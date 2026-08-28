@@ -35,6 +35,8 @@ func (l *logger) log(level, format string, args ...any) {
 
 func (l *logger) Info(format string, args ...any) { l.log("INFO", format, args...) }
 
+func (l *logger) Warn(format string, args ...any) { l.log("WARNING", format, args...) }
+
 func (l *logger) Debug(format string, args ...any) {
 	if l.debugEnabled {
 		l.log("DEBUG", format, args...)
@@ -397,6 +399,29 @@ func run(cfg runConfig) {
 	fullReport := rep.Run()
 	emailBody := rep.EmailBody()
 	log.Debug("Generated report")
+
+	// Persist this run's findings into the library (same SQLite file as the
+	// aggregates) so history accumulates before any UI exists. A capture
+	// failure costs the library one day, not the report or the email.
+	if cfg.storeOn {
+		captureModel := cfg.model
+		if !cfg.llmOn {
+			captureModel = ""
+		}
+		if lib, err := reporter.OpenLibraryStore(cfg.dbPath); err != nil {
+			log.Warn("opening findings library %s: %v", cfg.dbPath, err)
+		} else {
+			if err := reporter.CaptureRun(lib, logDate, captureModel, issues, resolutions, explained); err != nil {
+				log.Warn("capturing findings: %v", err)
+			} else {
+				log.Info("Captured %d findings for %s",
+					len(issues.Issues)+len(explained), logDate.Format("2006-01-02"))
+			}
+			lib.Close()
+		}
+	} else {
+		log.Info("--no-store: skipping findings capture")
+	}
 
 	// While we refine things, always drop the two files to the working directory.
 	if err := os.WriteFile("email_body.md", []byte(emailBody), 0o644); err != nil {
