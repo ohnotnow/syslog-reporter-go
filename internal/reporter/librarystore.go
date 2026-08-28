@@ -198,18 +198,19 @@ type FindingFilter struct {
 }
 
 // FindingSummary is one findings-list row: the promoted columns joined to
-// the run date, the host list, and the feedback verdict counts.
+// the run date, the host list, and the feedback verdict counts. The json
+// tags serve the CLI's --json output.
 type FindingSummary struct {
-	ID        int64
-	RunID     int64
-	LogDate   string
-	Kind      string
-	Severity  string // '' for anomaly kinds
-	Title     string
-	Service   string
-	Hosts     string // comma-joined, insertion order
-	Worked    int
-	DidntWork int
+	ID        int64  `json:"id"`
+	RunID     int64  `json:"run_id"`
+	LogDate   string `json:"log_date"`
+	Kind      string `json:"kind"`
+	Severity  string `json:"severity"` // '' for anomaly kinds
+	Title     string `json:"title"`
+	Service   string `json:"service"`
+	Hosts     string `json:"hosts"` // comma-joined, insertion order
+	Worked    int    `json:"worked"`
+	DidntWork int    `json:"didnt_work"`
 }
 
 // escapeLike backslash-escapes the SQL LIKE wildcards in a user-supplied
@@ -280,19 +281,20 @@ func (s *LibraryStore) SearchFindings(f FindingFilter) ([]*FindingSummary, error
 
 // FindingDetail is one finding in full: the promoted columns joined to the
 // run, the host list, and the payload unmarshalled per kind (Issue for kind
-// 'issue', Anomaly for the rest).
+// 'issue', Anomaly for the rest). The json tags serve the CLI's --json
+// output.
 type FindingDetail struct {
-	ID       int64
-	RunID    int64
-	LogDate  string
-	Model    string // '' when the run was --no-llm
-	Kind     string
-	Severity string
-	Title    string
-	Service  string
-	Hosts    []string
-	Issue    *IssuePayload
-	Anomaly  *ExplainedAnomaly
+	ID       int64             `json:"id"`
+	RunID    int64             `json:"run_id"`
+	LogDate  string            `json:"log_date"`
+	Model    string            `json:"model"` // '' when the run was --no-llm
+	Kind     string            `json:"kind"`
+	Severity string            `json:"severity"`
+	Title    string            `json:"title"`
+	Service  string            `json:"service"`
+	Hosts    []string          `json:"hosts"`
+	Issue    *IssuePayload     `json:"issue,omitempty"`
+	Anomaly  *ExplainedAnomaly `json:"anomaly,omitempty"`
 }
 
 // GetFinding loads one finding by id; a missing id returns sql.ErrNoRows.

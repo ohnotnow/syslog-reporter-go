@@ -23,6 +23,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/term"
 
+	"github.com/ohnotnow/syslog-reporter-go/internal/cli"
 	"github.com/ohnotnow/syslog-reporter-go/internal/reporter"
 	"github.com/ohnotnow/syslog-reporter-go/internal/web"
 )
@@ -99,6 +100,12 @@ func main() {
 		case "user":
 			runUser(os.Args[2:])
 			return
+		case "findings":
+			defaultDB := getenvDefault("SYSLOG_DB_PATH", "syslog_aggregates.db")
+			if err := cli.RunFindings(defaultDB, os.Args[2:], os.Stdout); err != nil {
+				fatal("%v", err)
+			}
+			return
 		}
 	}
 	runBatch(os.Args[1:])
@@ -158,21 +165,6 @@ func runServe(args []string) {
 	log.Info("Server stopped")
 }
 
-// parseFlagsAnywhere parses argparse-style: flags may appear before or
-// after positionals. Go's flag package stops at the first non-flag
-// argument, so re-parse until every argument is consumed.
-func parseFlagsAnywhere(fs *flag.FlagSet, args []string) []string {
-	var positionals []string
-	for {
-		fs.Parse(args)
-		if fs.NArg() == 0 {
-			return positionals
-		}
-		positionals = append(positionals, fs.Arg(0))
-		args = fs.Args()[1:]
-	}
-}
-
 // runUser handles `syslog-reporter user add <username> <email>`. The
 // password is prompted for without echo when stdin is a terminal, or read
 // from stdin with --password-stdin for scripted/agent use; it is never
@@ -187,7 +179,7 @@ func runUser(args []string) {
 		"Read the password from stdin instead of prompting (for scripted use).")
 	dbPath := fs.String("db", getenvDefault("SYSLOG_DB_PATH", "syslog_aggregates.db"),
 		"SQLite store path, resolved exactly as in batch mode.")
-	positionals := parseFlagsAnywhere(fs, args[1:])
+	positionals := cli.ParseFlagsAnywhere(fs, args[1:])
 	if len(positionals) != 2 {
 		fatal(usage)
 	}
@@ -289,7 +281,7 @@ func runBatch(cliArgs []string) {
 	showVersion := fs.Bool("version", false, "Print the version and exit.")
 
 	// Python's argparse accepts flags after the positional logfile.
-	positionals := parseFlagsAnywhere(fs, cliArgs)
+	positionals := cli.ParseFlagsAnywhere(fs, cliArgs)
 	if len(positionals) > 1 {
 		fatal("unrecognised extra arguments: %s", strings.Join(positionals[1:], " "))
 	}
