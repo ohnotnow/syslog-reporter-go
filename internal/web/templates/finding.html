@@ -1,5 +1,6 @@
 {{define "title"}}{{.Data.Finding.Title}}{{end}}
 {{define "content"}}
+    <article class="article">
     <nav class="crumbs" aria-label="Breadcrumb">
       <a href="/">Findings</a> <span aria-hidden="true">/</span> {{.Data.Finding.LogDate}}
     </nav>
@@ -64,6 +65,7 @@
          fragment; this persistent live region just speaks the change. -->
     <p id="feedback-status" class="visually-hidden" aria-live="polite"></p>
 {{template "feedback" .}}
+    </article>
 {{end}}
 
 {{define "feedback"}}

@@ -39,6 +39,13 @@
   --text-lg: 1.125rem;
   --text-2xl: 1.5rem;
   --text-3xl: 1.875rem;
+
+  /* The one content width: article pages set every element to this so
+     headings, prose, code and the feedback panel read as a single column.
+     Deliberately wide (owner decision 2026-08-28): sysadmins skim the
+     prose and read the command blocks, so the column matches the code
+     width rather than a bookish reading measure. */
+  --measure: 70rem;
 }
 
 *,
@@ -198,7 +205,7 @@ a {
 .empty-state {
   background-color: var(--blue-10);
   padding: var(--space-6) var(--space-7);
-  max-width: 46rem;
+  max-width: var(--measure);
 }
 
 .empty-state h2 {
@@ -332,7 +339,20 @@ a {
   margin-top: var(--space-6);
 }
 
-/* Finding detail page. */
+/* Finding detail page: one column, one measure. Everything inside the
+   article - headings, meta, prose, bullets, code blocks, the feedback
+   panel - shares the same width, so nothing reads as a separate track.
+   Long command lines scroll inside their pre rather than widening it. */
+.article {
+  max-width: var(--measure);
+}
+
+.article p,
+.article .fact-list,
+.article pre {
+  max-width: none;
+}
+
 .crumbs {
   font-size: var(--text-sm);
   color: var(--dark-grey-1);
@@ -379,12 +399,12 @@ h3 {
   margin: var(--space-6) 0 var(--space-2);
 }
 
-/* Feedback panel: the outcome loop the library exists for. */
+/* Feedback panel: the outcome loop the library exists for. Width comes
+   from the article column it sits in. */
 .feedback {
   margin-top: var(--space-9);
   padding: var(--space-6) var(--space-7);
   background-color: var(--blue-10);
-  max-width: 46rem;
 }
 
 .feedback h2 {
