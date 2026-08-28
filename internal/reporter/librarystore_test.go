@@ -458,7 +458,8 @@ func TestRecordFeedbackUpserts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Same user twice: one row, verdict updated, comment blanked.
+	// Same user twice: one row, verdict updated; an empty comment on the
+	// re-vote KEEPS the earlier note (owner decision 2026-08-28).
 	if err := lib.RecordFeedback(findingID, &userID, "worked", "sorted it"); err != nil {
 		t.Fatalf("record: %v", err)
 	}
@@ -484,9 +485,10 @@ func TestRecordFeedbackUpserts(t *testing.T) {
 	for _, r := range rows {
 		byUser[r.Username] = r
 	}
-	if r := byUser["opsuser"]; r == nil || r.Verdict != "didnt_work" || r.Comment != "" {
-		t.Errorf("opsuser row = %+v, want updated verdict and blanked comment", r)
+	if r := byUser["opsuser"]; r == nil || r.Verdict != "didnt_work" || r.Comment != "sorted it" {
+		t.Errorf("opsuser row = %+v, want updated verdict with the earlier note kept", r)
 	}
+	// A non-empty comment on a re-vote still replaces the old one.
 	if r := byUser[""]; r == nil || r.UserID != nil || r.Verdict != "worked" || r.Comment != "still good" {
 		t.Errorf("anonymous row = %+v", r)
 	}

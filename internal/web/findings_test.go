@@ -250,14 +250,15 @@ func TestFeedbackAnonymousFlow(t *testing.T) {
 		t.Error("anonymous fragment should be partial, without multi-user copy or counts")
 	}
 
-	// Re-vote: still one row, verdict replaced.
+	// Re-vote with the (always-empty) comment box untouched: still one row,
+	// verdict replaced, the earlier note kept (owner decision 2026-08-28).
 	postFeedback(t, s, anomID, url.Values{"verdict": {"didnt_work"}}, true)
 	rows, err := s.lib.FeedbackFor(anomID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 1 || rows[0].Verdict != "didnt_work" || rows[0].Comment != "" {
-		t.Errorf("after re-vote rows = %+v, want one didnt_work row with blanked comment", rows)
+	if len(rows) != 1 || rows[0].Verdict != "didnt_work" || rows[0].Comment != "rebooted the collector" {
+		t.Errorf("after re-vote rows = %+v, want one didnt_work row keeping the note", rows)
 	}
 
 	// Non-htmx fallback: 303 back to the detail page.

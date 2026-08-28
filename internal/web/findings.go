@@ -131,16 +131,17 @@ func (s *Server) handleFindings(w http.ResponseWriter, r *http.Request) {
 	render(w, "findings.html", d)
 }
 
-// detailView is the finding detail page plus its feedback state.
+// detailView is the finding detail page plus its feedback state. The
+// comment box is deliberately never prefilled: a recorded note's home is
+// the Notes list (owner decision 2026-08-28).
 type detailView struct {
-	Finding     *reporter.FindingDetail
-	Feedback    []*reporter.FeedbackRow
-	Worked      int
-	DidntWork   int
-	YourVote    string // '' until this visitor has voted
-	YourComment string
-	Anonymous   bool // auth mode none: one shared anonymous vote, honest copy
-	HasNotes    bool // any feedback row carries a comment
+	Finding   *reporter.FindingDetail
+	Feedback  []*reporter.FeedbackRow
+	Worked    int
+	DidntWork int
+	YourVote  string // '' until this visitor has voted
+	Anonymous bool   // auth mode none: one shared anonymous vote, honest copy
+	HasNotes  bool   // any feedback row carries a comment
 }
 
 func (s *Server) buildDetailView(r *http.Request, d *reporter.FindingDetail) (detailView, error) {
@@ -168,7 +169,6 @@ func (s *Server) buildDetailView(r *http.Request, d *reporter.FindingDetail) (de
 			(user != nil && row.UserID != nil && *row.UserID == user.ID)
 		if mine {
 			view.YourVote = row.Verdict
-			view.YourComment = row.Comment
 		}
 	}
 	return view, nil

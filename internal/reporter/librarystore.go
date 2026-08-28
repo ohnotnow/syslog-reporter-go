@@ -334,9 +334,10 @@ func (s *LibraryStore) GetFinding(id int64) (*FindingDetail, error) {
 var ErrBadVerdict = errors.New("verdict must be 'worked' or 'didnt_work'")
 
 // RecordFeedback upserts one user's verdict on a finding (userID nil is the
-// single anonymous vote). A re-vote replaces the row outright - verdict,
-// comment (including blanking it) and created_at: the row is the current
-// state, not an audit log.
+// single anonymous vote). A re-vote always updates verdict and created_at;
+// an empty comment KEEPS the existing one (owner decision 2026-08-28: the
+// UI's comment box is blank on every visit, so a later verdict flip must
+// not wipe the voter's own note). There is no comment-clearing path.
 func (s *LibraryStore) RecordFeedback(findingID int64, userID *int64, verdict, comment string) error {
 	if verdict != "worked" && verdict != "didnt_work" {
 		return ErrBadVerdict
@@ -352,7 +353,8 @@ func (s *LibraryStore) RecordFeedback(findingID int64, userID *int64, verdict, c
 		"INSERT INTO feedback (finding_id, user_id, verdict, comment, created_at) "+
 			"VALUES (?, ?, ?, ?, ?) "+
 			"ON CONFLICT (finding_id, COALESCE(user_id, 0)) "+
-			"DO UPDATE SET verdict = excluded.verdict, comment = excluded.comment, "+
+			"DO UPDATE SET verdict = excluded.verdict, "+
+			"comment = COALESCE(excluded.comment, feedback.comment), "+
 			"created_at = excluded.created_at",
 		findingID, userVal, verdict, commentVal,
 		time.Now().UTC().Format(time.RFC3339))

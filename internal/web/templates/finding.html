@@ -80,7 +80,7 @@
             hx-target="#feedback" hx-swap="outerHTML">
         <div class="field">
           <label for="feedback-comment">Comment (optional)</label>
-          <textarea id="feedback-comment" name="comment" rows="2">{{.Data.YourComment}}</textarea>
+          <textarea id="feedback-comment" name="comment" rows="2" autocomplete="off"></textarea>
         </div>
         <div class="feedback-buttons">
           <button class="button-primary" type="submit" name="verdict" value="worked">Fixed it</button>
