@@ -1,0 +1,91 @@
+# CLAUDE.md
+
+The Go port of syslog_reporter: a batch CLI tool that turns a noisy,
+org-wide syslog stream into a short, prioritised email report for a small
+university sysadmin team. Deterministic code (filters, counts, robust
+statistics) decides *what* is worth surfacing; the LLM only explains
+findings and writes paste-ready commands. Alert fatigue is the enemy.
+
+This repo is a **replacement, not a sibling** of the Python original at
+`~/Documents/code/syslog_reporter` (GitHub: ohnotnow's
+syslog_reporter, archived). The compatibility contract: identical SQLite schema, env
+vars, CLI flags, known_knowns.toml format, and report markdown behaviour,
+so a cron host can swap the binary in without losing its accumulated
+baseline history.
+
+## Start here, in this order
+
+1. **`ant show srg-AkRXV`** - the cold-start pointer. The port plan (the
+   full ADR, compatibility contract, provider routing design) lives in the
+   *Python* repo's ant database; that note tells you how to read it.
+2. **`ant recent --limit 5`** and **`ait status`** - current decisions and
+   open work in this repo.
+3. The Python repo's `TECHNICAL_OVERVIEW.md` - the pipeline map. The Go
+   code mirrors it agent-for-agent.
+
+## Layout
+
+```
+main.go                     CLI entry point; wires the pipeline (mirrors main.py)
+internal/reporter/
+  pyfmt.go                  Python-semantics helpers (split, number formatting);
+                            byte parity with the original depends on these
+  filters_data.go           port of agents/log_filters.py (edit per estate)
+  filter.go                 LogFilter (deterministic noise removal)
+  knowns.go                 known-knowns TOML suppression
+  anomaly.go                ParseLine / RobustZ / peer detector / CombineAnomalies
+  store.go                  SQLite aggregate store (same schema as Python)
+  baseline.go temporal.go   history-based detectors
+  elksource.go              ELK NDJSON dump renderer
+  models.go report.go       report data models + both report layouts
+  llmagents.go prompts/     the four LLM agents + embedded system prompts
+  emailer.go                SMTP digest + markdown-attachment sender
+internal/llm/               provider seam: litellm-style prefix -> official SDK
+tools/elk_dump.py           ELK NDJSON dumper (copied verbatim from the Python repo)
+```
+
+## Commands
+
+```bash
+go build -o syslog-reporter .        # single static-ish binary
+go test ./...                        # stdlib testing only
+./syslog-reporter <dump.ndjson.gz> --no-llm --db /tmp/scratch.db   # free run
+```
+
+## Conventions and gotchas
+
+- **Load the `golang` skill before writing Go here** (owner's rule).
+- **Licence is AGPL-3.0, deliberately.** Verbatim FSF text in LICENSE,
+  copyright notice in the README. Never soften to MIT/Apache.
+- **No em dashes anywhere, including output** (owner decision 2026-08-28):
+  the Go report emits plain hyphens where the Python original emits em
+  dashes. The only other deliberate report divergence is the model
+  footer (`_Analysis by <model>_`, owner decision 2026-08-28) appended
+  to both layouts when the LLM stages ran. Everything else is
+  byte-identical; parity tooling must canonicalise dashes and strip the
+  footer before diffing.
+- The LLM stages live in `internal/reporter/llmagents.go` with prompts
+  embedded from `internal/reporter/prompts/` (ports of the Python
+  `agents/prompts/*.j2`, em dashes replaced per the dash rule);
+  `internal/llm` routes `openai/` and `anthropic/` model prefixes to the
+  official SDKs (azure/ not yet). `SYSLOG_REASONING_EFFORT` passes to
+  OpenAI verbatim; for Anthropic it maps onto `output_config.effort`
+  (`none`/`minimal` clamp to `low`). `--send-email` is ported and was
+  verified against a local mailhog: recipients ride the SMTP envelope
+  only (BCC), the To header carries the sender.
+- `internal/reporter` reproduces Python dict insertion order with ordered
+  map types (Counts, PairTotals, PairHistory) so stable-sort tie-breaks
+  land where the original's do. Don't swap them for plain Go maps.
+- pyfmt.go's helpers are pinned by tests to CPython-captured vectors; if a
+  report number ever mismatches, look there first.
+- The aggregate store deliberately does NOT enable WAL: the Python
+  original leaves SQLite's default journal mode, and drop-in db
+  compatibility wins over the usual Go conventions.
+- `--dump-filtered` prints the post-filter lines and exits. Born as the
+  milestone-1 parity diff tool, promoted to a documented filter-tuning
+  aid (owner decision 2026-08-28) now the Python repo is archived.
+- Sample dumps (syslog-*.ndjson.gz) and the aggregate db are gitignored
+  and local-only; they carry real estate hostnames, so they must never be
+  committed, quoted in tests, or pasted into notes. Test fixtures use
+  fictional hostnames only.
+- British English throughout, including report output.

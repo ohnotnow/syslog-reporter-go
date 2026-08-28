@@ -1,0 +1,13 @@
+/syslog-reporter-go
+/syslog-reporter
+*.exe
+.env
+.ant/
+.ait/
+*.db
+*.log
+*.ndjson
+*.ndjson.gz
+known_knowns.toml
+email_body.md
+email_attachment.md
