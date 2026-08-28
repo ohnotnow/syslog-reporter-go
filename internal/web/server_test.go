@@ -12,7 +12,11 @@ import (
 
 func newTestServer(t *testing.T, cfg Config) *Server {
 	t.Helper()
-	s, err := New(cfg)
+	auth, err := NewAuthenticator(cfg, nil)
+	if err != nil {
+		t.Fatalf("new authenticator: %v", err)
+	}
+	s, err := New(cfg, auth)
 	if err != nil {
 		t.Fatalf("new server: %v", err)
 	}

@@ -12,6 +12,7 @@ package reporter
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -177,4 +178,60 @@ func (s *LibraryStore) AddFinding(runID int64, kind, severity, title, service st
 		}
 	}
 	return id, tx.Commit()
+}
+
+// User is a users-table row. Forenames, surname and the password hash are
+// nullable: local `user add` leaves the names NULL (OIDC fills them in
+// later), and SSO-created users carry a NULL password hash, which the local
+// login form treats as "can never sign in here".
+type User struct {
+	ID           int64
+	Email        string
+	Username     string
+	Forenames    sql.NullString
+	Surname      sql.NullString
+	PasswordHash sql.NullString
+	CreatedAt    string
+}
+
+// CreateUser inserts a user with the names left NULL. An empty passwordHash
+// is stored as NULL (an SSO-created user with no local login).
+func (s *LibraryStore) CreateUser(username, email, passwordHash string) (int64, error) {
+	var hash any
+	if passwordHash != "" {
+		hash = passwordHash
+	}
+	res, err := s.db.Exec(
+		"INSERT INTO users (email, username, password_hash, created_at) VALUES (?, ?, ?, ?)",
+		email, username, hash, time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// UserByUsername returns nil, nil when no user matches.
+func (s *LibraryStore) UserByUsername(username string) (*User, error) {
+	return s.userWhere("username = ?", username)
+}
+
+// UserByID returns nil, nil when no user matches.
+func (s *LibraryStore) UserByID(id int64) (*User, error) {
+	return s.userWhere("id = ?", id)
+}
+
+func (s *LibraryStore) userWhere(cond string, arg any) (*User, error) {
+	u := &User{}
+	err := s.db.QueryRow(
+		"SELECT id, email, username, forenames, surname, password_hash, created_at "+
+			"FROM users WHERE "+cond, arg).
+		Scan(&u.ID, &u.Email, &u.Username, &u.Forenames, &u.Surname,
+			&u.PasswordHash, &u.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return u, nil
 }

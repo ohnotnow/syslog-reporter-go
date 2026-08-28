@@ -18,6 +18,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/ohnotnow/syslog-reporter-go/internal/reporter"
 )
 
 //go:embed templates
@@ -31,6 +33,7 @@ type Config struct {
 	CertFile string // SYSLOG_WEB_TLS_CERT; with KeyFile, serve HTTPS
 	KeyFile  string // SYSLOG_WEB_TLS_KEY
 	DBPath   string // SYSLOG_DB_PATH, the same file batch mode writes
+	AuthMode string // SYSLOG_AUTH_MODE: none (default) | local | oidc
 	Version  string // stamped binary version, shown in the footer
 }
 
@@ -43,6 +46,7 @@ func ConfigFromEnv() (Config, error) {
 		CertFile: os.Getenv("SYSLOG_WEB_TLS_CERT"),
 		KeyFile:  os.Getenv("SYSLOG_WEB_TLS_KEY"),
 		DBPath:   getenvDefault("SYSLOG_DB_PATH", "syslog_aggregates.db"),
+		AuthMode: getenvDefault("SYSLOG_AUTH_MODE", "none"),
 	}
 	if (cfg.CertFile == "") != (cfg.KeyFile == "") {
 		return Config{}, errors.New(
@@ -58,38 +62,21 @@ func getenvDefault(key, fallback string) string {
 	return fallback
 }
 
-type Server struct {
-	cfg Config
-	tpl *template.Template
-	mux *http.ServeMux
-}
+// baseTemplate holds only the shared layout; each page's blocks are parsed
+// into a clone at render time so pages never collide.
+var baseTemplate = template.Must(template.ParseFS(templateFS, "templates/base.html"))
 
-func New(cfg Config) (*Server, error) {
-	// Only the shared layout lives in the base set; each page's blocks are
-	// parsed into a clone at render time so pages never collide.
-	tpl, err := template.ParseFS(templateFS, "templates/base.html")
-	if err != nil {
-		return nil, fmt.Errorf("parsing templates: %w", err)
-	}
-	s := &Server{cfg: cfg, tpl: tpl, mux: http.NewServeMux()}
-	s.mux.HandleFunc("GET /{$}", s.handleHome)
-	s.mux.Handle("GET /static/", http.FileServerFS(staticFS))
-	return s, nil
-}
-
-// Handler exposes the routes without the listener, for tests.
-func (s *Server) Handler() http.Handler { return s.mux }
-
-func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	s.render(w, "home.html", nil)
+// pageData is what the base layout sees on every render.
+type pageData struct {
+	Version string
+	Path    string         // the page's own path, for the nav's current marker
+	User    *reporter.User // nil when anonymous (always, in auth mode none)
+	Data    any
 }
 
 // render executes the base layout with the named page's blocks mixed in.
-// Cloning per request keeps page-specific {{define}}s from leaking between
-// pages once there is more than one.
-func (s *Server) render(w http.ResponseWriter, page string, data any) {
-	tpl, err := s.tpl.Clone()
+func render(w http.ResponseWriter, page string, d pageData) {
+	tpl, err := baseTemplate.Clone()
 	if err == nil {
 		_, err = tpl.ParseFS(templateFS, "templates/"+page)
 	}
@@ -97,13 +84,44 @@ func (s *Server) render(w http.ResponseWriter, page string, data any) {
 		http.Error(w, "template error", http.StatusInternalServerError)
 		return
 	}
-	if err := tpl.ExecuteTemplate(w, "base", struct {
-		Version string
-		Data    any
-	}{s.cfg.Version, data}); err != nil {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tpl.ExecuteTemplate(w, "base", d); err != nil {
 		// Headers are likely gone already; nothing useful left to send.
 		return
 	}
+}
+
+type Server struct {
+	cfg  Config
+	auth Authenticator
+	mux  *http.ServeMux
+	csrf *http.CrossOriginProtection
+}
+
+func New(cfg Config, auth Authenticator) (*Server, error) {
+	if auth == nil {
+		return nil, fmt.Errorf("web.New needs an Authenticator (use NewAuthenticator)")
+	}
+	s := &Server{cfg: cfg, auth: auth, mux: http.NewServeMux(),
+		csrf: http.NewCrossOriginProtection()}
+	s.mux.HandleFunc("GET /{$}", s.handleHome)
+	s.mux.Handle("GET /static/", http.FileServerFS(staticFS))
+	auth.Routes(s.mux)
+	return s, nil
+}
+
+// Handler exposes the full stack (CSRF, auth middleware, routes) without
+// the listener, for tests.
+func (s *Server) Handler() http.Handler {
+	return s.csrf.Handler(s.auth.Middleware(s.mux))
+}
+
+func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
+	render(w, "home.html", pageData{
+		Version: s.cfg.Version,
+		Path:    "/",
+		User:    s.auth.CurrentUser(r),
+	})
 }
 
 // Listen binds cfg.Listen, wrapped in TLS when a certificate pair is
@@ -131,7 +149,7 @@ func (s *Server) Listen() (net.Listener, error) {
 // Serve runs until ctx is cancelled, then shuts down gracefully, draining
 // in-flight requests for up to five seconds.
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
-	srv := &http.Server{Handler: s.mux, ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.Serve(ln) }()
 	select {

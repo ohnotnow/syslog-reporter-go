@@ -15,9 +15,15 @@
       <a class="site-header__brand" href="/">Syslog Reporter</a>
       <nav aria-label="Primary">
         <ul class="site-nav">
-          <li><a href="/" aria-current="page">Findings</a></li>
+          <li><a href="/"{{if eq .Path "/"}} aria-current="page"{{end}}>Findings</a></li>
         </ul>
       </nav>
+      {{if .User}}
+      <form class="logout-form" method="post" action="/logout">
+        <span class="site-header__user">{{.User.Username}}</span>
+        <button class="logout-button" type="submit">Log out</button>
+      </form>
+      {{end}}
     </div>
   </header>
   <main id="main" class="container" tabindex="-1">

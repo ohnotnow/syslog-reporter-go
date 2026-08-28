@@ -5,6 +5,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"flag"
@@ -19,6 +20,8 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/term"
 
 	"github.com/ohnotnow/syslog-reporter-go/internal/reporter"
 	"github.com/ohnotnow/syslog-reporter-go/internal/web"
@@ -88,9 +91,15 @@ func main() {
 	// more subcommands (user, findings) alongside serve; everything else
 	// falls through to the batch report path, whose CLI contract
 	// (positional dump path, flags in any position) is unchanged.
-	if len(os.Args) > 1 && os.Args[1] == "serve" {
-		runServe(os.Args[2:])
-		return
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "serve":
+			runServe(os.Args[2:])
+			return
+		case "user":
+			runUser(os.Args[2:])
+			return
+		}
 	}
 	runBatch(os.Args[1:])
 }
@@ -111,7 +120,22 @@ func runServe(args []string) {
 		fatal("%v", err)
 	}
 	cfg.Version = version
-	srv, err := web.New(cfg)
+	// Only the local driver reads the users table; mode none must not
+	// require (or create) a database file at all.
+	var users web.UserStore
+	if cfg.AuthMode == "local" {
+		lib, err := reporter.OpenLibraryStore(cfg.DBPath)
+		if err != nil {
+			fatal("opening %s: %v", cfg.DBPath, err)
+		}
+		defer lib.Close()
+		users = lib
+	}
+	auth, err := web.NewAuthenticator(cfg, users)
+	if err != nil {
+		fatal("%v", err)
+	}
+	srv, err := web.New(cfg, auth)
 	if err != nil {
 		fatal("%v", err)
 	}
@@ -126,6 +150,101 @@ func runServe(args []string) {
 		fatal("%v", err)
 	}
 	log.Info("Server stopped")
+}
+
+// parseFlagsAnywhere parses argparse-style: flags may appear before or
+// after positionals. Go's flag package stops at the first non-flag
+// argument, so re-parse until every argument is consumed.
+func parseFlagsAnywhere(fs *flag.FlagSet, args []string) []string {
+	var positionals []string
+	for {
+		fs.Parse(args)
+		if fs.NArg() == 0 {
+			return positionals
+		}
+		positionals = append(positionals, fs.Arg(0))
+		args = fs.Args()[1:]
+	}
+}
+
+// runUser handles `syslog-reporter user add <username> <email>`. The
+// password is prompted for without echo when stdin is a terminal, or read
+// from stdin with --password-stdin for scripted/agent use; it is never
+// accepted as a CLI argument and never echoed or logged.
+func runUser(args []string) {
+	const usage = "usage: syslog-reporter user add <username> <email> [--password-stdin] [--db <path>]"
+	if len(args) == 0 || args[0] != "add" {
+		fatal(usage)
+	}
+	fs := flag.NewFlagSet("user add", flag.ExitOnError)
+	passwordStdin := fs.Bool("password-stdin", false,
+		"Read the password from stdin instead of prompting (for scripted use).")
+	dbPath := fs.String("db", getenvDefault("SYSLOG_DB_PATH", "syslog_aggregates.db"),
+		"SQLite store path, resolved exactly as in batch mode.")
+	positionals := parseFlagsAnywhere(fs, args[1:])
+	if len(positionals) != 2 {
+		fatal(usage)
+	}
+	username, email := positionals[0], positionals[1]
+
+	var password string
+	if *passwordStdin {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			fatal("reading password from stdin: %v", err)
+		}
+		password = strings.TrimRight(string(data), "\r\n")
+	} else {
+		if !term.IsTerminal(int(os.Stdin.Fd())) {
+			fatal("stdin is not a terminal; pipe the password in with --password-stdin")
+		}
+		fmt.Fprint(os.Stderr, "Password: ")
+		first, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			fatal("reading password: %v", err)
+		}
+		fmt.Fprint(os.Stderr, "Again: ")
+		second, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			fatal("reading password: %v", err)
+		}
+		if !bytes.Equal(first, second) {
+			fatal("passwords do not match")
+		}
+		password = string(first)
+	}
+	if password == "" {
+		fatal("password must not be empty")
+	}
+	if err := userAdd(*dbPath, username, email, password); err != nil {
+		fatal("%v", err)
+	}
+	fmt.Printf("user %s added\n", username)
+}
+
+// userAdd is the testable core of `user add`: hash and insert.
+func userAdd(dbPath, username, email, password string) error {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	lib, err := reporter.OpenLibraryStore(dbPath)
+	if err != nil {
+		return fmt.Errorf("opening %s: %w", dbPath, err)
+	}
+	defer lib.Close()
+	if _, err := lib.CreateUser(username, email, string(hash)); err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed: users.username") {
+			return fmt.Errorf("username %q already exists", username)
+		}
+		if strings.Contains(err.Error(), "UNIQUE constraint failed: users.email") {
+			return fmt.Errorf("email %q already exists", email)
+		}
+		return err
+	}
+	return nil
 }
 
 func runBatch(cliArgs []string) {
@@ -163,19 +282,8 @@ func runBatch(cliArgs []string) {
 		"Print the filtered log lines and exit (parity/debug tool).")
 	showVersion := fs.Bool("version", false, "Print the version and exit.")
 
-	// Python's argparse accepts flags after the positional logfile; Go's flag
-	// package stops at the first non-flag argument, so re-parse until every
-	// argument is consumed.
-	args := cliArgs
-	var positionals []string
-	for {
-		fs.Parse(args)
-		if fs.NArg() == 0 {
-			break
-		}
-		positionals = append(positionals, fs.Arg(0))
-		args = fs.Args()[1:]
-	}
+	// Python's argparse accepts flags after the positional logfile.
+	positionals := parseFlagsAnywhere(fs, cliArgs)
 	if len(positionals) > 1 {
 		fatal("unrecognised extra arguments: %s", strings.Join(positionals[1:], " "))
 	}

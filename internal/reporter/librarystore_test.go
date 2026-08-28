@@ -250,6 +250,62 @@ func TestLibraryEmptyModelStoredAsNull(t *testing.T) {
 	}
 }
 
+func TestLibraryUserRoundTrip(t *testing.T) {
+	lib := newTestLibrary(t)
+	id, err := lib.CreateUser("opsuser", "opsuser@example.test", "fake-bcrypt-hash")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	byName, err := lib.UserByUsername("opsuser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID, err := lib.UserByID(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range []*User{byName, byID} {
+		if u == nil {
+			t.Fatal("user not found")
+		}
+		if u.ID != id || u.Username != "opsuser" || u.Email != "opsuser@example.test" {
+			t.Errorf("user = %+v", u)
+		}
+		if !u.PasswordHash.Valid || u.PasswordHash.String != "fake-bcrypt-hash" {
+			t.Errorf("password hash = %+v", u.PasswordHash)
+		}
+		if u.Forenames.Valid || u.Surname.Valid {
+			t.Errorf("names should be NULL, got %v / %v", u.Forenames, u.Surname)
+		}
+	}
+}
+
+func TestLibraryUserEmptyHashStoredAsNull(t *testing.T) {
+	lib := newTestLibrary(t)
+	if _, err := lib.CreateUser("ssouser", "ssouser@example.test", ""); err != nil {
+		t.Fatal(err)
+	}
+	u, err := lib.UserByUsername("ssouser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u == nil || u.PasswordHash.Valid {
+		t.Errorf("empty hash should be stored as NULL, got %+v", u)
+	}
+}
+
+func TestLibraryUserNotFoundIsNilNil(t *testing.T) {
+	lib := newTestLibrary(t)
+	u, err := lib.UserByUsername("nobody")
+	if err != nil || u != nil {
+		t.Errorf("missing user = %v, %v; want nil, nil", u, err)
+	}
+	u, err = lib.UserByID(99)
+	if err != nil || u != nil {
+		t.Errorf("missing id = %v, %v; want nil, nil", u, err)
+	}
+}
+
 func TestLibraryAggregatePruneLeavesLibraryRows(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "shared.db")
 	agg, err := OpenAggregateStore(path)

@@ -18,6 +18,7 @@
   --light-grey-1: #F5F5F5;
   --light-grey-3: #CCCCCC;
   --highlight: #FFDD00;
+  --error: #D4351C;
   --white: #FFFFFF;
 
   /* Noto Sans leads; no CDN fetch (one-binary rule), so the system stack
@@ -191,6 +192,87 @@ a {
 
 .empty-state p {
   margin-bottom: 0;
+}
+
+/* Signed-in identity and logout, pushed to the end of the header bar. */
+.logout-form {
+  margin-left: auto;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+}
+
+.site-header__user {
+  color: var(--blue-20);
+  font-size: var(--text-sm);
+}
+
+.logout-button {
+  background: none;
+  border: none;
+  padding: var(--space-1) 0;
+  font-family: var(--font-stack);
+  font-size: var(--text-base);
+  color: var(--white);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.logout-button:hover {
+  color: var(--blue-20);
+}
+
+/* Login form: one narrow column, labels above fields. */
+.auth-form {
+  max-width: 24rem;
+}
+
+.field {
+  margin-bottom: var(--space-6);
+}
+
+.field label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: var(--space-2);
+}
+
+.field input {
+  font-family: var(--font-stack);
+  font-size: var(--text-base);
+  width: 100%;
+  padding: var(--space-3);
+  border: 1px solid var(--dark-grey-1);
+  border-radius: 4px;
+}
+
+.field input:focus {
+  border-color: var(--blue);
+}
+
+.button-primary {
+  font-family: var(--font-stack);
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--white);
+  background-color: var(--blue);
+  border: 2px solid var(--blue);
+  border-radius: 4px;
+  padding: var(--space-3) var(--space-6);
+  cursor: pointer;
+}
+
+.button-primary:hover {
+  background-color: var(--navy);
+  border-color: var(--navy);
+}
+
+/* The words carry the failure; the colour only underlines it. */
+.form-error {
+  color: var(--error);
+  font-weight: 600;
+  max-width: 24rem;
+  margin-bottom: var(--space-6);
 }
 
 .site-footer {
