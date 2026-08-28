@@ -4,6 +4,7 @@
 .env
 .ant/
 .ait/
+.impeccable.md
 *.db
 *.log
 *.ndjson
@@ -11,3 +12,4 @@
 known_knowns.toml
 email_body.md
 email_attachment.md
+/.playwright-cli

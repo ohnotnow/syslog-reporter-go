@@ -1,0 +1,32 @@
+{{define "base"}}<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{template "title" .}} - Syslog Reporter</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23011451'/%3E%3Ccircle cx='8' cy='8' r='3.5' fill='%23FFDD00'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/htmx-2.0.10.min.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+  <header class="site-header">
+    <div class="container site-header__inner">
+      <a class="site-header__brand" href="/">Syslog Reporter</a>
+      <nav aria-label="Primary">
+        <ul class="site-nav">
+          <li><a href="/" aria-current="page">Findings</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+  <main id="main" class="container" tabindex="-1">
+{{template "content" .}}
+  </main>
+  <footer class="site-footer">
+    <div class="container">
+      <p>syslog-reporter {{.Version}} - the findings library</p>
+    </div>
+  </footer>
+</body>
+</html>{{end}}

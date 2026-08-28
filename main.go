@@ -6,17 +6,22 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/joho/godotenv"
 
 	"github.com/ohnotnow/syslog-reporter-go/internal/reporter"
+	"github.com/ohnotnow/syslog-reporter-go/internal/web"
 )
 
 // version is stamped by the release build via -ldflags "-X main.version=...".
@@ -79,6 +84,51 @@ func main() {
 	// directory without overriding variables already in the environment.
 	_ = godotenv.Load()
 
+	// Subcommand dispatch ahead of batch flag parsing. Later issues add
+	// more subcommands (user, findings) alongside serve; everything else
+	// falls through to the batch report path, whose CLI contract
+	// (positional dump path, flags in any position) is unchanged.
+	if len(os.Args) > 1 && os.Args[1] == "serve" {
+		runServe(os.Args[2:])
+		return
+	}
+	runBatch(os.Args[1:])
+}
+
+// runServe starts the findings library web app (serve mode). Configuration
+// is environment-only: SYSLOG_WEB_LISTEN, SYSLOG_WEB_TLS_CERT/_KEY,
+// SYSLOG_DB_PATH.
+func runServe(args []string) {
+	fs := flag.NewFlagSet("serve", flag.ExitOnError)
+	debug := fs.Bool("debug", false, "Print extra debug information")
+	fs.Parse(args)
+	if fs.NArg() > 0 {
+		fatal("unrecognised extra arguments: %s", strings.Join(fs.Args(), " "))
+	}
+	log := &logger{debugEnabled: *debug}
+	cfg, err := web.ConfigFromEnv()
+	if err != nil {
+		fatal("%v", err)
+	}
+	cfg.Version = version
+	srv, err := web.New(cfg)
+	if err != nil {
+		fatal("%v", err)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	scheme := "http"
+	if cfg.CertFile != "" {
+		scheme = "https"
+	}
+	log.Info("Serving on %s://%s (db %s)", scheme, cfg.Listen, cfg.DBPath)
+	if err := srv.Run(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		fatal("%v", err)
+	}
+	log.Info("Server stopped")
+}
+
+func runBatch(cliArgs []string) {
 	defaultModel := getenvDefault("SYSLOG_DEFAULT_MODEL", "openai/gpt-4o-mini")
 	defaultDBPath := getenvDefault("SYSLOG_DB_PATH", "syslog_aggregates.db")
 	defaultKnownsPath := getenvDefault("SYSLOG_KNOWN_KNOWNS", "known_knowns.toml")
@@ -116,7 +166,7 @@ func main() {
 	// Python's argparse accepts flags after the positional logfile; Go's flag
 	// package stops at the first non-flag argument, so re-parse until every
 	// argument is consumed.
-	args := os.Args[1:]
+	args := cliArgs
 	var positionals []string
 	for {
 		fs.Parse(args)

@@ -1,0 +1,206 @@
+/* Syslog Reporter web UI.
+ *
+ * Light theme, deliberately: daytime triage in an office, and legibility
+ * for tired eyes beats looking cool. Severity and state must never be
+ * carried by colour alone. Everything is rem-based so browser zoom and
+ * large-text settings behave honestly.
+ */
+
+:root {
+  /* Palette */
+  --navy: #011451;
+  --blue: #005398;
+  --blue-60: #677297;
+  --blue-20: #CCD0DC;
+  --blue-10: #E6E7EE;
+  --dark-grey-1: #666666;
+  --dark-grey-3: #323232;
+  --light-grey-1: #F5F5F5;
+  --light-grey-3: #CCCCCC;
+  --highlight: #FFDD00;
+  --white: #FFFFFF;
+
+  /* Noto Sans leads; no CDN fetch (one-binary rule), so the system stack
+     carries machines without it installed. */
+  --font-stack: "Noto Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-7: 2rem;
+  --space-9: 3rem;
+
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 1.875rem;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-stack);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  color: var(--dark-grey-3);
+  background-color: var(--white);
+}
+
+:focus-visible {
+  outline: 3px solid var(--highlight);
+  outline-offset: 2px;
+}
+
+/* Horizontal padding only: main relies on its own vertical padding, and a
+   shorthand here would out-rank the element selector and zero it. */
+.container {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding-left: var(--space-6);
+  padding-right: var(--space-6);
+}
+
+/* Skip link: visually hidden until focused, then a solid banner. */
+.skip-link {
+  position: absolute;
+  left: -999rem;
+  top: 0;
+  z-index: 10;
+  padding: var(--space-3) var(--space-6);
+  background-color: var(--highlight);
+  color: var(--navy);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.skip-link:focus {
+  left: 0;
+}
+
+/* Header: the deep navy bar. */
+.site-header {
+  background-color: var(--navy);
+  color: var(--white);
+}
+
+.site-header__inner {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-7);
+  padding-top: var(--space-4);
+  padding-bottom: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.site-header__brand {
+  color: var(--white);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  text-decoration: none;
+  letter-spacing: 0.01em;
+}
+
+.site-nav {
+  display: flex;
+  gap: var(--space-6);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.site-nav a {
+  color: var(--blue-20);
+  text-decoration: none;
+  padding: var(--space-1) 0;
+}
+
+.site-nav a:hover {
+  color: var(--white);
+  text-decoration: underline;
+}
+
+.site-nav a[aria-current="page"] {
+  color: var(--white);
+  font-weight: 600;
+  border-bottom: 2px solid var(--highlight);
+}
+
+main {
+  flex: 1;
+  padding-top: var(--space-9);
+  padding-bottom: var(--space-9);
+}
+
+/* Skip-link target: focusable for the jump, but not interactive, so a
+   full-width focus ring would be noise. */
+main:focus {
+  outline: none;
+}
+
+h1 {
+  font-size: var(--text-3xl);
+  font-weight: 700;
+  color: var(--navy);
+  margin: 0 0 var(--space-3);
+}
+
+h2 {
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  margin: 0 0 var(--space-2);
+}
+
+p {
+  max-width: 70ch;
+  margin: 0 0 var(--space-4);
+}
+
+a {
+  color: var(--blue);
+}
+
+.lede {
+  font-size: var(--text-lg);
+  color: var(--dark-grey-1);
+  margin-bottom: var(--space-7);
+}
+
+/* Placeholder while the library pages are built: quiet, flat, no card
+   theatre; a tinted panel with the same left margin as the prose. */
+.empty-state {
+  background-color: var(--blue-10);
+  padding: var(--space-6) var(--space-7);
+  max-width: 46rem;
+}
+
+.empty-state h2 {
+  color: var(--navy);
+}
+
+.empty-state p {
+  margin-bottom: 0;
+}
+
+.site-footer {
+  background-color: var(--navy);
+  color: var(--blue-20);
+  font-size: var(--text-sm);
+}
+
+.site-footer p {
+  padding-top: var(--space-6);
+  padding-bottom: var(--space-6);
+  margin: 0;
+}
