@@ -250,6 +250,144 @@ func TestLibraryEmptyModelStoredAsNull(t *testing.T) {
 	}
 }
 
+// seedSearchLibrary builds two runs of findings for the search tests.
+// Insertion order (and so id order): run1 f1 issue "Disk filling on /var"
+// (hostA, hostB) + f2 peer (hostC); run2 f3 issue "Disk 100% usage"
+// (hostD) + f4 temporal (hostA) + f5 issue "Weird_title with % and \"
+// (hostE). f1 carries 2 worked + 1 didnt_work feedback votes.
+func seedSearchLibrary(t *testing.T) (*LibraryStore, []int64) {
+	t.Helper()
+	lib := newTestLibrary(t)
+	run1, err := lib.BeginRun(day(2026, 6, 1), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run2, err := lib.BeginRun(day(2026, 6, 2), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	anom := sampleAnomaly()
+	var ids []int64
+	addf := func(runID int64, kind, severity, title, service string, hosts []string) {
+		t.Helper()
+		id, err := lib.AddFinding(runID, kind, severity, title, service, hosts, anom)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	addf(run1, "issue", "high", "Disk filling on /var", "kernel", []string{"hostA", "hostB"})
+	addf(run1, "peer", "", "Chattier than its peers", "sshd", []string{"hostC"})
+	addf(run2, "issue", "critical", "Disk 100% usage", "storaged", []string{"hostD"})
+	addf(run2, "temporal", "", "Burst at 10:00", "cron", []string{"hostA"})
+	addf(run2, "issue", "low", `Weird_title with % and \`, "misc", []string{"hostE"})
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, row := range []struct {
+		userID  any
+		verdict string
+	}{{1, "worked"}, {2, "worked"}, {nil, "didnt_work"}} {
+		if _, err := lib.db.Exec(
+			"INSERT INTO feedback (finding_id, user_id, verdict, created_at) VALUES (?, ?, ?, ?)",
+			ids[0], row.userID, row.verdict, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return lib, ids
+}
+
+func searchIDs(t *testing.T, lib *LibraryStore, f FindingFilter) []int64 {
+	t.Helper()
+	if f.Limit == 0 {
+		f.Limit = 50
+	}
+	results, err := lib.SearchFindings(f)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	var got []int64
+	for _, r := range results {
+		got = append(got, r.ID)
+	}
+	return got
+}
+
+func TestSearchFindingsFilters(t *testing.T) {
+	lib, ids := seedSearchLibrary(t)
+	f1, f2, f3, f4, f5 := ids[0], ids[1], ids[2], ids[3], ids[4]
+
+	for name, tc := range map[string]struct {
+		filter FindingFilter
+		want   []int64
+	}{
+		// Newest run first, insertion order within a run.
+		"no filter":         {FindingFilter{}, []int64{f3, f4, f5, f1, f2}},
+		"host":              {FindingFilter{Host: "hostA"}, []int64{f4, f1}},
+		"service":           {FindingFilter{Service: "sshd"}, []int64{f2}},
+		"severity":          {FindingFilter{Severity: "critical"}, []int64{f3}},
+		"kind":              {FindingFilter{Kind: "issue"}, []int64{f3, f5, f1}},
+		"query lowercase":   {FindingFilter{Query: "disk"}, []int64{f3, f1}},
+		"from":              {FindingFilter{From: "2026-06-02"}, []int64{f3, f4, f5}},
+		"to":                {FindingFilter{To: "2026-06-01"}, []int64{f1, f2}},
+		"combined":          {FindingFilter{Kind: "issue", Host: "hostA"}, []int64{f1}},
+		"combined no match": {FindingFilter{Kind: "peer", Severity: "high"}, nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := searchIDs(t, lib, tc.filter); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("ids = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSearchFindingsEscapesLikeWildcards(t *testing.T) {
+	lib, ids := seedSearchLibrary(t)
+	weird := ids[4]
+	// An unescaped % or _ would match every title; escaped, each matches
+	// only titles containing the literal character ("Disk 100% usage"
+	// legitimately contains a %).
+	for q, want := range map[string][]int64{
+		"%": {ids[2], weird},
+		"_": {weird},
+		`\`: {weird},
+	} {
+		if got := searchIDs(t, lib, FindingFilter{Query: q}); !reflect.DeepEqual(got, want) {
+			t.Errorf("query %q matched %v, want %v", q, got, want)
+		}
+	}
+}
+
+func TestSearchFindingsPagination(t *testing.T) {
+	lib, ids := seedSearchLibrary(t)
+	f1, f2, f3, f4, f5 := ids[0], ids[1], ids[2], ids[3], ids[4]
+	pages := [][]int64{{f3, f4}, {f5, f1}, {f2}}
+	for i, want := range pages {
+		got := searchIDs(t, lib, FindingFilter{Limit: 2, Offset: i * 2})
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("page %d = %v, want %v", i+1, got, want)
+		}
+	}
+}
+
+func TestSearchFindingsRowShape(t *testing.T) {
+	lib, ids := seedSearchLibrary(t)
+	results, err := lib.SearchFindings(FindingFilter{Host: "hostB", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results = %d, want 1", len(results))
+	}
+	r := results[0]
+	if r.ID != ids[0] || r.LogDate != "2026-06-01" || r.Kind != "issue" ||
+		r.Severity != "high" || r.Title != "Disk filling on /var" ||
+		r.Service != "kernel" || r.Hosts != "hostA, hostB" {
+		t.Errorf("row = %+v", r)
+	}
+	if r.Worked != 2 || r.DidntWork != 1 {
+		t.Errorf("feedback counts = %d worked / %d didnt, want 2 / 1", r.Worked, r.DidntWork)
+	}
+}
+
 func TestLibraryUserRoundTrip(t *testing.T) {
 	lib := newTestLibrary(t)
 	id, err := lib.CreateUser("opsuser", "opsuser@example.test", "fake-bcrypt-hash")

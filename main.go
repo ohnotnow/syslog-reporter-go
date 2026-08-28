@@ -120,22 +120,22 @@ func runServe(args []string) {
 		fatal("%v", err)
 	}
 	cfg.Version = version
-	// Only the local driver reads the users table; mode none must not
-	// require (or create) a database file at all.
+	// The findings pages read the library on every request, so serve mode
+	// always opens the store; the local auth driver shares the same handle.
+	lib, err := reporter.OpenLibraryStore(cfg.DBPath)
+	if err != nil {
+		fatal("opening %s: %v", cfg.DBPath, err)
+	}
+	defer lib.Close()
 	var users web.UserStore
 	if cfg.AuthMode == "local" {
-		lib, err := reporter.OpenLibraryStore(cfg.DBPath)
-		if err != nil {
-			fatal("opening %s: %v", cfg.DBPath, err)
-		}
-		defer lib.Close()
 		users = lib
 	}
 	auth, err := web.NewAuthenticator(cfg, users)
 	if err != nil {
 		fatal("%v", err)
 	}
-	srv, err := web.New(cfg, auth)
+	srv, err := web.New(cfg, auth, lib)
 	if err != nil {
 		fatal("%v", err)
 	}

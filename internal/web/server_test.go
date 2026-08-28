@@ -6,17 +6,25 @@ package web
 import (
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ohnotnow/syslog-reporter-go/internal/reporter"
 )
 
 func newTestServer(t *testing.T, cfg Config) *Server {
 	t.Helper()
+	lib, err := reporter.OpenLibraryStore(filepath.Join(t.TempDir(), "web.db"))
+	if err != nil {
+		t.Fatalf("open library store: %v", err)
+	}
+	t.Cleanup(func() { lib.Close() })
 	auth, err := NewAuthenticator(cfg, nil)
 	if err != nil {
 		t.Fatalf("new authenticator: %v", err)
 	}
-	s, err := New(cfg, auth)
+	s, err := New(cfg, auth, lib)
 	if err != nil {
 		t.Fatalf("new server: %v", err)
 	}

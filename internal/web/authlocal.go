@@ -22,6 +22,12 @@ const userContextKey ctxKey = 0
 
 const sessionUserKey = "userID"
 
+// dummyHash (bcrypt of an arbitrary string at DefaultCost) is compared
+// against on the unknown-user and NULL-hash paths, so a failed login costs
+// the same whether or not the username exists: without it the fast fail is
+// a timing oracle for enumerating usernames.
+const dummyHash = "$2a$10$sr17aG207Q6pHLLx7nLsXutTfPgwj0/h9QPNl0kb3VR0GTb24JBAy"
+
 type localAuth struct {
 	cfg      Config
 	users    UserStore
@@ -109,13 +115,11 @@ func (a *localAuth) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "server error", http.StatusInternalServerError)
 		return
 	}
-	if user == nil {
-		fail()
-		return
-	}
-	if !user.PasswordHash.Valid {
-		// SSO-created user with no local password: the local form can never
-		// sign them in, deliberately.
+	if user == nil || !user.PasswordHash.Valid {
+		// Unknown username, or an SSO-created user with no local password
+		// (who can never sign in here, deliberately). Pay the bcrypt cost
+		// anyway so the response time does not leak which case this was.
+		bcrypt.CompareHashAndPassword([]byte(dummyHash), []byte(password))
 		fail()
 		return
 	}

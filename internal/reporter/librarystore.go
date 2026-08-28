@@ -13,6 +13,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -178,6 +179,101 @@ func (s *LibraryStore) AddFinding(runID int64, kind, severity, title, service st
 		}
 	}
 	return id, tx.Commit()
+}
+
+// FindingFilter narrows a findings search. Zero values mean "any": host,
+// service, severity and kind match exactly; Query is a substring match on
+// the title; From/To bound the run's log_date (inclusive, ISO YYYY-MM-DD).
+type FindingFilter struct {
+	Host     string
+	Service  string
+	Severity string
+	Kind     string
+	Query    string
+	From     string
+	To       string
+	Limit    int
+	Offset   int
+}
+
+// FindingSummary is one findings-list row: the promoted columns joined to
+// the run date, the host list, and the feedback verdict counts.
+type FindingSummary struct {
+	ID        int64
+	RunID     int64
+	LogDate   string
+	Kind      string
+	Severity  string // '' for anomaly kinds
+	Title     string
+	Service   string
+	Hosts     string // comma-joined, insertion order
+	Worked    int
+	DidntWork int
+}
+
+// escapeLike backslash-escapes the SQL LIKE wildcards in a user-supplied
+// term, for use with ESCAPE '\'.
+func escapeLike(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return r.Replace(s)
+}
+
+// SearchFindings lists findings newest run first (ties by insertion order),
+// honouring Limit/Offset for pagination.
+func (s *LibraryStore) SearchFindings(f FindingFilter) ([]*FindingSummary, error) {
+	where := []string{"1=1"}
+	var args []any
+	add := func(cond string, vals ...any) {
+		where = append(where, cond)
+		args = append(args, vals...)
+	}
+	if f.Host != "" {
+		add("EXISTS (SELECT 1 FROM finding_hosts fh WHERE fh.finding_id = fnd.id AND fh.host = ?)", f.Host)
+	}
+	if f.Service != "" {
+		add("fnd.service = ?", f.Service)
+	}
+	if f.Severity != "" {
+		add("fnd.severity = ?", f.Severity)
+	}
+	if f.Kind != "" {
+		add("fnd.kind = ?", f.Kind)
+	}
+	if f.Query != "" {
+		add(`fnd.title LIKE ? ESCAPE '\'`, "%"+escapeLike(f.Query)+"%")
+	}
+	if f.From != "" {
+		add("r.log_date >= ?", f.From)
+	}
+	if f.To != "" {
+		add("r.log_date <= ?", f.To)
+	}
+	args = append(args, f.Limit, f.Offset)
+	rows, err := s.db.Query(
+		"SELECT fnd.id, fnd.run_id, r.log_date, fnd.kind, COALESCE(fnd.severity, ''), "+
+			"fnd.title, COALESCE(fnd.service, ''), "+
+			"COALESCE((SELECT GROUP_CONCAT(fh.host, ', ') FROM finding_hosts fh "+
+			"WHERE fh.finding_id = fnd.id), ''), "+
+			"(SELECT COUNT(*) FROM feedback fb WHERE fb.finding_id = fnd.id AND fb.verdict = 'worked'), "+
+			"(SELECT COUNT(*) FROM feedback fb WHERE fb.finding_id = fnd.id AND fb.verdict = 'didnt_work') "+
+			"FROM findings fnd JOIN runs r ON fnd.run_id = r.id "+
+			"WHERE "+strings.Join(where, " AND ")+" "+
+			"ORDER BY r.log_date DESC, fnd.id LIMIT ? OFFSET ?",
+		args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*FindingSummary
+	for rows.Next() {
+		fs := &FindingSummary{}
+		if err := rows.Scan(&fs.ID, &fs.RunID, &fs.LogDate, &fs.Kind, &fs.Severity,
+			&fs.Title, &fs.Service, &fs.Hosts, &fs.Worked, &fs.DidntWork); err != nil {
+			return nil, err
+		}
+		out = append(out, fs)
+	}
+	return out, rows.Err()
 }
 
 // User is a users-table row. Forenames, surname and the password hash are

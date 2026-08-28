@@ -47,7 +47,7 @@ func newLocalServer(t *testing.T, lib *reporter.LibraryStore) *httptest.Server {
 	if err != nil {
 		t.Fatalf("new authenticator: %v", err)
 	}
-	s, err := New(cfg, auth)
+	s, err := New(cfg, auth, lib)
 	if err != nil {
 		t.Fatalf("new server: %v", err)
 	}

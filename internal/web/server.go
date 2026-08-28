@@ -64,7 +64,10 @@ func getenvDefault(key, fallback string) string {
 
 // baseTemplate holds only the shared layout; each page's blocks are parsed
 // into a clone at render time so pages never collide.
-var baseTemplate = template.Must(template.ParseFS(templateFS, "templates/base.html"))
+var baseTemplate = template.Must(template.New("").Funcs(template.FuncMap{
+	// list lets a template range over an inline slice, e.g. select options.
+	"list": func(items ...string) []string { return items },
+}).ParseFS(templateFS, "templates/base.html"))
 
 // pageData is what the base layout sees on every render.
 type pageData struct {
@@ -76,6 +79,12 @@ type pageData struct {
 
 // render executes the base layout with the named page's blocks mixed in.
 func render(w http.ResponseWriter, page string, d pageData) {
+	renderBlock(w, page, "base", d)
+}
+
+// renderBlock executes one named block from a page's template set: "base"
+// for a full page, or a fragment block for an htmx partial.
+func renderBlock(w http.ResponseWriter, page, block string, d pageData) {
 	tpl, err := baseTemplate.Clone()
 	if err == nil {
 		_, err = tpl.ParseFS(templateFS, "templates/"+page)
@@ -85,7 +94,7 @@ func render(w http.ResponseWriter, page string, d pageData) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := tpl.ExecuteTemplate(w, "base", d); err != nil {
+	if err := tpl.ExecuteTemplate(w, block, d); err != nil {
 		// Headers are likely gone already; nothing useful left to send.
 		return
 	}
@@ -94,17 +103,21 @@ func render(w http.ResponseWriter, page string, d pageData) {
 type Server struct {
 	cfg  Config
 	auth Authenticator
+	lib  *reporter.LibraryStore
 	mux  *http.ServeMux
 	csrf *http.CrossOriginProtection
 }
 
-func New(cfg Config, auth Authenticator) (*Server, error) {
+func New(cfg Config, auth Authenticator, lib *reporter.LibraryStore) (*Server, error) {
 	if auth == nil {
 		return nil, fmt.Errorf("web.New needs an Authenticator (use NewAuthenticator)")
 	}
-	s := &Server{cfg: cfg, auth: auth, mux: http.NewServeMux(),
+	if lib == nil {
+		return nil, fmt.Errorf("web.New needs a LibraryStore")
+	}
+	s := &Server{cfg: cfg, auth: auth, lib: lib, mux: http.NewServeMux(),
 		csrf: http.NewCrossOriginProtection()}
-	s.mux.HandleFunc("GET /{$}", s.handleHome)
+	s.mux.HandleFunc("GET /{$}", s.handleFindings)
 	s.mux.Handle("GET /static/", http.FileServerFS(staticFS))
 	auth.Routes(s.mux)
 	return s, nil
@@ -114,14 +127,6 @@ func New(cfg Config, auth Authenticator) (*Server, error) {
 // the listener, for tests.
 func (s *Server) Handler() http.Handler {
 	return s.csrf.Handler(s.auth.Middleware(s.mux))
-}
-
-func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
-	render(w, "home.html", pageData{
-		Version: s.cfg.Version,
-		Path:    "/",
-		User:    s.auth.CurrentUser(r),
-	})
 }
 
 // Listen binds cfg.Listen, wrapped in TLS when a certificate pair is

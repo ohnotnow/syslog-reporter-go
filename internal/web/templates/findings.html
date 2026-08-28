@@ -1,0 +1,113 @@
+{{define "title"}}Findings{{end}}
+{{define "content"}}
+    <h1>Findings library</h1>
+    <form class="filters" method="get" action="/"
+          hx-get="/" hx-target="#results" hx-swap="outerHTML"
+          hx-trigger="input delay:300ms, change" hx-push-url="true">
+      {{with .Data.Filters}}
+      <div class="filter-field filter-field--wide">
+        <label for="filter-q">Search titles</label>
+        <input type="search" id="filter-q" name="q" value="{{.Query}}">
+      </div>
+      <div class="filter-field">
+        <label for="filter-host">Host</label>
+        <input type="text" id="filter-host" name="host" value="{{.Host}}">
+      </div>
+      <div class="filter-field">
+        <label for="filter-service">Service</label>
+        <input type="text" id="filter-service" name="service" value="{{.Service}}">
+      </div>
+      <div class="filter-field">
+        <label for="filter-severity">Severity</label>
+        <select id="filter-severity" name="severity">
+          <option value="">Any</option>
+          {{range $s := list "critical" "high" "medium" "low"}}
+          <option value="{{$s}}"{{if eq $.Data.Filters.Severity $s}} selected{{end}}>{{$s}}</option>
+          {{end}}
+        </select>
+      </div>
+      <div class="filter-field">
+        <label for="filter-kind">Kind</label>
+        <select id="filter-kind" name="kind">
+          <option value="">Any</option>
+          {{range $k := list "issue" "peer" "baseline" "temporal"}}
+          <option value="{{$k}}"{{if eq $.Data.Filters.Kind $k}} selected{{end}}>{{$k}}</option>
+          {{end}}
+        </select>
+      </div>
+      <div class="filter-field">
+        <label for="filter-from">From</label>
+        <input type="date" id="filter-from" name="from" value="{{.From}}">
+      </div>
+      <div class="filter-field">
+        <label for="filter-to">To</label>
+        <input type="date" id="filter-to" name="to" value="{{.To}}">
+      </div>
+      {{end}}
+      <button class="button-primary filter-submit" type="submit">Filter</button>
+    </form>
+    <p id="results-status" class="results-status" aria-live="polite">{{.Data.StatusLine}}</p>
+{{template "results" .}}
+{{end}}
+
+{{define "results"}}
+    <section id="results" aria-label="Findings">
+      {{if .Data.Results}}
+      <div class="table-scroll">
+        <table class="findings-table">
+          <thead>
+            <tr>
+              <th scope="col">Date</th>
+              <th scope="col">Finding</th>
+              <th scope="col">Kind</th>
+              <th scope="col">Severity</th>
+              <th scope="col">Service</th>
+              <th scope="col">Hosts</th>
+              <th scope="col">Outcomes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Data.Results}}
+            <tr>
+              <td class="cell-date">{{.LogDate}}</td>
+              <td><a href="/findings/{{.ID}}">{{.Title}}<span class="visually-hidden">
+                - {{.Service}} on {{.Hosts}}, {{.LogDate}}</span></a></td>
+              <td>{{.Kind}}</td>
+              <td{{if or (eq .Severity "critical") (eq .Severity "high")}} class="cell-severe"{{end}}>
+                {{if .Severity}}{{.Severity}}{{else}}-{{end}}</td>
+              <td>{{.Service}}</td>
+              <td class="cell-hosts">{{.Hosts}}</td>
+              <td class="cell-outcomes">
+                {{if .Worked}}<span class="badge badge-worked">{{.Worked}} worked</span>{{end}}
+                {{if .DidntWork}}<span class="badge badge-didnt">{{.DidntWork}} didn't</span>{{end}}
+                {{if and (not .Worked) (not .DidntWork)}}<span class="badge-none">none yet</span>{{end}}
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+      <nav class="pager" aria-label="Pagination">
+        {{if gt .Data.Page 1}}<a href="/?{{.Data.PrevQuery}}">Previous page</a>{{end}}
+        {{if .Data.HasMore}}<a href="/?{{.Data.NextQuery}}">Next page</a>{{end}}
+      </nav>
+      {{else}}
+      <div class="empty-state">
+        {{if .Data.Filtered}}
+        <h2>Nothing matches</h2>
+        <p>No findings match these filters. Clear one or two and try again;
+        the title search matches any part of the title.</p>
+        {{else}}
+        <h2>The shelves are up, and waiting</h2>
+        <p>No findings have been captured yet. Each report run stores what
+        it flagged, so the first run after this deploy will start filling
+        the library.</p>
+        {{end}}
+      </div>
+      {{end}}
+    </section>
+{{end}}
+
+{{define "results-partial"}}{{template "results" .}}
+<p id="results-status" hx-swap-oob="innerHTML">{{.Data.StatusLine}}</p>
+{{end}}
