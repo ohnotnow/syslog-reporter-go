@@ -126,18 +126,20 @@ const DefaultMaxExplain = 15
 
 // ExplainedAnomaly is the deterministic anomaly facts merged with the LLM
 // explanation. Kind/Headline/Detail come from whichever detector flagged it,
-// so the report renders all three kinds uniformly.
+// so the report renders all three kinds uniformly. The json tags are the
+// findings library's stored payload format (librarystore.go); renaming any
+// of them needs a migration story, so don't.
 type ExplainedAnomaly struct {
-	Host               string
-	Program            string
-	Kind               string // peer / baseline / temporal
-	Headline           string // short label, e.g. "Gone silent"
-	Detail             string // the deterministic numbers sentence
-	OSFamily           string
-	ExampleLine        string
-	LikelyCauses       string
-	InvestigationSteps []string
-	SuggestedCommands  []string
+	Host               string   `json:"host"`
+	Program            string   `json:"program"`
+	Kind               string   `json:"kind"`     // peer / baseline / temporal
+	Headline           string   `json:"headline"` // short label, e.g. "Gone silent"
+	Detail             string   `json:"detail"`   // the deterministic numbers sentence
+	OSFamily           string   `json:"os_family"`
+	ExampleLine        string   `json:"example_line"`
+	LikelyCauses       string   `json:"likely_causes"`
+	InvestigationSteps []string `json:"investigation_steps"`
+	SuggestedCommands  []string `json:"suggested_commands"`
 }
 
 func (e *ExplainedAnomaly) ToMarkdown() string {
