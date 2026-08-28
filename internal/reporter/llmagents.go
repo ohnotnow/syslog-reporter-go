@@ -44,12 +44,12 @@ func issueItemSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"issue":             str(),
-			"severity":          map[string]any{"type": "string", "enum": []string{"critical", "high", "medium", "low"}},
-			"description":       str(),
-			"example_log_entry": str(),
-			"affected_host":     map[string]any{"type": "array", "items": str()},
-			"affected_service":  str(),
+			"issue":               str(),
+			"severity":            map[string]any{"type": "string", "enum": []string{"critical", "high", "medium", "low"}},
+			"description":         str(),
+			"example_log_entry":   str(),
+			"affected_host":       map[string]any{"type": "array", "items": str()},
+			"affected_service":    str(),
 			"timestamp_frequency": str(),
 			"potential_impact":    str(),
 			"recommended_action":  str(),
