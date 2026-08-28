@@ -5,7 +5,9 @@ package reporter
 // Fictional hostnames only.
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -320,9 +322,13 @@ func TestSearchFindingsFilters(t *testing.T) {
 		want   []int64
 	}{
 		// Newest run first, insertion order within a run.
-		"no filter":         {FindingFilter{}, []int64{f3, f4, f5, f1, f2}},
-		"host":              {FindingFilter{Host: "hostA"}, []int64{f4, f1}},
+		"no filter": {FindingFilter{}, []int64{f3, f4, f5, f1, f2}},
+		"host":      {FindingFilter{Host: "hostA"}, []int64{f4, f1}},
+		// Host and service are substring matches (owner decision 2026-08-28).
+		"host substring":    {FindingFilter{Host: "stA"}, []int64{f4, f1}},
 		"service":           {FindingFilter{Service: "sshd"}, []int64{f2}},
+		"service substring": {FindingFilter{Service: "ssh"}, []int64{f2}},
+		"host like-escape":  {FindingFilter{Host: "host%"}, nil},
 		"severity":          {FindingFilter{Severity: "critical"}, []int64{f3}},
 		"kind":              {FindingFilter{Kind: "issue"}, []int64{f3, f5, f1}},
 		"query lowercase":   {FindingFilter{Query: "disk"}, []int64{f3, f1}},
@@ -385,6 +391,108 @@ func TestSearchFindingsRowShape(t *testing.T) {
 	}
 	if r.Worked != 2 || r.DidntWork != 1 {
 		t.Errorf("feedback counts = %d worked / %d didnt, want 2 / 1", r.Worked, r.DidntWork)
+	}
+}
+
+func TestGetFindingBothKinds(t *testing.T) {
+	lib := newTestLibrary(t)
+	runID, err := lib.BeginRun(day(2026, 6, 1), "openai/gpt-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	issue := sampleIssuePayload()
+	issueID, err := lib.AddFinding(runID, "issue", issue.Severity, issue.Issue.Issue,
+		issue.AffectedService, issue.AffectedHost, issue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	anom := sampleAnomaly()
+	anomID, err := lib.AddFinding(runID, anom.Kind, "", anom.Headline,
+		anom.Program, []string{anom.Host}, anom)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := lib.GetFinding(issueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.LogDate != "2026-06-01" || got.Model != "openai/gpt-test" ||
+		got.Kind != "issue" || got.Title != issue.Issue.Issue {
+		t.Errorf("issue detail = %+v", got)
+	}
+	if !reflect.DeepEqual(got.Hosts, []string{"hostA", "hostB"}) {
+		t.Errorf("hosts = %v", got.Hosts)
+	}
+	if got.Issue == nil || !reflect.DeepEqual(*got.Issue, issue) || got.Anomaly != nil {
+		t.Errorf("issue payload round-trip failed: %+v", got.Issue)
+	}
+
+	got, err = lib.GetFinding(anomID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Anomaly == nil || !reflect.DeepEqual(got.Anomaly, anom) || got.Issue != nil {
+		t.Errorf("anomaly payload round-trip failed: %+v", got.Anomaly)
+	}
+
+	if _, err := lib.GetFinding(9999); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("missing finding: err = %v, want sql.ErrNoRows", err)
+	}
+}
+
+func TestRecordFeedbackUpserts(t *testing.T) {
+	lib := newTestLibrary(t)
+	runID, err := lib.BeginRun(day(2026, 6, 1), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	anom := sampleAnomaly()
+	findingID, err := lib.AddFinding(runID, anom.Kind, "", anom.Headline,
+		anom.Program, []string{anom.Host}, anom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userID, err := lib.CreateUser("opsuser", "opsuser@example.test", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Same user twice: one row, verdict updated, comment blanked.
+	if err := lib.RecordFeedback(findingID, &userID, "worked", "sorted it"); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	if err := lib.RecordFeedback(findingID, &userID, "didnt_work", ""); err != nil {
+		t.Fatalf("re-record: %v", err)
+	}
+	// Anonymous twice: still one row.
+	if err := lib.RecordFeedback(findingID, nil, "worked", "solo tick"); err != nil {
+		t.Fatalf("anonymous: %v", err)
+	}
+	if err := lib.RecordFeedback(findingID, nil, "worked", "still good"); err != nil {
+		t.Fatalf("anonymous re-vote: %v", err)
+	}
+
+	rows, err := lib.FeedbackFor(findingID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("feedback rows = %d, want 2 (one per voter)", len(rows))
+	}
+	byUser := map[string]*FeedbackRow{}
+	for _, r := range rows {
+		byUser[r.Username] = r
+	}
+	if r := byUser["opsuser"]; r == nil || r.Verdict != "didnt_work" || r.Comment != "" {
+		t.Errorf("opsuser row = %+v, want updated verdict and blanked comment", r)
+	}
+	if r := byUser[""]; r == nil || r.UserID != nil || r.Verdict != "worked" || r.Comment != "still good" {
+		t.Errorf("anonymous row = %+v", r)
+	}
+
+	if err := lib.RecordFeedback(findingID, nil, "thumbs_up", ""); !errors.Is(err, ErrBadVerdict) {
+		t.Errorf("bad verdict err = %v, want ErrBadVerdict", err)
 	}
 }
 

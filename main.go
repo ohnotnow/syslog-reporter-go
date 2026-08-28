@@ -141,12 +141,18 @@ func runServe(args []string) {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// Bind before announcing, so a taken port fails without first printing
+	// a URL that never existed.
+	ln, err := srv.Listen()
+	if err != nil {
+		fatal("%v", err)
+	}
 	scheme := "http"
 	if cfg.CertFile != "" {
 		scheme = "https"
 	}
-	log.Info("Serving on %s://%s (db %s)", scheme, cfg.Listen, cfg.DBPath)
-	if err := srv.Run(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	log.Info("Serving on %s://%s (db %s)", scheme, ln.Addr(), cfg.DBPath)
+	if err := srv.Serve(ctx, ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		fatal("%v", err)
 	}
 	log.Info("Server stopped")

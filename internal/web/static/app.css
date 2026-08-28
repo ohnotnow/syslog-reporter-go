@@ -16,6 +16,7 @@
   --dark-grey-1: #666666;
   --dark-grey-3: #323232;
   --light-grey-1: #F5F5F5;
+  --light-grey-2: #E6E6E6;
   --light-grey-3: #CCCCCC;
   --highlight: #FFDD00;
   --error: #D4351C;
@@ -329,6 +330,114 @@ a {
   display: flex;
   gap: var(--space-6);
   margin-top: var(--space-6);
+}
+
+/* Finding detail page. */
+.crumbs {
+  font-size: var(--text-sm);
+  color: var(--dark-grey-1);
+  margin-bottom: var(--space-3);
+}
+
+.meta {
+  color: var(--dark-grey-1);
+}
+
+.fact-list {
+  padding-left: var(--space-5);
+  max-width: 70ch;
+}
+
+.fact-list li {
+  margin-bottom: var(--space-2);
+}
+
+pre {
+  background-color: var(--light-grey-1);
+  border: 1px solid var(--light-grey-3);
+  border-radius: 4px;
+  padding: var(--space-4);
+  overflow-x: auto;
+  max-width: 70rem;
+}
+
+pre code {
+  font-size: var(--text-sm);
+}
+
+.quiet {
+  color: var(--dark-grey-1);
+}
+
+h2 {
+  margin-top: var(--space-7);
+}
+
+h3 {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  margin: var(--space-6) 0 var(--space-2);
+}
+
+/* Feedback panel: the outcome loop the library exists for. */
+.feedback {
+  margin-top: var(--space-9);
+  padding: var(--space-6) var(--space-7);
+  background-color: var(--blue-10);
+  max-width: 46rem;
+}
+
+.feedback h2 {
+  margin-top: 0;
+}
+
+.feedback textarea {
+  font-family: var(--font-stack);
+  font-size: var(--text-base);
+  width: 100%;
+  padding: var(--space-3);
+  border: 1px solid var(--dark-grey-1);
+  border-radius: 4px;
+  resize: vertical;
+}
+
+.feedback-recorded {
+  font-weight: 600;
+}
+
+.feedback-counts {
+  color: var(--dark-grey-1);
+  font-size: var(--text-sm);
+}
+
+.feedback-buttons {
+  display: flex;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.button-secondary {
+  font-family: var(--font-stack);
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--dark-grey-3);
+  background-color: var(--light-grey-2);
+  border: 2px solid var(--light-grey-3);
+  border-radius: 4px;
+  padding: var(--space-3) var(--space-6);
+  cursor: pointer;
+}
+
+.button-secondary:hover {
+  background-color: var(--light-grey-3);
+}
+
+.feedback-notes {
+  padding-left: var(--space-5);
+}
+
+.feedback-notes li {
+  margin-bottom: var(--space-2);
 }
 
 /* Signed-in identity and logout, pushed to the end of the header bar. */

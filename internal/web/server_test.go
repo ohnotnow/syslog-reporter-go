@@ -46,7 +46,7 @@ func TestConfigFromEnvDefaultsToPlainHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Listen != "127.0.0.1:8080" {
+	if cfg.Listen != "127.0.0.1:7373" {
 		t.Errorf("Listen = %q", cfg.Listen)
 	}
 	if cfg.CertFile != "" || cfg.KeyFile != "" {

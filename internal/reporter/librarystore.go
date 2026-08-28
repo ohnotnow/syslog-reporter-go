@@ -181,9 +181,10 @@ func (s *LibraryStore) AddFinding(runID int64, kind, severity, title, service st
 	return id, tx.Commit()
 }
 
-// FindingFilter narrows a findings search. Zero values mean "any": host,
-// service, severity and kind match exactly; Query is a substring match on
-// the title; From/To bound the run's log_date (inclusive, ISO YYYY-MM-DD).
+// FindingFilter narrows a findings search. Zero values mean "any". Host,
+// Service and Query are substring matches ("mik" finds host mikonos; owner
+// decision 2026-08-28, severity and kind stay exact - they are dropdowns);
+// From/To bound the run's log_date (inclusive, ISO YYYY-MM-DD).
 type FindingFilter struct {
 	Host     string
 	Service  string
@@ -228,10 +229,11 @@ func (s *LibraryStore) SearchFindings(f FindingFilter) ([]*FindingSummary, error
 		args = append(args, vals...)
 	}
 	if f.Host != "" {
-		add("EXISTS (SELECT 1 FROM finding_hosts fh WHERE fh.finding_id = fnd.id AND fh.host = ?)", f.Host)
+		add(`EXISTS (SELECT 1 FROM finding_hosts fh WHERE fh.finding_id = fnd.id `+
+			`AND fh.host LIKE ? ESCAPE '\')`, "%"+escapeLike(f.Host)+"%")
 	}
 	if f.Service != "" {
-		add("fnd.service = ?", f.Service)
+		add(`fnd.service LIKE ? ESCAPE '\'`, "%"+escapeLike(f.Service)+"%")
 	}
 	if f.Severity != "" {
 		add("fnd.severity = ?", f.Severity)
@@ -272,6 +274,122 @@ func (s *LibraryStore) SearchFindings(f FindingFilter) ([]*FindingSummary, error
 			return nil, err
 		}
 		out = append(out, fs)
+	}
+	return out, rows.Err()
+}
+
+// FindingDetail is one finding in full: the promoted columns joined to the
+// run, the host list, and the payload unmarshalled per kind (Issue for kind
+// 'issue', Anomaly for the rest).
+type FindingDetail struct {
+	ID       int64
+	RunID    int64
+	LogDate  string
+	Model    string // '' when the run was --no-llm
+	Kind     string
+	Severity string
+	Title    string
+	Service  string
+	Hosts    []string
+	Issue    *IssuePayload
+	Anomaly  *ExplainedAnomaly
+}
+
+// GetFinding loads one finding by id; a missing id returns sql.ErrNoRows.
+func (s *LibraryStore) GetFinding(id int64) (*FindingDetail, error) {
+	d := &FindingDetail{}
+	var model sql.NullString
+	var hosts, payload string
+	err := s.db.QueryRow(
+		"SELECT fnd.id, fnd.run_id, r.log_date, COALESCE(r.model, ''), fnd.kind, "+
+			"COALESCE(fnd.severity, ''), fnd.title, COALESCE(fnd.service, ''), "+
+			"COALESCE((SELECT GROUP_CONCAT(fh.host, ',') FROM finding_hosts fh "+
+			"WHERE fh.finding_id = fnd.id), ''), fnd.payload "+
+			"FROM findings fnd JOIN runs r ON fnd.run_id = r.id WHERE fnd.id = ?", id).
+		Scan(&d.ID, &d.RunID, &d.LogDate, &model, &d.Kind, &d.Severity,
+			&d.Title, &d.Service, &hosts, &payload)
+	if err != nil {
+		return nil, err
+	}
+	d.Model = model.String
+	if hosts != "" {
+		d.Hosts = strings.Split(hosts, ",")
+	}
+	if d.Kind == "issue" {
+		d.Issue = &IssuePayload{}
+		err = json.Unmarshal([]byte(payload), d.Issue)
+	} else {
+		d.Anomaly = &ExplainedAnomaly{}
+		err = json.Unmarshal([]byte(payload), d.Anomaly)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return d, nil
+}
+
+// ErrBadVerdict rejects any verdict other than the two the schema allows.
+var ErrBadVerdict = errors.New("verdict must be 'worked' or 'didnt_work'")
+
+// RecordFeedback upserts one user's verdict on a finding (userID nil is the
+// single anonymous vote). A re-vote replaces the row outright - verdict,
+// comment (including blanking it) and created_at: the row is the current
+// state, not an audit log.
+func (s *LibraryStore) RecordFeedback(findingID int64, userID *int64, verdict, comment string) error {
+	if verdict != "worked" && verdict != "didnt_work" {
+		return ErrBadVerdict
+	}
+	var commentVal, userVal any
+	if comment != "" {
+		commentVal = comment
+	}
+	if userID != nil {
+		userVal = *userID
+	}
+	_, err := s.db.Exec(
+		"INSERT INTO feedback (finding_id, user_id, verdict, comment, created_at) "+
+			"VALUES (?, ?, ?, ?, ?) "+
+			"ON CONFLICT (finding_id, COALESCE(user_id, 0)) "+
+			"DO UPDATE SET verdict = excluded.verdict, comment = excluded.comment, "+
+			"created_at = excluded.created_at",
+		findingID, userVal, verdict, commentVal,
+		time.Now().UTC().Format(time.RFC3339))
+	return err
+}
+
+// FeedbackRow is one recorded verdict, with the voter's username joined
+// (” for the anonymous vote).
+type FeedbackRow struct {
+	UserID    *int64
+	Username  string
+	Verdict   string
+	Comment   string
+	CreatedAt string
+}
+
+// FeedbackFor lists a finding's feedback, newest first.
+func (s *LibraryStore) FeedbackFor(findingID int64) ([]*FeedbackRow, error) {
+	rows, err := s.db.Query(
+		"SELECT fb.user_id, COALESCE(u.username, ''), fb.verdict, "+
+			"COALESCE(fb.comment, ''), fb.created_at "+
+			"FROM feedback fb LEFT JOIN users u ON fb.user_id = u.id "+
+			"WHERE fb.finding_id = ? ORDER BY fb.created_at DESC, fb.id DESC",
+		findingID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*FeedbackRow
+	for rows.Next() {
+		fr := &FeedbackRow{}
+		var userID sql.NullInt64
+		if err := rows.Scan(&userID, &fr.Username, &fr.Verdict, &fr.Comment, &fr.CreatedAt); err != nil {
+			return nil, err
+		}
+		if userID.Valid {
+			fr.UserID = &userID.Int64
+		}
+		out = append(out, fr)
 	}
 	return out, rows.Err()
 }

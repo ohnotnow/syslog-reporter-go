@@ -42,7 +42,8 @@ type Config struct {
 // of the pair set is a configuration mistake and errors at startup.
 func ConfigFromEnv() (Config, error) {
 	cfg := Config{
-		Listen:   getenvDefault("SYSLOG_WEB_LISTEN", "127.0.0.1:8080"),
+		// Port 7373: 73 kilos is what Vila weighs (owner's choice, Blake's 7).
+		Listen:   getenvDefault("SYSLOG_WEB_LISTEN", "127.0.0.1:7373"),
 		CertFile: os.Getenv("SYSLOG_WEB_TLS_CERT"),
 		KeyFile:  os.Getenv("SYSLOG_WEB_TLS_KEY"),
 		DBPath:   getenvDefault("SYSLOG_DB_PATH", "syslog_aggregates.db"),
@@ -67,6 +68,13 @@ func getenvDefault(key, fallback string) string {
 var baseTemplate = template.Must(template.New("").Funcs(template.FuncMap{
 	// list lets a template range over an inline slice, e.g. select options.
 	"list": func(items ...string) []string { return items },
+	// verdictLabel keeps the stored verdict values out of the visible copy.
+	"verdictLabel": func(verdict string) string {
+		if verdict == "worked" {
+			return "fixed it"
+		}
+		return "did not fix it"
+	},
 }).ParseFS(templateFS, "templates/base.html"))
 
 // pageData is what the base layout sees on every render.
@@ -79,12 +87,21 @@ type pageData struct {
 
 // render executes the base layout with the named page's blocks mixed in.
 func render(w http.ResponseWriter, page string, d pageData) {
-	renderBlock(w, page, "base", d)
+	renderBlockStatus(w, page, "base", http.StatusOK, d)
 }
 
-// renderBlock executes one named block from a page's template set: "base"
-// for a full page, or a fragment block for an htmx partial.
+// renderBlock executes one named block from a page's template set, for
+// htmx partials.
 func renderBlock(w http.ResponseWriter, page, block string, d pageData) {
+	renderBlockStatus(w, page, block, http.StatusOK, d)
+}
+
+// renderStatus is render with an explicit status code (error pages).
+func renderStatus(w http.ResponseWriter, page string, status int, d pageData) {
+	renderBlockStatus(w, page, "base", status, d)
+}
+
+func renderBlockStatus(w http.ResponseWriter, page, block string, status int, d pageData) {
 	tpl, err := baseTemplate.Clone()
 	if err == nil {
 		_, err = tpl.ParseFS(templateFS, "templates/"+page)
@@ -94,8 +111,9 @@ func renderBlock(w http.ResponseWriter, page, block string, d pageData) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
 	if err := tpl.ExecuteTemplate(w, block, d); err != nil {
-		// Headers are likely gone already; nothing useful left to send.
+		// Headers are gone already; nothing useful left to send.
 		return
 	}
 }
@@ -118,6 +136,8 @@ func New(cfg Config, auth Authenticator, lib *reporter.LibraryStore) (*Server, e
 	s := &Server{cfg: cfg, auth: auth, lib: lib, mux: http.NewServeMux(),
 		csrf: http.NewCrossOriginProtection()}
 	s.mux.HandleFunc("GET /{$}", s.handleFindings)
+	s.mux.HandleFunc("GET /findings/{id}", s.handleFindingDetail)
+	s.mux.HandleFunc("POST /findings/{id}/feedback", s.handleFeedback)
 	s.mux.Handle("GET /static/", http.FileServerFS(staticFS))
 	auth.Routes(s.mux)
 	return s, nil

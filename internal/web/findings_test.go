@@ -4,8 +4,10 @@ package web
 // only.
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -118,6 +120,183 @@ func TestFindingsOutcomeBadgesRender(t *testing.T) {
 	for _, want := range []string{"2 worked", "1 didn't", "badge-worked", "badge-didnt"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("badges missing %q", want)
+		}
+	}
+}
+
+func seedDetailFindings(t *testing.T, lib *reporter.LibraryStore) (issueID, anomID int64) {
+	t.Helper()
+	runID, err := lib.BeginRun(day(2026, 6, 1), "openai/gpt-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	issue := reporter.IssuePayload{
+		Issue: reporter.Issue{
+			Issue: "Disk filling on /var", Severity: "high",
+			Description:     "Log partition at 92% and climbing.",
+			ExampleLogEntry: "hostA kernel: VFS: file-max limit reached",
+			AffectedHost:    []string{"hostA", "hostB"}, AffectedService: "kernel",
+			TimestampFrequency: "hourly since 03:00",
+			PotentialImpact:    "Service outage when the partition fills.",
+			RecommendedAction:  "Rotate and compress old logs.",
+		},
+		Resolution: &reporter.Resolution{
+			Issue: "Disk filling on /var", RootCause: "logrotate unit disabled",
+			Investigate: "df -h /var",
+			FixCommands: []string{"systemctl enable --now logrotate.timer"},
+			Notes:       "Check retention policy first.",
+		},
+	}
+	issueID, err = lib.AddFinding(runID, "issue", "high", issue.Issue.Issue,
+		issue.AffectedService, issue.AffectedHost, issue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	anom := &reporter.ExplainedAnomaly{
+		Host: "hostC", Program: "sshd", Kind: "peer",
+		Headline: "Chattier than its peers", Detail: "480 lines vs peer median 12",
+		OSFamily: "debian", ExampleLine: "hostC sshd[1234]: Failed password",
+		LikelyCauses:       "Credential scanning.",
+		InvestigationSteps: []string{"Check auth log source addresses"},
+		SuggestedCommands:  []string{"lastb | head"},
+	}
+	anomID, err = lib.AddFinding(runID, anom.Kind, "", anom.Headline,
+		anom.Program, []string{anom.Host}, anom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return issueID, anomID
+}
+
+func TestFindingDetailRendersBothKinds(t *testing.T) {
+	s := newTestServer(t, Config{Version: "test"})
+	issueID, anomID := seedDetailFindings(t, s.lib)
+
+	body := get(t, s, fmt.Sprintf("/findings/%d", issueID)).Body.String()
+	for _, want := range []string{
+		"Disk filling on /var", "hourly since 03:00",
+		"Log partition at 92%", "hostA, hostB",
+		"Service outage when the partition fills.", "Rotate and compress old logs.",
+		"VFS: file-max limit reached",
+		"logrotate unit disabled", "df -h /var",
+		"systemctl enable --now logrotate.timer", "Check retention policy first.",
+		"Did this fix it?", "Fixed it", "Did not fix it",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("issue detail missing %q", want)
+		}
+	}
+
+	body = get(t, s, fmt.Sprintf("/findings/%d", anomID)).Body.String()
+	for _, want := range []string{
+		"Chattier than its peers", "480 lines vs peer median 12",
+		"debian", "Failed password", "Credential scanning.",
+		"Check auth log source addresses", "lastb | head",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("anomaly detail missing %q", want)
+		}
+	}
+}
+
+func TestFindingDetailUnknownIs404(t *testing.T) {
+	s := newTestServer(t, Config{Version: "test"})
+	for _, path := range []string{"/findings/9999", "/findings/banana"} {
+		rec := get(t, s, path)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("GET %s = %d, want 404", path, rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), "Not found") {
+			t.Errorf("GET %s should render the not-found page", path)
+		}
+	}
+}
+
+func postFeedback(t *testing.T, s *Server, id int64, form url.Values, htmx bool) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/findings/%d/feedback", id),
+		strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if htmx {
+		req.Header.Set("HX-Request", "true")
+	}
+	s.Handler().ServeHTTP(rec, req)
+	return rec
+}
+
+func TestFeedbackAnonymousFlow(t *testing.T) {
+	s := newTestServer(t, Config{Version: "test"})
+	_, anomID := seedDetailFindings(t, s.lib)
+
+	// htmx vote: fragment comes back with the honest single-vote copy and
+	// the out-of-band live status update; no aggregate counts in mode none.
+	rec := postFeedback(t, s, anomID, url.Values{
+		"verdict": {"worked"}, "comment": {"rebooted the collector"}}, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("htmx feedback = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		"Recorded: fixed it.", `hx-swap-oob="innerHTML"`,
+		"rebooted the collector", "anonymous",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("feedback fragment missing %q", want)
+		}
+	}
+	if strings.Contains(body, "<html") || strings.Contains(body, "You recorded") ||
+		strings.Contains(body, "0 fixed it") {
+		t.Error("anonymous fragment should be partial, without multi-user copy or counts")
+	}
+
+	// Re-vote: still one row, verdict replaced.
+	postFeedback(t, s, anomID, url.Values{"verdict": {"didnt_work"}}, true)
+	rows, err := s.lib.FeedbackFor(anomID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Verdict != "didnt_work" || rows[0].Comment != "" {
+		t.Errorf("after re-vote rows = %+v, want one didnt_work row with blanked comment", rows)
+	}
+
+	// Non-htmx fallback: 303 back to the detail page.
+	rec = postFeedback(t, s, anomID, url.Values{"verdict": {"worked"}}, false)
+	if rec.Code != http.StatusSeeOther ||
+		rec.Header().Get("Location") != fmt.Sprintf("/findings/%d", anomID) {
+		t.Errorf("non-htmx POST = %d -> %q, want 303 to the detail page",
+			rec.Code, rec.Header().Get("Location"))
+	}
+
+	// Invalid verdict is rejected before the CHECK constraint sees it.
+	if rec := postFeedback(t, s, anomID, url.Values{"verdict": {"thumbs_up"}}, true); rec.Code != http.StatusBadRequest {
+		t.Errorf("bad verdict = %d, want 400", rec.Code)
+	}
+}
+
+func TestFeedbackSignedInShowsCounts(t *testing.T) {
+	lib := newAuthTestStore(t)
+	createTestUser(t, lib, "opsuser", "correct horse")
+	issueID, _ := seedDetailFindings(t, lib)
+	ts := newLocalServer(t, lib)
+	client := sessionClient(t)
+	if _, err := client.PostForm(ts.URL+"/login", url.Values{
+		"username": {"opsuser"}, "password": {"correct horse"}, "next": {"/"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := client.PostForm(fmt.Sprintf("%s/findings/%d/feedback", ts.URL, issueID),
+		url.Values{"verdict": {"worked"}, "comment": {"ran the fix, held overnight"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := bodyOf(t, resp) // non-htmx: redirected back to the detail page
+	for _, want := range []string{
+		"You recorded: fixed it.", "1 fixed it · 0 did not fix it",
+		"opsuser", "ran the fix, held overnight",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("signed-in detail missing %q", want)
 		}
 	}
 }

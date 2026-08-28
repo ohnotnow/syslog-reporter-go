@@ -1,0 +1,104 @@
+{{define "title"}}{{.Data.Finding.Title}}{{end}}
+{{define "content"}}
+    <nav class="crumbs" aria-label="Breadcrumb">
+      <a href="/">Findings</a> <span aria-hidden="true">/</span> {{.Data.Finding.LogDate}}
+    </nav>
+    <h1>{{.Data.Finding.Title}}</h1>
+    {{with .Data.Finding}}
+    {{if .Issue}}{{with .Issue}}
+    <p class="meta"><strong>Severity:</strong> {{.Severity}} ·
+      <strong>Service:</strong> {{.AffectedService}} ·
+      <strong>When:</strong> {{.TimestampFrequency}}</p>
+    <p>{{.Description}}</p>
+    <ul class="fact-list">
+      <li><strong>Affected:</strong> {{range $i, $h := $.Data.Finding.Hosts}}{{if $i}}, {{end}}{{$h}}{{end}}</li>
+      <li><strong>Impact:</strong> {{.PotentialImpact}}</li>
+      <li><strong>Recommended action:</strong> {{.RecommendedAction}}</li>
+    </ul>
+    <h2>Example log entry</h2>
+    <pre><code>{{.ExampleLogEntry}}</code></pre>
+    {{if .Resolution}}{{with .Resolution}}
+    <h2>Suggested resolution</h2>
+    <p><strong>Root cause:</strong> {{.RootCause}}</p>
+    <h3>Investigate</h3>
+    <pre><code>{{.Investigate}}</code></pre>
+    <h3>Fix</h3>
+    {{if .FixCommands}}
+    <pre><code>{{range $i, $c := .FixCommands}}{{if $i}}
+{{end}}{{$c}}{{end}}</code></pre>
+    {{else}}
+    <p>No commands suggested.</p>
+    {{end}}
+    {{if .Notes}}<p><strong>Note:</strong> {{.Notes}}</p>{{end}}
+    {{end}}{{else}}
+    <p class="quiet">No resolution was generated for this finding.</p>
+    {{end}}
+    {{end}}{{end}}
+    {{if .Anomaly}}{{with .Anomaly}}
+    <p class="meta"><strong>Host:</strong> {{.Host}} ·
+      <strong>Program:</strong> {{.Program}} · <strong>OS:</strong> {{.OSFamily}}</p>
+    <p>{{.Detail}}</p>
+    {{if .ExampleLine}}
+    <h2>Example</h2>
+    <pre><code>{{.ExampleLine}}</code></pre>
+    {{end}}
+    <p><strong>Likely causes:</strong> {{.LikelyCauses}}</p>
+    <h2>Investigate</h2>
+    {{if .InvestigationSteps}}
+    <ul class="fact-list">
+      {{range .InvestigationSteps}}<li>{{.}}</li>{{end}}
+    </ul>
+    {{else}}
+    <p class="quiet">No steps given.</p>
+    {{end}}
+    <h2>Suggested commands</h2>
+    {{if .SuggestedCommands}}
+    <pre><code>{{range $i, $c := .SuggestedCommands}}{{if $i}}
+{{end}}{{$c}}{{end}}</code></pre>
+    {{else}}
+    <p class="quiet">None given.</p>
+    {{end}}
+    {{end}}{{end}}
+    {{end}}
+    <!-- Announcement-only: the visible state lives inside the swapped
+         fragment; this persistent live region just speaks the change. -->
+    <p id="feedback-status" class="visually-hidden" aria-live="polite"></p>
+{{template "feedback" .}}
+{{end}}
+
+{{define "feedback"}}
+    <section id="feedback" class="feedback" aria-labelledby="feedback-heading">
+      <h2 id="feedback-heading">Did this fix it?</h2>
+      {{if .Data.YourVote}}
+      <p class="feedback-recorded">{{if .Data.Anonymous}}Recorded{{else}}You recorded{{end}}: {{verdictLabel .Data.YourVote}}.</p>
+      {{end}}
+      {{if not .Data.Anonymous}}
+      <p class="feedback-counts">{{.Data.Worked}} fixed it · {{.Data.DidntWork}} did not fix it</p>
+      {{end}}
+      <form method="post" action="/findings/{{.Data.Finding.ID}}/feedback"
+            hx-post="/findings/{{.Data.Finding.ID}}/feedback"
+            hx-target="#feedback" hx-swap="outerHTML">
+        <div class="field">
+          <label for="feedback-comment">Comment (optional)</label>
+          <textarea id="feedback-comment" name="comment" rows="2">{{.Data.YourComment}}</textarea>
+        </div>
+        <div class="feedback-buttons">
+          <button class="button-primary" type="submit" name="verdict" value="worked">Fixed it</button>
+          <button class="button-secondary" type="submit" name="verdict" value="didnt_work">Did not fix it</button>
+        </div>
+      </form>
+      {{if .Data.HasNotes}}
+      <h3>Notes</h3>
+      <ul class="feedback-notes">
+        {{range .Data.Feedback}}{{if .Comment}}
+        <li><strong>{{if .Username}}{{.Username}}{{else}}anonymous{{end}}</strong>
+          ({{verdictLabel .Verdict}}): {{.Comment}}</li>
+        {{end}}{{end}}
+      </ul>
+      {{end}}
+    </section>
+{{end}}
+
+{{define "feedback-partial"}}{{template "feedback" .}}
+<p id="feedback-status" hx-swap-oob="innerHTML">Recorded: {{verdictLabel .Data.YourVote}}.</p>
+{{end}}

@@ -9,6 +9,8 @@ package web
 // sits outside the swap target and is only ever updated in place.
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -127,6 +129,129 @@ func (s *Server) handleFindings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	render(w, "findings.html", d)
+}
+
+// detailView is the finding detail page plus its feedback state.
+type detailView struct {
+	Finding     *reporter.FindingDetail
+	Feedback    []*reporter.FeedbackRow
+	Worked      int
+	DidntWork   int
+	YourVote    string // '' until this visitor has voted
+	YourComment string
+	Anonymous   bool // auth mode none: one shared anonymous vote, honest copy
+	HasNotes    bool // any feedback row carries a comment
+}
+
+func (s *Server) buildDetailView(r *http.Request, d *reporter.FindingDetail) (detailView, error) {
+	feedback, err := s.lib.FeedbackFor(d.ID)
+	if err != nil {
+		return detailView{}, err
+	}
+	view := detailView{
+		Finding:   d,
+		Feedback:  feedback,
+		Anonymous: s.auth.CurrentUser(r) == nil,
+	}
+	user := s.auth.CurrentUser(r)
+	for _, row := range feedback {
+		switch row.Verdict {
+		case "worked":
+			view.Worked++
+		case "didnt_work":
+			view.DidntWork++
+		}
+		if row.Comment != "" {
+			view.HasNotes = true
+		}
+		mine := (user == nil && row.UserID == nil) ||
+			(user != nil && row.UserID != nil && *row.UserID == user.ID)
+		if mine {
+			view.YourVote = row.Verdict
+			view.YourComment = row.Comment
+		}
+	}
+	return view, nil
+}
+
+// loadFinding parses {id} and fetches the row, rendering the 404 page (and
+// returning nil) when either fails.
+func (s *Server) loadFinding(w http.ResponseWriter, r *http.Request) *reporter.FindingDetail {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err == nil {
+		var d *reporter.FindingDetail
+		if d, err = s.lib.GetFinding(id); err == nil {
+			return d
+		}
+	}
+	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, strconv.ErrSyntax) || errors.Is(err, strconv.ErrRange) {
+		renderStatus(w, "notfound.html", http.StatusNotFound, pageData{
+			Version: s.cfg.Version,
+			Path:    r.URL.Path,
+			User:    s.auth.CurrentUser(r),
+		})
+		return nil
+	}
+	http.Error(w, "server error", http.StatusInternalServerError)
+	return nil
+}
+
+func (s *Server) handleFindingDetail(w http.ResponseWriter, r *http.Request) {
+	d := s.loadFinding(w, r)
+	if d == nil {
+		return
+	}
+	view, err := s.buildDetailView(r, d)
+	if err != nil {
+		http.Error(w, "server error", http.StatusInternalServerError)
+		return
+	}
+	render(w, "finding.html", pageData{
+		Version: s.cfg.Version,
+		Path:    r.URL.Path,
+		User:    s.auth.CurrentUser(r),
+		Data:    view,
+	})
+}
+
+func (s *Server) handleFeedback(w http.ResponseWriter, r *http.Request) {
+	d := s.loadFinding(w, r)
+	if d == nil {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	var userID *int64
+	if user := s.auth.CurrentUser(r); user != nil {
+		userID = &user.ID
+	}
+	verdict := r.PostFormValue("verdict")
+	comment := strings.TrimSpace(r.PostFormValue("comment"))
+	if err := s.lib.RecordFeedback(d.ID, userID, verdict, comment); err != nil {
+		if errors.Is(err, reporter.ErrBadVerdict) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		http.Error(w, "server error", http.StatusInternalServerError)
+		return
+	}
+	if r.Header.Get("HX-Request") != "" {
+		view, err := s.buildDetailView(r, d)
+		if err != nil {
+			http.Error(w, "server error", http.StatusInternalServerError)
+			return
+		}
+		renderBlock(w, "finding.html", "feedback-partial", pageData{
+			Version: s.cfg.Version,
+			Path:    r.URL.Path,
+			User:    s.auth.CurrentUser(r),
+			Data:    view,
+		})
+		return
+	}
+	http.Redirect(w, r, fmt.Sprintf("/findings/%d", d.ID), http.StatusSeeOther)
 }
 
 func findingsStatusLine(n, offset int, hasMore, filtered bool) string {
