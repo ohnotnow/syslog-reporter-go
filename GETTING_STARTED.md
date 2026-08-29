@@ -115,6 +115,40 @@ _Note: Replace unit placeholders only after identifying the actual runaway unit;
 - `mgmt-report` renders a weekly or monthly management summary.
 - `--help` on any command for more details.
 
+## Running unattended
+
+The daily run is a cron job. `--out-dir` keeps the report file drops out
+of cron's working directory, and a non-zero exit means the report did not
+go out, so let cron's own failure mail do its job:
+
+```cron
+# Yesterday's dump, emailed to the team at 07:30.
+30 7 * * * /usr/local/bin/syslog-reporter run /var/dumps/yesterday.ndjson.gz \
+  --send-email --out-dir /var/lib/syslog-reporter >> /var/log/syslog-reporter.log 2>&1
+```
+
+The web UI suits a small systemd service. Flags and environment variables
+are interchangeable (the flag wins), so use whichever reads better in a
+unit file:
+
+```ini
+[Unit]
+Description=syslog-reporter findings UI
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/syslog-reporter serve --listen 127.0.0.1:7373 \
+  --db /var/lib/syslog-reporter/syslog_aggregates.db --auth local
+User=syslog-reporter
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+serve refuses to start if the database file does not exist yet - do a
+first `run` (or point `--db` at the right file) before enabling it.
+
 
 ## Quick evaluations
 

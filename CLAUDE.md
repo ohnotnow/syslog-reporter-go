@@ -113,9 +113,13 @@ SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.
   per finding (anonymous is a shared singleton); a re-vote updates the
   verdict but an EMPTY comment keeps the existing note (owner decision
   2026-08-28) - there is no comment-clearing path.
-- serve mode is env-configured only (SYSLOG_WEB_LISTEN, SYSLOG_AUTH_MODE,
-  SYSLOG_WEB_TLS_CERT/_KEY, SYSLOG_WEB_SECURE_COOKIES for
-  proxy-terminated TLS). Default port 7373 is a Blake's 7 joke
+- serve mode takes flags (--listen, --db, --auth, --tls-cert/--tls-key,
+  --secure-cookies), each defaulting from its SYSLOG_WEB_*/SYSLOG_DB_PATH
+  variable; the flag wins. (It was briefly env-only; the owner never
+  agreed to that - srg-NJzXv.) Read-only commands (serve, findings,
+  mgmt-report, user) refuse a missing db file via
+  reporter.RequireDatabase; only a run creates the store.
+  Default port 7373 is a Blake's 7 joke
   (Vila weighs 73 kilos); do not "fix" it. Auth mode oidc errors at
   startup - deferred (ait srg-2KY5X.5) until the owner is present for a
   Keycloak round-trip. Risky listen/auth combos WARN at startup, never

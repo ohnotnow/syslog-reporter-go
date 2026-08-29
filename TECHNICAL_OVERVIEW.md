@@ -191,8 +191,13 @@ Capture semantics worth knowing:
 extra services. Stdlib `net/http` with Go 1.22+ pattern routing,
 `html/template`, and `go:embed` for every asset; htmx (vendored, pinned)
 progressively enhances the list page's filtering and the feedback form,
-which both work without JavaScript. Configuration is environment-only
-(`SYSLOG_WEB_LISTEN`, default `127.0.0.1:7373`). Routes: the findings list
+which both work without JavaScript. Every setting is a flag (`--listen`,
+`--db`, `--auth`, `--tls-cert`/`--tls-key`, `--secure-cookies`) whose
+default comes from the matching `SYSLOG_WEB_*`/`SYSLOG_DB_PATH` variable,
+so systemd units can stay env-shaped while a shell session just types
+flags; the flag wins. The listen default is `127.0.0.1:7373`. The store
+must already exist - serve refuses a missing db file rather than creating
+an empty one and reporting "no findings yet". Routes: the findings list
 at `/` (substring filters for host/service and title search, exact-match
 severity/kind dropdowns, an inclusive date range, pagination at 50), the
 detail page at `/findings/{id}`, and `POST /findings/{id}/feedback`.
@@ -297,15 +302,26 @@ between them.
 ### CLI flags
 
 The first argument is always a command: `run` (the daily batch report),
-`eval` (model comparison), `serve` (web UI), `user add` (local accounts),
-`findings` (list/show/feedback), `mgmt-report` (management summary) and
-`self-update`. A bare invocation or an unknown command prints the command
-list and exits non-zero; there is no default mode. `--help` and
-`--version` work at top level. The `run` flags:
+`eval` (model comparison), `serve` (web UI), `user` (local accounts:
+add/list/passwd/remove), `findings` (list/show/feedback), `mgmt-report`
+(management summary) and `self-update`. A bare invocation or an unknown
+command prints the command list and exits non-zero; there is no default
+mode. `--help`, `--version`, the bare words `help <command>` and
+`version`, all work at top level.
+
+Exit codes, for cron and monitoring: 0 success; 1 any runtime failure
+(the message on stderr names the cause); 2 usage errors (unknown command,
+bad flag). `self-update --check` alone uses 0 = current, 1 = newer
+available, 2 = lookup failed. A run that cannot possibly succeed (missing
+API key, missing SMTP settings with `--send-email`, a `--db` or
+`--out-dir` that does not exist for a command that never creates one)
+fails at startup before any work or spend.
+
+The `run` flags:
 
 ```
 logfile          positional: path to the syslog file; omit (or pass --) to
-                 read raw text from stdin. --file is an alternative spelling.
+                 read raw text from stdin
 --model          model to use, litellm format (default SYSLOG_DEFAULT_MODEL)
 --format         auto | raw | ndjson. auto picks ndjson for *.ndjson(.gz)
                  paths, raw otherwise (stdin is always raw)
@@ -320,6 +336,8 @@ logfile          positional: path to the syslog file; omit (or pass --) to
 --no-llm         skip every LLM stage so the run costs nothing
 --send-email     email the report; --recipients takes a comma-separated
                  list (falls back to SYSLOG_SMTP_RECIPIENTS)
+--out-dir        directory for the email_body.md / email_attachment.md
+                 drops (default .; must already exist)
 --dump-filtered  print the post-filter log lines and exit: the quickest way
                  to see what your ignore rules are letting through when
                  tuning the filter for your estate
