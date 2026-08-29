@@ -13,14 +13,8 @@ same SQLite file, served by the same binary as a small web UI (`serve`) and
 a findings CLI. A plain-language tour for non-developers lives in
 [HOW_IT_WORKS.md](HOW_IT_WORKS.md).
 
-This is the production implementation. The pipeline was first proven in a
-Python project ([syslog_reporter](https://github.com/ohnotnow/syslog_reporter),
-now archived); this Go version is a drop-in replacement for it - identical
-SQLite schema (accumulated baseline history carries over), environment
-variables, CLI flags, `known_knowns.toml` format, and report layout, so a
-cron host can swap the binary in without losing anything. The only deliberate
-report differences: plain hyphens where the Python literals had em dashes,
-and a model-attribution footer on both report layouts.
+The pipeline design was first proven in a prototype, since archived; this
+implementation replaced it outright and maintains no compatibility with it.
 
 ## Stack
 
@@ -36,12 +30,14 @@ and a model-attribution footer on both report layouts.
 ## Directory structure
 
 ```
-main.go                     CLI entry point; subcommand dispatch (serve, user,
-                            findings) ahead of the batch pipeline
+cmd/syslog-reporter/        CLI entry point; subcommand dispatch (serve, user,
+                            findings, mgmt-report, self-update) ahead of the
+                            batch pipeline
+internal/selfupdate/        Version/RepoURL (ldflags-stamped), the --version
+                            latest-release check, and the self-update command
 internal/reporter/
-  pyfmt.go                  Python-semantics helpers (split, number formatting,
-                            repr); report parity with the original pipeline
-                            depends on these, pinned by CPython-captured vectors
+  lineformat.go             line parsing + number formatting helpers (splitWS,
+                            thousands, compactFloat), pinned by test vectors
   filters_data.go           the noise filter rule list (edit per estate)
   filter.go                 LogFilter: deterministic noise removal
   knowns.go                 known-knowns TOML suppression
@@ -169,12 +165,12 @@ Every batch run files its findings into the library at report time
 (`capture.go`): each issue is stored merged with its resolution (the same
 title-match pairing the report itself uses), and each explained anomaly is
 stored whole. The library lives in the SAME SQLite file as the aggregates
-(`librarystore.go`) and keeps the store's minimal-pragma style: default
-rollback journal (no WAL), declarative-only foreign keys, and
-`CREATE TABLE IF NOT EXISTS` as the whole migration story. The new tables
-(`runs`, `findings`, `finding_hosts`, `feedback`, `users`) are additive and
-carry no Python compatibility burden - the aggregates compatibility
-contract is unchanged.
+(`librarystore.go`). Both stores open through `migrate.go`, which sets the
+standard pragmas (WAL journal, enforced foreign keys, 5s busy timeout) and
+runs a numbered `schema_version` migration ladder shared by the whole
+file; schema changes are new migrations there, never inline DDL. The
+library tables are `runs`, `findings`, `finding_hosts`, `feedback`, and
+`users`.
 
 Capture semantics worth knowing:
 
@@ -289,7 +285,7 @@ between them.
 The first argument may be a subcommand: `serve` (web UI), `user add`
 (local accounts), `findings` (list/show/feedback) and `mgmt-report`
 (management summary), all documented above. Anything else is the batch
-report path, whose contract is unchanged:
+report path:
 
 ```
 logfile          positional: path to the syslog file; omit (or pass --) to
@@ -336,7 +332,10 @@ Read from the environment or a `.env` beside the working directory
   `SYSLOG_SMTP_RECIPIENTS` in either direction
 - `SYSLOG_DB_PATH` SQLite aggregate-store path (default
   `syslog_aggregates.db`; CLI `--db` overrides; `--no-store` skips
-  persistence and the history-based detectors)
+  persistence and the history-based detectors). The file is in WAL mode:
+  a plain `cp` of a live database drops commits still in the `-wal`
+  sidecar, so back up with `sqlite3 <file> ".backup <dest>"` or copy
+  only while nothing is running
 - `SYSLOG_DB_KEEP_DAYS` store retention, pruned each run (default 90)
 - `SYSLOG_BLANKET_IGNORE` comma-separated substrings appended to the filter
   at runtime - the home for estate-identifying entries (hostnames, internal
@@ -369,16 +368,16 @@ script.
 - Pure logic is unit-tested; LLM round-trips are validated by live runs, not
   mocks. The store/baseline/temporal tests seed in-memory SQLite with
   synthetic history.
-- `pyfmt.go` helpers (Python split semantics, number formatting, `repr`
-  quoting) are pinned to CPython-captured vectors; if a report number ever
-  mismatches the original pipeline, look there first.
+- `lineformat.go` helpers (split semantics, number formatting) and the
+  explainer payload's `quoteField` quoting are pinned to captured test
+  vectors; if a report number ever looks odd, look there first.
 - Test fixtures use fictional hostnames only. Real estate names live solely
   in gitignored dumps, reports and the `.env`.
 
 ## Local development
 
 ```bash
-go build -o syslog-reporter .
+go build -o syslog-reporter ./cmd/syslog-reporter
 go test ./...
 ./syslog-reporter dump.ndjson.gz --no-llm --db /tmp/scratch.db   # free run
 ./syslog-reporter dump.ndjson.gz --model openai/gpt-4o-mini      # full run

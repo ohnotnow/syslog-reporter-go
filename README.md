@@ -44,7 +44,7 @@ or build from source with Go:
 ```bash
 git clone https://github.com/ohnotnow/syslog-reporter-go.git
 cd syslog-reporter-go
-go build -o syslog-reporter .
+go build -o syslog-reporter ./cmd/syslog-reporter
 ```
 
 Configuration comes from environment variables, or a `.env` file next to
@@ -90,8 +90,11 @@ environment-variable reference and the known-knowns suppression file.
 
 Each batch run also records what it found (issues merged with their
 suggested fixes, plus the explained anomalies) in the same SQLite file
-as the history, so the morning report stops being throwaway. To browse
-the accumulated findings:
+as the history, so the morning report stops being throwaway. The
+database uses SQLite's WAL mode, so a plain `cp` of a live file can
+silently miss the most recent writes - back it up with
+`sqlite3 syslog_aggregates.db ".backup backup.db"`, or copy it while
+nothing is running. To browse the accumulated findings:
 
 ```bash
 # a small web UI on http://127.0.0.1:7373
