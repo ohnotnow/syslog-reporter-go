@@ -196,12 +196,13 @@ func wrapBase64(data []byte) []byte {
 	return []byte(out.String())
 }
 
-// Run sends the message to recipients as BCC.
-func (e *EmailAgent) Run() {
+// Run sends the message to recipients as BCC. The error matters to cron:
+// callers must fail the process on it, or a lost morning report looks like
+// a success.
+func (e *EmailAgent) Run() error {
 	msg, err := e.BuildMessage()
 	if err != nil {
-		fmt.Printf("Failed to send email: %v\n", err)
-		return
+		return fmt.Errorf("building email: %w", err)
 	}
 	addr := e.SMTPServer
 	if !strings.Contains(addr, ":") {
@@ -211,8 +212,8 @@ func (e *EmailAgent) Run() {
 	// envelope only, like smtplib's send_message with a Bcc header.
 	rcpts := append([]string{e.Sender}, e.recipientList()...)
 	if err := smtp.SendMail(addr, nil, e.Sender, rcpts, msg); err != nil {
-		fmt.Printf("Failed to send email: %v\n", err)
-		return
+		return fmt.Errorf("sending email via %s: %w", addr, err)
 	}
 	fmt.Printf("Email sent to %s\n", e.Recipients)
+	return nil
 }

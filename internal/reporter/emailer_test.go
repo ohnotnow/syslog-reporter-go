@@ -7,6 +7,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"mime/quotedprintable"
+	"net"
 	"net/mail"
 	"strings"
 	"testing"
@@ -219,5 +220,23 @@ func TestWrapBase64LineLength(t *testing.T) {
 		if len(line) > 76 {
 			t.Fatalf("base64 line longer than 76 chars: %d", len(line))
 		}
+	}
+}
+
+// Run must surface delivery failures to the caller: --send-email rides
+// cron, and a swallowed error means a lost morning report that looks like
+// a success (srg-so8ja.1).
+func TestRunReturnsErrorWhenServerUnreachable(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	ln.Close() // free the port so the connection is refused
+
+	agent := testEmailAgent()
+	agent.SMTPServer = addr
+	if err := agent.Run(); err == nil {
+		t.Fatal("Run returned nil against an unreachable SMTP server")
 	}
 }
