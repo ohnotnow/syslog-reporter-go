@@ -160,3 +160,79 @@ func TestCaptureRunSameDayTwiceLeavesOneRun(t *testing.T) {
 		t.Errorf("finding_hosts = %d, want 1", n)
 	}
 }
+
+// A capture that fails part-way must leave the previous day's run intact:
+// the whole capture is one transaction (srg-so8ja.2). The failure is forced
+// with a test-only trigger that aborts the insert of one poisoned title,
+// exactly the mid-loop shape a disk-full or constraint error would take.
+func TestCaptureRunFailurePreservesPreviousRun(t *testing.T) {
+	lib := newTestLibrary(t)
+	sample := sampleIssuePayload()
+	issue := sample.Issue
+	anom := sampleAnomaly()
+
+	if err := CaptureRun(lib, day(2026, 6, 1), "openai/gpt-test", 1000, 50,
+		&IssueList{Issues: []*Issue{&issue}}, nil,
+		[]*ExplainedAnomaly{anom}); err != nil {
+		t.Fatalf("first capture: %v", err)
+	}
+	if err := lib.RecordFeedback(readFindingIDs(t, lib)[0], nil, "worked", "kept me right"); err != nil {
+		t.Fatalf("feedback: %v", err)
+	}
+
+	if _, err := lib.db.Exec(
+		`CREATE TRIGGER fail_capture BEFORE INSERT ON findings
+		 WHEN NEW.title = 'poisoned' BEGIN
+		   SELECT RAISE(ABORT, 'test-induced failure');
+		 END`); err != nil {
+		t.Fatal(err)
+	}
+
+	poisoned := issue
+	poisoned.Issue = "poisoned"
+	err := CaptureRun(lib, day(2026, 6, 1), "openai/gpt-test", 2000, 75,
+		&IssueList{Issues: []*Issue{&issue, &poisoned}}, nil, nil)
+	if err == nil {
+		t.Fatal("capture with poisoned finding did not fail")
+	}
+
+	// The failed replacement rolled back wholesale: original run, both
+	// findings and the feedback vote all survive.
+	if n := countRows(t, lib, "runs"); n != 1 {
+		t.Fatalf("runs = %d, want 1", n)
+	}
+	var rawLines int
+	if err := lib.db.QueryRow("SELECT raw_lines FROM runs").Scan(&rawLines); err != nil {
+		t.Fatal(err)
+	}
+	if rawLines != 1000 {
+		t.Fatalf("raw_lines = %d, want the original 1000", rawLines)
+	}
+	if n := countRows(t, lib, "findings"); n != 2 {
+		t.Fatalf("findings = %d, want the original 2", n)
+	}
+	if n := countRows(t, lib, "feedback"); n != 1 {
+		t.Fatalf("feedback = %d, want the original 1", n)
+	}
+}
+
+func readFindingIDs(t *testing.T, lib *LibraryStore) []int64 {
+	t.Helper()
+	rows, err := lib.db.Query("SELECT id FROM findings ORDER BY id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}

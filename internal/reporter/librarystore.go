@@ -40,6 +40,13 @@ func (s *LibraryStore) Close() error {
 	return s.db.Close()
 }
 
+// execer is the slice of database/sql shared by *sql.DB and *sql.Tx that
+// the write helpers need. It lets CaptureRun run a whole day's capture in
+// ONE transaction while the standalone methods keep their own.
+type execer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
 // BeginRun records a report run and returns its id. Idempotent per day,
 // mirroring WriteAggregates: any earlier run for the same log date is deleted
 // first, together with its findings, hosts and feedback. Re-running a day is
@@ -50,6 +57,15 @@ func (s *LibraryStore) BeginRun(logDate time.Time, model string) (int64, error) 
 	if err != nil {
 		return 0, err
 	}
+	id, err := beginRun(tx, logDate, model)
+	if err != nil {
+		tx.Rollback()
+		return 0, err
+	}
+	return id, tx.Commit()
+}
+
+func beginRun(q execer, logDate time.Time, model string) (int64, error) {
 	iso := isoDate(logDate)
 	// Child-first deletes: foreign_keys is ON, so order matters.
 	staleFindings := "(SELECT id FROM findings WHERE run_id IN " +
@@ -60,8 +76,7 @@ func (s *LibraryStore) BeginRun(logDate time.Time, model string) (int64, error) 
 		"DELETE FROM findings WHERE run_id IN (SELECT id FROM runs WHERE log_date = ?)",
 		"DELETE FROM runs WHERE log_date = ?",
 	} {
-		if _, err := tx.Exec(del, iso); err != nil {
-			tx.Rollback()
+		if _, err := q.Exec(del, iso); err != nil {
 			return 0, err
 		}
 	}
@@ -69,19 +84,13 @@ func (s *LibraryStore) BeginRun(logDate time.Time, model string) (int64, error) 
 	if model != "" {
 		modelVal = model
 	}
-	res, err := tx.Exec(
+	res, err := q.Exec(
 		"INSERT INTO runs (log_date, created_at, model) VALUES (?, ?, ?)",
 		iso, time.Now().UTC().Format(time.RFC3339), modelVal)
 	if err != nil {
-		tx.Rollback()
 		return 0, err
 	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		tx.Rollback()
-		return 0, err
-	}
-	return id, tx.Commit()
+	return res.LastInsertId()
 }
 
 // SetRunStats records the day's ingest funnel on the run row: the dump's
@@ -89,7 +98,11 @@ func (s *LibraryStore) BeginRun(logDate time.Time, model string) (int64, error) 
 // at capture time so the numbers survive the aggregate store's prune (ant
 // ADR srg-9X77J); the management report reads them, never writes them.
 func (s *LibraryStore) SetRunStats(runID int64, rawLines, filteredLines int) error {
-	_, err := s.db.Exec(
+	return setRunStats(s.db, runID, rawLines, filteredLines)
+}
+
+func setRunStats(q execer, runID int64, rawLines, filteredLines int) error {
+	_, err := q.Exec(
 		"UPDATE runs SET raw_lines = ?, filtered_lines = ? WHERE id = ?",
 		rawLines, filteredLines, runID)
 	return err
@@ -101,35 +114,41 @@ func (s *LibraryStore) SetRunStats(runID int64, rawLines, filteredLines int) err
 // Anomaly kinds pass severity as the empty string (queries treat the empty
 // string as absent); an empty hosts slice writes no finding_hosts rows.
 func (s *LibraryStore) AddFinding(runID int64, kind, severity, title, service string, hosts []string, payload any) (int64, error) {
-	blob, err := json.Marshal(payload)
-	if err != nil {
-		return 0, err
-	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return 0, err
 	}
-	res, err := tx.Exec(
+	id, err := addFinding(tx, runID, kind, severity, title, service, hosts, payload)
+	if err != nil {
+		tx.Rollback()
+		return 0, err
+	}
+	return id, tx.Commit()
+}
+
+func addFinding(q execer, runID int64, kind, severity, title, service string, hosts []string, payload any) (int64, error) {
+	blob, err := json.Marshal(payload)
+	if err != nil {
+		return 0, err
+	}
+	res, err := q.Exec(
 		"INSERT INTO findings (run_id, kind, severity, title, service, payload) "+
 			"VALUES (?, ?, ?, ?, ?, ?)",
 		runID, kind, severity, title, service, string(blob))
 	if err != nil {
-		tx.Rollback()
 		return 0, err
 	}
 	id, err := res.LastInsertId()
 	if err != nil {
-		tx.Rollback()
 		return 0, err
 	}
 	for _, host := range hosts {
-		if _, err := tx.Exec(
+		if _, err := q.Exec(
 			"INSERT INTO finding_hosts (finding_id, host) VALUES (?, ?)", id, host); err != nil {
-			tx.Rollback()
 			return 0, err
 		}
 	}
-	return id, tx.Commit()
+	return id, nil
 }
 
 // FindingFilter narrows a findings search. Zero values mean "any". Host,
