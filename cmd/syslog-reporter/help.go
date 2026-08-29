@@ -23,17 +23,17 @@ const runHelpEnv = `environment (full reference in TECHNICAL_OVERVIEW.md):
 `
 
 const serveHelpIntro = `Serve the findings library web UI from the shared SQLite file.
-usage: syslog-reporter serve [--debug]
-flags:
+usage: syslog-reporter serve [flags]
+flags (each defaults from its environment variable; the flag wins):
 `
 
-const serveHelpEnv = `configuration is environment-only:
-  SYSLOG_WEB_LISTEN          host:port to bind (default 127.0.0.1:7373)
-  SYSLOG_AUTH_MODE           none (default), local, or oidc (not built yet)
-  SYSLOG_WEB_TLS_CERT/_KEY   certificate pair; set both to serve HTTPS
+const serveHelpEnv = `environment fallbacks, for systemd units and the like:
+  SYSLOG_WEB_LISTEN          --listen   (default 127.0.0.1:7373)
+  SYSLOG_AUTH_MODE           --auth     (default none)
+  SYSLOG_WEB_TLS_CERT/_KEY   --tls-cert / --tls-key; set both to serve HTTPS
                              (the pair hot-reloads, no restart on renewal)
-  SYSLOG_WEB_SECURE_COOKIES  set to 1 behind a TLS-terminating reverse proxy
-  SYSLOG_DB_PATH             SQLite file to serve (default syslog_aggregates.db)
+  SYSLOG_WEB_SECURE_COOKIES  --secure-cookies (1/true/yes/on)
+  SYSLOG_DB_PATH             --db       (default syslog_aggregates.db)
 `
 
 const mgmtHelpIntro = `Render the management summary (HTML file plus plain text on stdout).
@@ -49,10 +49,16 @@ const mgmtHelpEnv = `environment:
   SYSLOG_DB_PATH                       SQLite file to read (--db overrides)
 `
 
-const userHelp = `Manage local-auth accounts for serve mode (SYSLOG_AUTH_MODE=local).
+const userHelp = `Manage local-auth accounts for serve mode (auth mode local).
 usage: syslog-reporter user add <username> <email> [--password-stdin] [--db <path>]
-The password is prompted for twice without echo, or read from stdin with
---password-stdin for scripted use. It is never accepted as an argument.
+       syslog-reporter user list [--db <path>]
+       syslog-reporter user passwd <username> [--password-stdin] [--db <path>]
+       syslog-reporter user remove <username> [--db <path>]
+Passwords are prompted for twice without echo, or read from stdin with
+--password-stdin for scripted use; never accepted as an argument.
+Removing a user keeps their feedback votes as anonymous votes.
+The store must already exist (a report run creates it); --db and
+SYSLOG_DB_PATH name it exactly as in the other commands.
 `
 
 // setUsage wires a FlagSet's --help output: intro, the flag list, then the

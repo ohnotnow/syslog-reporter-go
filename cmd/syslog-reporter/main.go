@@ -13,9 +13,11 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
+	"text/tabwriter"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -38,15 +40,14 @@ type logger struct {
 }
 
 func (l *logger) log(level, format string, args ...any) {
-	now := time.Now()
-	fmt.Fprintf(os.Stderr, "%s,%03d - syslog-reporter - %s - %s\n",
-		now.Format("2006-01-02 15:04:05"), now.Nanosecond()/1e6, level,
+	fmt.Fprintf(os.Stderr, "%s %s %s\n",
+		time.Now().Format("2006-01-02 15:04:05"), level,
 		fmt.Sprintf(format, args...))
 }
 
 func (l *logger) Info(format string, args ...any) { l.log("INFO", format, args...) }
 
-func (l *logger) Warn(format string, args ...any) { l.log("WARNING", format, args...) }
+func (l *logger) Warn(format string, args ...any) { l.log("WARN", format, args...) }
 
 func (l *logger) Debug(format string, args ...any) {
 	if l.debugEnabled {
@@ -112,7 +113,9 @@ func runMgmtReport(args []string) {
 	fs := flag.NewFlagSet("mgmt-report", flag.ExitOnError)
 	setUsage(fs, mgmtHelpIntro, mgmtHelpEnv)
 	days := fs.Int("days", 30, "Number of days the report covers, ending yesterday")
-	sendEmail := fs.Bool("send-email", false, "Email the report to SYSLOG_MGMT_RECIPIENTS")
+	sendEmail := fs.Bool("send-email", false, "Email the report to the recipients")
+	recipientsFlag := fs.String("recipients", "",
+		"Comma-separated recipient addresses (default: SYSLOG_MGMT_RECIPIENTS)")
 	dbPath := fs.String("db", getenvDefault("SYSLOG_DB_PATH", "syslog_aggregates.db"),
 		"Path to the SQLite database")
 	outPath := fs.String("out", "mgmt_report.html", "Where to write the HTML report")
@@ -126,9 +129,29 @@ func runMgmtReport(args []string) {
 	}
 	log := &logger{debugEnabled: *debug}
 
-	recipients := os.Getenv("SYSLOG_MGMT_RECIPIENTS")
-	if *sendEmail && recipients == "" {
-		fatal("--send-email needs SYSLOG_MGMT_RECIPIENTS to be set")
+	// Management is a different audience from the team digest, so the
+	// recipients list is separate and there is deliberately no fallback to
+	// SYSLOG_SMTP_RECIPIENTS.
+	recipients := *recipientsFlag
+	if recipients == "" {
+		recipients = os.Getenv("SYSLOG_MGMT_RECIPIENTS")
+	}
+	if *sendEmail {
+		if recipients == "" {
+			fatal("--send-email needs --recipients or SYSLOG_MGMT_RECIPIENTS to be set")
+		}
+		if os.Getenv("SYSLOG_SMTP_SERVER") == "" {
+			fatal("--send-email needs SYSLOG_SMTP_SERVER to be set")
+		}
+		if os.Getenv("SYSLOG_SMTP_SENDER") == "" {
+			fatal("--send-email needs SYSLOG_SMTP_SENDER to be set")
+		}
+	} else if *recipientsFlag != "" {
+		log.Warn("--recipients given but --send-email not set; no email will be sent")
+	}
+	// mgmt-report is a pure reader; a missing db is a typo'd path.
+	if err := reporter.RequireDatabase(*dbPath); err != nil {
+		fatal("%v", err)
 	}
 
 	// The period ends yesterday: log dates cover completed days, and
@@ -187,23 +210,41 @@ func runMgmtReport(args []string) {
 	}
 }
 
-// runServe starts the findings library web app (serve mode). Configuration
-// is environment-only: SYSLOG_WEB_LISTEN, SYSLOG_WEB_TLS_CERT/_KEY,
-// SYSLOG_DB_PATH.
+// runServe starts the findings library web app (serve mode). Every setting
+// is a flag whose default comes from the matching SYSLOG_WEB_* variable
+// (flag wins), so systemd units can stay env-shaped while a sysadmin at a
+// shell just types flags.
 func runServe(args []string) {
+	cfg, err := web.ConfigFromEnv()
+	if err != nil {
+		fatal("%v", err)
+	}
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	setUsage(fs, serveHelpIntro, serveHelpEnv)
-	debug := fs.Bool("debug", false, "Print extra debug information")
+	fs.StringVar(&cfg.Listen, "listen", cfg.Listen, "host:port to bind")
+	fs.StringVar(&cfg.DBPath, "db", cfg.DBPath, "SQLite file to serve")
+	fs.StringVar(&cfg.AuthMode, "auth", cfg.AuthMode, "Auth mode: none, local, or oidc (not built yet)")
+	fs.StringVar(&cfg.CertFile, "tls-cert", cfg.CertFile, "TLS certificate; with --tls-key, serve HTTPS")
+	fs.StringVar(&cfg.KeyFile, "tls-key", cfg.KeyFile, "TLS private key")
+	fs.BoolVar(&cfg.SecureCookies, "secure-cookies", cfg.SecureCookies,
+		"Force the Secure cookie flag on, for TLS terminated at a reverse proxy")
+	debug := fs.Bool("debug", false, "Log every request (method, path, status, duration)")
 	fs.Parse(args)
 	if fs.NArg() > 0 {
 		fatal("unrecognised extra arguments: %s", strings.Join(fs.Args(), " "))
 	}
 	log := &logger{debugEnabled: *debug}
-	cfg, err := web.ConfigFromEnv()
-	if err != nil {
+	if err := cfg.Validate(); err != nil {
+		fatal("%v", err)
+	}
+	// serve only reads the store; a missing file is a typo'd path, not an
+	// invitation to create an empty library and serve "no findings yet".
+	if err := reporter.RequireDatabase(cfg.DBPath); err != nil {
 		fatal("%v", err)
 	}
 	cfg.Version = version
+	cfg.Debug = *debug
+	cfg.Logger = log
 	// Risky-but-supported combinations announce themselves; the operator's
 	// call stands (warn, never refuse - srg-so8ja.9).
 	for _, warning := range cfg.StartupWarnings() {
@@ -247,33 +288,52 @@ func runServe(args []string) {
 	log.Info("Server stopped")
 }
 
-// runUser handles `syslog-reporter user add <username> <email>`. The
-// password is prompted for without echo when stdin is a terminal, or read
-// from stdin with --password-stdin for scripted/agent use; it is never
-// accepted as a CLI argument and never echoed or logged.
+// runUser handles the local-auth account lifecycle: add, list, passwd,
+// remove. Passwords are prompted for without echo when stdin is a
+// terminal, or read from stdin with --password-stdin for scripted/agent
+// use; never accepted as a CLI argument, never echoed or logged.
 func runUser(args []string) {
-	const usage = "usage: syslog-reporter user add <username> <email> [--password-stdin] [--db <path>]"
-	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h" || args[0] == "help") {
+	const usage = "usage: syslog-reporter user <add|list|passwd|remove> [args] (see 'user --help')"
+	if len(args) == 0 {
+		fatal(usage)
+	}
+	switch args[0] {
+	case "--help", "-h", "help":
 		fmt.Print(userHelp)
-		return
+	case "add":
+		runUserAdd(args[1:])
+	case "list":
+		runUserList(args[1:])
+	case "passwd":
+		runUserPasswd(args[1:])
+	case "remove":
+		runUserRemove(args[1:])
+	default:
+		fatal("unknown user command %q\n%s", args[0], usage)
 	}
-	if len(args) == 0 || args[0] != "add" {
-		fatal(usage)
-	}
-	fs := flag.NewFlagSet("user add", flag.ExitOnError)
-	fs.Usage = func() { fmt.Fprint(fs.Output(), userHelp) }
-	passwordStdin := fs.Bool("password-stdin", false,
-		"Read the password from stdin instead of prompting (for scripted use).")
-	dbPath := fs.String("db", getenvDefault("SYSLOG_DB_PATH", "syslog_aggregates.db"),
-		"SQLite store path, resolved exactly as in batch mode.")
-	positionals := cli.ParseFlagsAnywhere(fs, args[1:])
-	if len(positionals) != 2 {
-		fatal(usage)
-	}
-	username, email := positionals[0], positionals[1]
+}
 
+// userFlagSet builds the shared flag set for the user subcommands: the
+// help wiring and the store path.
+func userFlagSet(name string) (*flag.FlagSet, *string) {
+	fs := flag.NewFlagSet(name, flag.ExitOnError)
+	fs.Usage = func() { fmt.Fprint(fs.Output(), userHelp) }
+	dbPath := fs.String("db", getenvDefault("SYSLOG_DB_PATH", "syslog_aggregates.db"),
+		"SQLite store path, resolved exactly as in batch mode")
+	return fs, dbPath
+}
+
+// passwordStdinFlag adds --password-stdin to a user subcommand's flags.
+func passwordStdinFlag(fs *flag.FlagSet) *bool {
+	return fs.Bool("password-stdin", false,
+		"Read the password from stdin instead of prompting (for scripted use)")
+}
+
+// readNewPassword collects a password: from stdin with --password-stdin,
+// otherwise prompted for twice without echo.
+func readNewPassword(passwordStdin bool) string {
 	var password string
-	if *passwordStdin {
+	if passwordStdin {
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			fatal("reading password from stdin: %v", err)
@@ -303,10 +363,104 @@ func runUser(args []string) {
 	if password == "" {
 		fatal("password must not be empty")
 	}
+	return password
+}
+
+// openUserStore opens the library for the user subcommands. The store must
+// already exist: account admin on a typo'd path must not conjure a new db
+// that serve will never read.
+func openUserStore(dbPath string) *reporter.LibraryStore {
+	if err := reporter.RequireDatabase(dbPath); err != nil {
+		fatal("%v", err)
+	}
+	lib, err := reporter.OpenLibraryStore(dbPath)
+	if err != nil {
+		fatal("opening %s: %v", dbPath, err)
+	}
+	return lib
+}
+
+func runUserAdd(args []string) {
+	fs, dbPath := userFlagSet("user add")
+	passwordStdin := passwordStdinFlag(fs)
+	positionals := cli.ParseFlagsAnywhere(fs, args)
+	if len(positionals) != 2 {
+		fatal("usage: syslog-reporter user add <username> <email> [--password-stdin] [--db <path>]")
+	}
+	username, email := positionals[0], positionals[1]
+	// The path check comes before the password prompt: a typo'd --db must
+	// not cost the operator two blind password entries first.
+	if err := reporter.RequireDatabase(*dbPath); err != nil {
+		fatal("%v", err)
+	}
+	password := readNewPassword(*passwordStdin)
 	if err := userAdd(*dbPath, username, email, password); err != nil {
 		fatal("%v", err)
 	}
 	fmt.Printf("user %s added\n", username)
+}
+
+func runUserList(args []string) {
+	fs, dbPath := userFlagSet("user list")
+	if extra := cli.ParseFlagsAnywhere(fs, args); len(extra) > 0 {
+		fatal("user list takes no arguments (got %s)", strings.Join(extra, " "))
+	}
+	lib := openUserStore(*dbPath)
+	defer lib.Close()
+	users, err := lib.ListUsers()
+	if err != nil {
+		fatal("%v", err)
+	}
+	if len(users) == 0 {
+		fmt.Println("no users (add one with 'user add')")
+		return
+	}
+	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "USERNAME\tEMAIL\tLOCAL LOGIN\tCREATED")
+	for _, u := range users {
+		login := "yes"
+		if !u.PasswordHash.Valid {
+			login = "no (SSO only)"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", u.Username, u.Email, login, u.CreatedAt)
+	}
+	tw.Flush()
+}
+
+func runUserPasswd(args []string) {
+	fs, dbPath := userFlagSet("user passwd")
+	passwordStdin := passwordStdinFlag(fs)
+	positionals := cli.ParseFlagsAnywhere(fs, args)
+	if len(positionals) != 1 {
+		fatal("usage: syslog-reporter user passwd <username> [--password-stdin] [--db <path>]")
+	}
+	username := positionals[0]
+	lib := openUserStore(*dbPath)
+	defer lib.Close()
+	password := readNewPassword(*passwordStdin)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		fatal("%v", err)
+	}
+	if err := lib.SetUserPassword(username, string(hash)); err != nil {
+		fatal("%v", err)
+	}
+	fmt.Printf("password updated for %s\n", username)
+}
+
+func runUserRemove(args []string) {
+	fs, dbPath := userFlagSet("user remove")
+	positionals := cli.ParseFlagsAnywhere(fs, args)
+	if len(positionals) != 1 {
+		fatal("usage: syslog-reporter user remove <username> [--db <path>]")
+	}
+	username := positionals[0]
+	lib := openUserStore(*dbPath)
+	defer lib.Close()
+	if err := lib.RemoveUser(username); err != nil {
+		fatal("%v", err)
+	}
+	fmt.Printf("user %s removed (their feedback votes are now anonymous)\n", username)
 }
 
 // userAdd is the testable core of `user add`: hash and insert.
@@ -344,28 +498,28 @@ func runBatch(cliArgs []string) {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	setUsage(fs, runHelpIntro, runHelpEnv)
 	model := fs.String("model", defaultModel, "Model to use (litellm format)")
-	filePath := fs.String("file", "--", "Alternative way to pass the file; or -- for stdin")
 	format := fs.String("format", "auto",
 		"Input format: 'raw' is rsyslog text, 'ndjson' is an elk_dump.py dump "+
 			"(.gz handled). 'auto' picks ndjson for *.ndjson / *.ndjson.gz paths, "+
 			"raw otherwise (stdin is always raw).")
 	debug := fs.Bool("debug", false, "Print extra debug information")
 	sendEmail := fs.Bool("send-email", false, "Email the report to the recipients")
-	recipients := fs.String("recipients", "", "Comma-separated list of email addresses to send the report to.")
+	recipients := fs.String("recipients", "",
+		"Comma-separated recipient addresses (default: SYSLOG_SMTP_RECIPIENTS)")
+	outDir := fs.String("out-dir", ".",
+		"Directory the report files are written to (must exist)")
 	dateStr := fs.String("date", "",
 		"ISO date (YYYY-MM-DD) the log slice covers, for the aggregate store. Defaults to yesterday.")
-	dbPath := fs.String("db", defaultDBPath,
-		fmt.Sprintf("SQLite aggregate store path (default %s)", defaultDBPath))
+	dbPath := fs.String("db", defaultDBPath, "SQLite aggregate store path")
 	knownsPath := fs.String("known-knowns", defaultKnownsPath,
-		fmt.Sprintf("TOML file of operator-acknowledged oddities to suppress "+
-			"(default %s; missing file just means none).", defaultKnownsPath))
+		"TOML file of operator-acknowledged oddities to suppress (missing file just means none)")
 	noStore := fs.Bool("no-store", false,
-		"Don't persist aggregates or run the history-based detectors (peer comparison still runs).")
+		"Don't persist aggregates or run the history-based detectors (peer comparison still runs)")
 	noLLM := fs.Bool("no-llm", false,
 		"Skip every LLM stage (issue detection, dedupe, resolutions, anomaly "+
-			"explanations) so the run costs nothing.")
+			"explanations) so the run costs nothing")
 	dumpFiltered := fs.Bool("dump-filtered", false,
-		"Print the filtered log lines and exit (the filter-tuning aid).")
+		"Print the filtered log lines and exit (the filter-tuning aid)")
 
 	// Flags are accepted before or after the positional logfile.
 	positionals := cli.ParseFlagsAnywhere(fs, cliArgs)
@@ -373,13 +527,35 @@ func runBatch(cliArgs []string) {
 		fatal("unrecognised extra arguments: %s", strings.Join(positionals[1:], " "))
 	}
 
-	// The positional path wins; fall back to --file; "--" (or nothing) means stdin.
-	path := *filePath
+	// The positional path names the logfile; "--" (or nothing) means stdin.
+	path := "--"
 	if len(positionals) == 1 {
 		path = positionals[0]
 	}
 	if *format != "auto" && *format != "raw" && *format != "ndjson" {
 		fatal("--format must be one of auto, raw, ndjson (got %q)", *format)
+	}
+
+	// Everything that can be checked before the pipeline spends time or
+	// money fails here, with the missing setting named.
+	if info, err := os.Stat(*outDir); err != nil || !info.IsDir() {
+		fatal("--out-dir %s is not an existing directory", *outDir)
+	}
+	if *sendEmail {
+		if *recipients == "" && os.Getenv("SYSLOG_SMTP_RECIPIENTS") == "" {
+			fatal("--send-email needs --recipients or SYSLOG_SMTP_RECIPIENTS to be set")
+		}
+		if os.Getenv("SYSLOG_SMTP_SERVER") == "" {
+			fatal("--send-email needs SYSLOG_SMTP_SERVER to be set")
+		}
+		if os.Getenv("SYSLOG_SMTP_SENDER") == "" {
+			fatal("--send-email needs SYSLOG_SMTP_SENDER to be set")
+		}
+	}
+	if !*noLLM && !*dumpFiltered {
+		if err := llm.CheckCredentials(*model); err != nil {
+			fatal("%v", err)
+		}
 	}
 	isNDJSON := *format == "ndjson" ||
 		(*format == "auto" && (strings.HasSuffix(path, ".ndjson") || strings.HasSuffix(path, ".ndjson.gz")))
@@ -441,6 +617,7 @@ func runBatch(cliArgs []string) {
 		debug:      *debug,
 		recipients: *recipients,
 		sendEmail:  *sendEmail,
+		outDir:     *outDir,
 		logDate:    logDate,
 		dbPath:     *dbPath,
 		storeOn:    !*noStore,
@@ -458,6 +635,7 @@ type runConfig struct {
 	debug      bool
 	recipients string
 	sendEmail  bool
+	outDir     string
 	logDate    time.Time
 	dbPath     string
 	storeOn    bool
@@ -663,14 +841,18 @@ func run(cfg runConfig) {
 		log.Info("--no-store: skipping findings capture")
 	}
 
-	// While we refine things, always drop the two files to the working directory.
-	if err := os.WriteFile("email_body.md", []byte(emailBody), 0o600); err != nil {
+	// The report files are the artefact cron archives and what survives a
+	// failed send; --out-dir places them, defaulting to the working
+	// directory.
+	bodyPath := filepath.Join(cfg.outDir, "email_body.md")
+	attachmentPath := filepath.Join(cfg.outDir, "email_attachment.md")
+	if err := os.WriteFile(bodyPath, []byte(emailBody), 0o600); err != nil {
 		fatal("%v", err)
 	}
-	if err := os.WriteFile("email_attachment.md", []byte(fullReport), 0o600); err != nil {
+	if err := os.WriteFile(attachmentPath, []byte(fullReport), 0o600); err != nil {
 		fatal("%v", err)
 	}
-	log.Info("Wrote email_body.md and email_attachment.md")
+	log.Info("Wrote %s and %s", bodyPath, attachmentPath)
 
 	// Print the short digest (not the full report) for cron logs.
 	fmt.Print(emailBody)
@@ -694,6 +876,9 @@ func run(cfg runConfig) {
 			fatal("%v", err)
 		}
 	} else {
+		if cfg.recipients != "" {
+			log.Warn("--recipients given but --send-email not set; no email will be sent")
+		}
 		log.Info("Skipping email")
 	}
 }

@@ -23,8 +23,8 @@ type command struct {
 var commands = []command{
 	{"run", "Run the daily batch pipeline over a log dump and write the report", cmdRun},
 	{"eval", "Compare provider/model combinations over a small log sample", cmdEval},
-	{"serve", "Serve the findings library web UI (env-configured; default 127.0.0.1:7373)", cmdServe},
-	{"user", "Manage local-auth accounts (user add <username> <email>)", cmdUser},
+	{"serve", "Serve the findings library web UI (default 127.0.0.1:7373)", cmdServe},
+	{"user", "Manage local-auth accounts (add, list, passwd, remove)", cmdUser},
 	{"findings", "List, show and record feedback on findings from the terminal", cmdFindings},
 	{"mgmt-report", "Render the management summary (HTML file plus plain text)", cmdMgmtReport},
 	{"self-update", "Replace this binary with the latest GitHub release", cmdSelfUpdate},
@@ -79,9 +79,19 @@ func dispatch(args []string, stdout, stderr io.Writer) int {
 	}
 	switch args[0] {
 	case "--help", "-h", "-help", "help":
+		// 'help <command>' forwards to that command's own --help.
+		if args[0] == "help" && len(args) > 1 {
+			for _, c := range commands {
+				if c.name == args[1] {
+					return c.run([]string{"--help"})
+				}
+			}
+			fmt.Fprintf(stderr, "syslog-reporter: unknown command %q\nRun 'syslog-reporter --help' for the list of commands.\n", args[1])
+			return 2
+		}
 		usage(stdout)
 		return 0
-	case "--version", "-version":
+	case "--version", "-version", "version":
 		fmt.Fprintf(stdout, "syslog-reporter %s\n", version)
 		// Release builds also mention a newer release when one exists;
 		// dev builds and lookup failures stay a single line.

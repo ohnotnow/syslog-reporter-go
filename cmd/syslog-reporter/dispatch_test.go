@@ -30,15 +30,36 @@ func TestBareInvocationPrintsCommandListAndFails(t *testing.T) {
 
 func TestUnknownCommandNamesTheArgument(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := dispatch([]string{"version"}, &stdout, &stderr)
+	code := dispatch([]string{"frobnicate"}, &stdout, &stderr)
 	if code == 0 {
 		t.Error("unknown command should exit non-zero")
 	}
-	if !strings.Contains(stderr.String(), `"version"`) {
+	if !strings.Contains(stderr.String(), `"frobnicate"`) {
 		t.Errorf("error should name the offending argument, got: %s", stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "--help") {
 		t.Errorf("error should suggest --help, got: %s", stderr.String())
+	}
+}
+
+// The bare words work like their flag spellings: 'version' prints the
+// version, 'help <command>' forwards to that command's own --help.
+func TestBareVersionAndHelpForwarding(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := dispatch([]string{"version"}, &stdout, &stderr); code != 0 {
+		t.Errorf("bare 'version' should exit 0, got %d (stderr: %s)", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "syslog-reporter") {
+		t.Errorf("bare 'version' output looks wrong: %s", stdout.String())
+	}
+
+	var helpErr bytes.Buffer
+	code := dispatch([]string{"help", "nosuch"}, &stdout, &helpErr)
+	if code == 0 {
+		t.Error("'help nosuch' should exit non-zero")
+	}
+	if !strings.Contains(helpErr.String(), `"nosuch"`) {
+		t.Errorf("'help nosuch' should name the argument, got: %s", helpErr.String())
 	}
 }
 
@@ -90,5 +111,41 @@ func TestRunCommandOwnsTheBatchPath(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "catastrophic widget failure") {
 		t.Errorf("filtered dump missing the test line, got: %s", out)
+	}
+}
+
+// The full deterministic pipeline (--no-llm --no-store) honours --out-dir
+// for the report file drops.
+func TestRunWritesReportFilesToOutDir(t *testing.T) {
+	t.Setenv("SYSLOG_BLANKET_IGNORE", "")
+	t.Setenv("SYSLOG_KNOWN_KNOWNS", filepath.Join(t.TempDir(), "absent.toml"))
+	logPath := filepath.Join(t.TempDir(), "sample.log")
+	line := "Jan 12 03:04:05 web01.example.test badservice[123]: catastrophic widget failure\n"
+	if err := os.WriteFile(logPath, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outDir := t.TempDir()
+
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	code := dispatch([]string{"run", logPath, "--no-llm", "--no-store", "--out-dir", outDir},
+		io.Discard, io.Discard)
+	w.Close()
+	os.Stdout = old
+	io.ReadAll(r)
+	if code != 0 {
+		t.Fatalf("run should exit 0, got %d", code)
+	}
+	for _, name := range []string{"email_body.md", "email_attachment.md"} {
+		if _, err := os.Stat(filepath.Join(outDir, name)); err != nil {
+			t.Errorf("%s not written to --out-dir: %v", name, err)
+		}
+		if _, err := os.Stat(name); err == nil {
+			t.Errorf("%s also appeared in the working directory", name)
+		}
 	}
 }

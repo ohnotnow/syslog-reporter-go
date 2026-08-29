@@ -58,6 +58,9 @@ func runEval(args []string) {
 	if *model == "" {
 		fatal("eval needs --model (litellm format, e.g. openai/gpt-4o-mini)")
 	}
+	if err := llm.CheckCredentials(*model); err != nil {
+		fatal("%v", err)
+	}
 	log := &logger{}
 
 	lines := strings.Split(strings.TrimRight(evalFixture, "\n"), "\n")
