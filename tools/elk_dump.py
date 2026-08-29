@@ -3,9 +3,7 @@
 
 Pulls every document for ONE day from a syslog data stream (e.g.
 'logs-system.syslog-<namespace>') and writes one trimmed JSON object
-per line, keeping only the fields the syslog_reporter pipeline needs:
-
-    @timestamp, host.name, host.hostname, process.name, process.pid, message
+per line, keeping only the fields the syslog reporter pipeline needs.
 
 Usage (yesterday, the common case):
 
@@ -24,13 +22,13 @@ a consistent snapshot with no skipped or duplicated documents. The
 account needs the 'read' index privilege (which includes PIT) on the
 target pattern; no cluster privileges are used.
 
-Auth and TLS conventions are the same as elk_recon.py: ELK_URL,
+Auth and TLS can be set as ELK_URL,
 ELK_API_KEY or ELK_USERNAME/ELK_PASSWORD from env or a local .env, or
 --key-file / --username (interactive password prompt). Credentials are
 never printed. --insecure skips TLS verification, --ca-cert trusts a
 local CA.
 
-If --out ends in .gz the file is gzip-compressed (handy for scp).
+If --out ends in .gz the file is gzip-compressed.
 
 This file is deliberately self-contained and stdlib-only: copy just
 this one script to any box with python3 and it runs.
