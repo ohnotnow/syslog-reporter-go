@@ -1,6 +1,7 @@
 package reporter
 
-// Port of tests/test_aggregate_store.py from the Python original.
+// Tests for the daily aggregate store: write/read-back, per-day
+// idempotency, window bounds, and pruning.
 
 import (
 	"reflect"
@@ -22,46 +23,35 @@ func day(y int, m time.Month, d int) time.Time {
 	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 }
 
-func countsOf(t *testing.T, entries map[AggKey]int, order ...AggKey) *Counts {
-	t.Helper()
-	c := NewCounts()
-	for _, k := range order {
-		c.Add(k, entries[k])
-	}
-	return c
-}
-
-func mustWrite(t *testing.T, s *AggregateStore, d time.Time, c *Counts) {
+func mustWrite(t *testing.T, s *AggregateStore, d time.Time, c map[AggKey]int) {
 	t.Helper()
 	if _, err := s.WriteAggregates(d, c); err != nil {
 		t.Fatalf("write aggregates: %v", err)
 	}
 }
 
-func singleCount(host, program, window string, n int) *Counts {
-	c := NewCounts()
-	c.Add(AggKey{host, program, window}, n)
-	return c
+func singleCount(host, program, window string, n int) map[AggKey]int {
+	return map[AggKey]int{{host, program, window}: n}
 }
 
 func TestStoreWriteAndReadBackPairTotals(t *testing.T) {
 	s := newTestStore(t)
-	c := NewCounts()
-	c.Add(AggKey{"hostA", "puppet", "00:00"}, 100)
-	c.Add(AggKey{"hostA", "puppet", "00:10"}, 50) // same series, different window
-	c.Add(AggKey{"hostB", "sshd", "09:00"}, 7)
-	mustWrite(t, s, day(2026, 6, 1), c)
+	mustWrite(t, s, day(2026, 6, 1), map[AggKey]int{
+		{"hostA", "puppet", "00:00"}: 100,
+		{"hostA", "puppet", "00:10"}: 50, // same series, different window
+		{"hostB", "sshd", "09:00"}:   7,
+	})
 
 	// beforeDate excludes the day itself, so query a later day
 	totals, err := s.HistoryPairTotals(day(2026, 6, 5), 14)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, _ := totals.Get(PairKey{"hostA", "puppet"})
+	got := totals[PairKey{"hostA", "puppet"}]
 	if !reflect.DeepEqual(got, map[string]int{"2026-06-01": 150}) { // windows summed
 		t.Errorf("hostA/puppet = %#v", got)
 	}
-	got, _ = totals.Get(PairKey{"hostB", "sshd"})
+	got = totals[PairKey{"hostB", "sshd"}]
 	if !reflect.DeepEqual(got, map[string]int{"2026-06-01": 7}) {
 		t.Errorf("hostB/sshd = %#v", got)
 	}
@@ -75,9 +65,31 @@ func TestStoreRewriteIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, _ := totals.Get(PairKey{"hostA", "puppet"})
+	got := totals[PairKey{"hostA", "puppet"}]
 	if !reflect.DeepEqual(got, map[string]int{"2026-06-01": 100}) { // not doubled
 		t.Errorf("got %#v", got)
+	}
+}
+
+func TestStoreRewriteWithFewerKeysDropsStaleRows(t *testing.T) {
+	s := newTestStore(t)
+	mustWrite(t, s, day(2026, 6, 1), map[AggKey]int{
+		{"hostA", "puppet", "00:00"}: 100,
+		{"hostA", "cron", "01:00"}:   40,
+	})
+	// The re-run of the day no longer sees the cron series; its old row
+	// must not survive to contaminate the baseline.
+	mustWrite(t, s, day(2026, 6, 1), singleCount("hostA", "puppet", "00:00", 80))
+	totals, err := s.HistoryPairTotals(day(2026, 6, 5), 14)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := totals[PairKey{"hostA", "cron"}]; ok {
+		t.Error("stale cron row survived the day's rewrite")
+	}
+	got := totals[PairKey{"hostA", "puppet"}]
+	if !reflect.DeepEqual(got, map[string]int{"2026-06-01": 80}) {
+		t.Errorf("puppet = %#v, want the re-run's value", got)
 	}
 }
 
@@ -88,7 +100,7 @@ func TestStoreBeforeDateIsExcludedFromHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := totals.Get(PairKey{"h", "p"}); ok {
+	if _, ok := totals[PairKey{"h", "p"}]; ok {
 		t.Error("the queried day must not sit in its own history")
 	}
 }
@@ -101,7 +113,7 @@ func TestStoreLookbackWindowBounds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, _ := totals.Get(PairKey{"h", "p"})
+	got := totals[PairKey{"h", "p"}]
 	if !reflect.DeepEqual(got, map[string]int{"2026-06-04": 2}) {
 		t.Errorf("got %#v", got)
 	}
@@ -109,10 +121,10 @@ func TestStoreLookbackWindowBounds(t *testing.T) {
 
 func TestStoreWindowCountsKeepTheWindow(t *testing.T) {
 	s := newTestStore(t)
-	c := NewCounts()
-	c.Add(AggKey{"h", "p", "10:00"}, 30)
-	c.Add(AggKey{"h", "p", "11:00"}, 5)
-	mustWrite(t, s, day(2026, 6, 1), c)
+	mustWrite(t, s, day(2026, 6, 1), map[AggKey]int{
+		{"h", "p", "10:00"}: 30,
+		{"h", "p", "11:00"}: 5,
+	})
 
 	wins, err := s.HistoryWindowCounts(day(2026, 6, 5), 14)
 	if err != nil {
@@ -140,7 +152,7 @@ func TestStorePruneDropsOldRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(totals.Keys()) != 0 {
-		t.Errorf("expected empty history, got %v", totals.Keys())
+	if len(totals) != 0 {
+		t.Errorf("expected empty history, got %v", totals)
 	}
 }

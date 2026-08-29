@@ -94,7 +94,7 @@ func TestLibraryOpenOnExistingAggregatesDBLeavesAggregatesAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, _ := totals.Get(PairKey{"hostA", "puppet"})
+	got := totals[PairKey{"hostA", "puppet"}]
 	if !reflect.DeepEqual(got, map[string]int{"2026-06-01": 100}) {
 		t.Errorf("aggregates disturbed by library open: %#v", got)
 	}
@@ -344,11 +344,20 @@ func seedSearchLibrary(t *testing.T) (*LibraryStore, []int64) {
 	addf(run2, "issue", "critical", "Disk 100% usage", "storaged", []string{"hostD"})
 	addf(run2, "temporal", "", "Burst at 10:00", "cron", []string{"hostA"})
 	addf(run2, "issue", "low", `Weird_title with % and \`, "misc", []string{"hostE"})
+	// Real users for the vote rows: foreign keys are enforced.
+	u1, err := lib.CreateUser("vera", "vera@example.ac.uk", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u2, err := lib.CreateUser("avon", "avon@example.ac.uk", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	for _, row := range []struct {
 		userID  any
 		verdict string
-	}{{1, "worked"}, {2, "worked"}, {nil, "didnt_work"}} {
+	}{{u1, "worked"}, {u2, "worked"}, {nil, "didnt_work"}} {
 		if _, err := lib.db.Exec(
 			"INSERT INTO feedback (finding_id, user_id, verdict, created_at) VALUES (?, ?, ?, ?)",
 			ids[0], row.userID, row.verdict, now); err != nil {
