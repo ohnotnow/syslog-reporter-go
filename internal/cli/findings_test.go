@@ -5,6 +5,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -248,5 +249,22 @@ func TestFindingsHelpListsTheSubcommands(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("findings help missing %q", want)
 		}
+	}
+}
+
+// A typo'd --db must error, never create an empty library and report
+// "no findings match".
+func TestFindingsRefusesAMissingDatabase(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "no-such.db")
+	var out bytes.Buffer
+	err := RunFindings(missing, []string{"list"}, &out)
+	if err == nil {
+		t.Fatal("expected an error for a missing db")
+	}
+	if !strings.Contains(err.Error(), "does not exist") {
+		t.Errorf("error should say the db is missing, got: %v", err)
+	}
+	if _, statErr := os.Stat(missing); statErr == nil {
+		t.Error("the missing db was created as a side effect")
 	}
 }

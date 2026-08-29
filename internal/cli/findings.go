@@ -68,11 +68,20 @@ func RunFindings(defaultDB string, args []string, out io.Writer) error {
 	case "feedback":
 		return runFeedback(defaultDB, args[1:], out)
 	default:
+		if strings.HasPrefix(args[0], "-") {
+			return fmt.Errorf("flags go after the subcommand (e.g. findings list %s)\n%s",
+				args[0], findingsUsage)
+		}
 		return fmt.Errorf("unknown findings command %q\n%s", args[0], findingsUsage)
 	}
 }
 
 func openLibrary(path string) (*reporter.LibraryStore, error) {
+	// The findings CLI only reads and votes; a missing db is a typo'd
+	// path, never a reason to create an empty library.
+	if err := reporter.RequireDatabase(path); err != nil {
+		return nil, err
+	}
 	lib, err := reporter.OpenLibraryStore(path)
 	if err != nil {
 		return nil, fmt.Errorf("opening %s: %w", path, err)
