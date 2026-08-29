@@ -17,6 +17,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/ohnotnow/syslog-reporter-go/internal/reporter"
@@ -35,6 +36,12 @@ type Config struct {
 	DBPath   string // SYSLOG_DB_PATH, the same file batch mode writes
 	AuthMode string // SYSLOG_AUTH_MODE: none (default) | local | oidc
 	Version  string // stamped binary version, shown in the footer
+	// SecureCookies (SYSLOG_WEB_SECURE_COOKIES=1) forces the session
+	// cookie's Secure flag on for the reverse-proxy deployment: the proxy
+	// owns TLS, this binary serves plain HTTP on loopback, and without the
+	// override the flag would be derived (wrongly, for the browser) from
+	// the built-in TLS setting alone (srg-so8ja.9).
+	SecureCookies bool
 }
 
 // ConfigFromEnv reads the SYSLOG_WEB_* settings. Plain HTTP (LAN and solo
@@ -43,11 +50,12 @@ type Config struct {
 func ConfigFromEnv() (Config, error) {
 	cfg := Config{
 		// Port 7373: 73 kilos is what Vila weighs (owner's choice, Blake's 7).
-		Listen:   getenvDefault("SYSLOG_WEB_LISTEN", "127.0.0.1:7373"),
-		CertFile: os.Getenv("SYSLOG_WEB_TLS_CERT"),
-		KeyFile:  os.Getenv("SYSLOG_WEB_TLS_KEY"),
-		DBPath:   getenvDefault("SYSLOG_DB_PATH", "syslog_aggregates.db"),
-		AuthMode: getenvDefault("SYSLOG_AUTH_MODE", "none"),
+		Listen:        getenvDefault("SYSLOG_WEB_LISTEN", "127.0.0.1:7373"),
+		CertFile:      os.Getenv("SYSLOG_WEB_TLS_CERT"),
+		KeyFile:       os.Getenv("SYSLOG_WEB_TLS_KEY"),
+		DBPath:        getenvDefault("SYSLOG_DB_PATH", "syslog_aggregates.db"),
+		AuthMode:      getenvDefault("SYSLOG_AUTH_MODE", "none"),
+		SecureCookies: os.Getenv("SYSLOG_WEB_SECURE_COOKIES") == "1",
 	}
 	if (cfg.CertFile == "") != (cfg.KeyFile == "") {
 		return Config{}, errors.New(
@@ -63,6 +71,45 @@ func getenvDefault(key, fallback string) string {
 	return fallback
 }
 
+// StartupWarnings names the risky-but-supported combinations so they never
+// start silently (srg-so8ja.9). Warnings, never refusals: plain HTTP on a
+// LAN is a deliberate first-class case here, and the operator gets to make
+// that call - out loud.
+func (c Config) StartupWarnings() []string {
+	if listenIsLoopback(c.Listen) {
+		return nil
+	}
+	var w []string
+	if c.AuthMode == "none" {
+		w = append(w, fmt.Sprintf(
+			"serving without authentication on %s; anyone who can reach it can read and vote on findings",
+			c.Listen))
+	}
+	if c.AuthMode == "local" && c.CertFile == "" {
+		w = append(w, fmt.Sprintf(
+			"local auth over plain HTTP on %s; passwords and session cookies are visible to the network",
+			c.Listen))
+	}
+	return w
+}
+
+// listenIsLoopback reports whether a host:port can only be reached from
+// this machine. An empty host binds every interface, so it is NOT loopback.
+func listenIsLoopback(listen string) bool {
+	host, _, err := net.SplitHostPort(listen)
+	if err != nil {
+		host = listen
+	}
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 // baseTemplate holds only the shared layout; each page's blocks are parsed
 // into a clone at render time so pages never collide.
 var baseTemplate = template.Must(template.New("").Funcs(template.FuncMap{
@@ -76,6 +123,16 @@ var baseTemplate = template.Must(template.New("").Funcs(template.FuncMap{
 		return "did not fix it"
 	},
 }).ParseFS(templateFS, "templates/base.html"))
+
+// maxFormBytes bounds the request body on every form POST: the forms here
+// are a login and a feedback vote, so Go's default megabytes-large form cap
+// is two orders of magnitude more than needed (srg-so8ja.8).
+const maxFormBytes = 16 << 10
+
+// limitForm applies maxFormBytes to a request about to be form-parsed.
+func limitForm(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
+}
 
 // pageData is what the base layout sees on every render.
 type pageData struct {
@@ -174,7 +231,14 @@ func (s *Server) Listen() (net.Listener, error) {
 // Serve runs until ctx is cancelled, then shuts down gracefully, draining
 // in-flight requests for up to five seconds.
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
-	srv := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{
+		Handler:           s.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		// Full-request and idle limits (srg-so8ja.8): every request this
+		// app serves is tiny, so a slow body is a stuck or hostile client.
+		ReadTimeout: 30 * time.Second,
+		IdleTimeout: 2 * time.Minute,
+	}
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.Serve(ln) }()
 	select {

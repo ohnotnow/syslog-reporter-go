@@ -16,11 +16,16 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/ohnotnow/syslog-reporter-go/internal/reporter"
 )
 
 const findingsPageSize = 50
+
+// maxCommentRunes bounds a feedback note (srg-so8ja.8): long enough for a
+// real war story, short enough that the form cannot be used as a dump.
+const maxCommentRunes = 2000
 
 type findingsFilters struct {
 	Query    string
@@ -219,6 +224,7 @@ func (s *Server) handleFeedback(w http.ResponseWriter, r *http.Request) {
 	if d == nil {
 		return
 	}
+	limitForm(w, r)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
@@ -229,6 +235,11 @@ func (s *Server) handleFeedback(w http.ResponseWriter, r *http.Request) {
 	}
 	verdict := r.PostFormValue("verdict")
 	comment := strings.TrimSpace(r.PostFormValue("comment"))
+	if utf8.RuneCountInString(comment) > maxCommentRunes {
+		http.Error(w, fmt.Sprintf("comment too long (%d character limit)", maxCommentRunes),
+			http.StatusBadRequest)
+		return
+	}
 	if err := s.lib.RecordFeedback(d.ID, userID, verdict, comment); err != nil {
 		if errors.Is(err, reporter.ErrBadVerdict) {
 			http.Error(w, err.Error(), http.StatusBadRequest)

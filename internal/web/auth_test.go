@@ -228,6 +228,38 @@ func TestSessionCookieFlags(t *testing.T) {
 	if !tlsAuth.sessions.Cookie.Secure {
 		t.Error("Secure must be on when a TLS pair is configured")
 	}
+
+	// SYSLOG_WEB_SECURE_COOKIES=1 covers proxy-terminated TLS: Secure on
+	// even though this binary itself serves plain HTTP (srg-so8ja.9).
+	proxyAuth := newLocalAuth(Config{SecureCookies: true}, lib)
+	if !proxyAuth.sessions.Cookie.Secure {
+		t.Error("Secure must be on when SecureCookies is set, TLS pair or not")
+	}
+}
+
+// The risky-but-supported serve combinations warn at startup and loopback
+// stays quiet; nothing refuses (srg-so8ja.9 - LAN plain HTTP is a
+// deliberate first-class case).
+func TestStartupWarnings(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cfg  Config
+		want int
+	}{
+		{"loopback none is quiet", Config{Listen: "127.0.0.1:7373", AuthMode: "none"}, 0},
+		{"localhost local is quiet", Config{Listen: "localhost:7373", AuthMode: "local"}, 0},
+		{"lan none warns", Config{Listen: "192.0.2.7:7373", AuthMode: "none"}, 1},
+		{"all-interfaces none warns", Config{Listen: ":7373", AuthMode: "none"}, 1},
+		{"lan local plain http warns", Config{Listen: "192.0.2.7:7373", AuthMode: "local"}, 1},
+		{"lan local with tls is quiet", Config{
+			Listen: "192.0.2.7:7373", AuthMode: "local",
+			CertFile: "/etc/certs/reporter.pem", KeyFile: "k"}, 0},
+	} {
+		if got := len(tc.cfg.StartupWarnings()); got != tc.want {
+			t.Errorf("%s: %d warnings, want %d: %v",
+				tc.name, got, tc.want, tc.cfg.StartupWarnings())
+		}
+	}
 }
 
 func TestCrossOriginPostIsRejected(t *testing.T) {

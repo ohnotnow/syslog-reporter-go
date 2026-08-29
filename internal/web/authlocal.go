@@ -32,15 +32,18 @@ type localAuth struct {
 	cfg      Config
 	users    UserStore
 	sessions *scs.SessionManager
+	throttle *loginThrottle
 }
 
 func newLocalAuth(cfg Config, users UserStore) *localAuth {
 	sm := scs.New()
 	sm.Cookie.HttpOnly = true
 	sm.Cookie.SameSite = http.SameSiteLaxMode
-	// Decided once from the serve TLS config, not per-request from r.TLS.
-	sm.Cookie.Secure = cfg.CertFile != ""
-	return &localAuth{cfg: cfg, users: users, sessions: sm}
+	// Decided once from the serve TLS config, not per-request from r.TLS;
+	// SecureCookies covers TLS terminated at a reverse proxy (srg-so8ja.9).
+	sm.Cookie.Secure = cfg.CertFile != "" || cfg.SecureCookies
+	return &localAuth{cfg: cfg, users: users, sessions: sm,
+		throttle: newLoginThrottle()}
 }
 
 // Middleware loads the session, resolves the current user into the request
@@ -94,6 +97,15 @@ func (a *localAuth) handleLoginForm(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *localAuth) handleLogin(w http.ResponseWriter, r *http.Request) {
+	// The lockout check comes before any parsing or bcrypt work: its whole
+	// job is to stop an unauthenticated client burning CPU (srg-so8ja.8).
+	ip := clientIP(r.RemoteAddr)
+	if a.throttle.blocked(ip) {
+		http.Error(w, "too many failed login attempts; try again shortly",
+			http.StatusTooManyRequests)
+		return
+	}
+	limitForm(w, r)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
@@ -104,6 +116,7 @@ func (a *localAuth) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// One generic message for every failure, so the form cannot be used to
 	// enumerate usernames.
 	fail := func() {
+		a.throttle.fail(ip)
 		a.renderLogin(w, loginData{
 			Error:    "That username and password combination was not recognised.",
 			Next:     next,
@@ -127,6 +140,7 @@ func (a *localAuth) handleLogin(w http.ResponseWriter, r *http.Request) {
 		fail()
 		return
 	}
+	a.throttle.success(ip)
 	// Fresh session token on privilege change, then remember only the id;
 	// the middleware loads the row on each request.
 	if err := a.sessions.RenewToken(r.Context()); err != nil {
