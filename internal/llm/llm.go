@@ -45,6 +45,35 @@ func Complete(ctx context.Context, model, system, user, schemaName string, schem
 	}
 }
 
+// CheckCredentials fails fast when the model's provider is missing its
+// API key, so a misconfigured cron run dies at startup with the variable
+// named rather than mid-pipeline with an HTTP error. A configured base
+// URL waives the key requirement for openai/ and anthropic/ (a local
+// keyless endpoint is a supported way to run).
+func CheckCredentials(model string) error {
+	provider, modelID, ok := strings.Cut(model, "/")
+	if !ok {
+		return fmt.Errorf("model %q has no provider prefix; use the litellm format, e.g. openai/%s", model, model)
+	}
+	switch provider {
+	case "openai":
+		if os.Getenv("OPENAI_API_KEY") == "" && os.Getenv("OPENAI_BASE_URL") == "" {
+			return fmt.Errorf("openai/%s needs OPENAI_API_KEY set (or OPENAI_BASE_URL for a keyless endpoint)", modelID)
+		}
+	case "anthropic":
+		if os.Getenv("ANTHROPIC_API_KEY") == "" && os.Getenv("ANTHROPIC_BASE_URL") == "" {
+			return fmt.Errorf("anthropic/%s needs ANTHROPIC_API_KEY set (or ANTHROPIC_BASE_URL for a keyless endpoint)", modelID)
+		}
+	case "azure":
+		if os.Getenv("AZURE_OPENAI_ENDPOINT") == "" || os.Getenv("AZURE_OPENAI_API_KEY") == "" {
+			return fmt.Errorf("azure/%s needs AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY set", modelID)
+		}
+	default:
+		return fmt.Errorf("unsupported provider prefix %q in model %q (supported: openai/, azure/, anthropic/)", provider, model)
+	}
+	return nil
+}
+
 // reasoningEffort reads SYSLOG_REASONING_EFFORT at call time. Unset means
 // provider default.
 func reasoningEffort() string {

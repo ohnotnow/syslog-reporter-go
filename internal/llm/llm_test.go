@@ -80,3 +80,37 @@ func TestAzureRoundTrip(t *testing.T) {
 		t.Errorf("decoded answer = %d, want 42", out.Answer)
 	}
 }
+
+func TestCheckCredentials(t *testing.T) {
+	for _, key := range []string{
+		"OPENAI_API_KEY", "OPENAI_BASE_URL",
+		"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL",
+		"AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_KEY",
+	} {
+		t.Setenv(key, "")
+	}
+	// Missing keys fail fast and name the variable.
+	for model, want := range map[string]string{
+		"openai/gpt-4o-mini": "OPENAI_API_KEY",
+		"anthropic/claude-x": "ANTHROPIC_API_KEY",
+		"azure/gpt-4o":       "AZURE_OPENAI_ENDPOINT",
+		"no-prefix":          "provider prefix",
+		"mystery/model":      "unsupported provider",
+	} {
+		err := CheckCredentials(model)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: expected error mentioning %q, got %v", model, want, err)
+		}
+	}
+	// A key satisfies its provider; a base URL waives the key for the
+	// SDK-from-env providers.
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	if err := CheckCredentials("openai/gpt-4o-mini"); err != nil {
+		t.Errorf("key set: %v", err)
+	}
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("OPENAI_BASE_URL", "http://localhost:11434/v1")
+	if err := CheckCredentials("openai/local-model"); err != nil {
+		t.Errorf("base URL set: %v", err)
+	}
+}
