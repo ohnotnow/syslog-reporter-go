@@ -1,9 +1,10 @@
 package reporter
 
-// Grew from a port of agents/emailer.py: recipients on the envelope only
-// (BCC) with the sender in the visible To header, and send failures print
-// a message rather than crash so a cron run still leaves the report files
-// behind. Since ait srg-kOKT9 the daily digest rides as a text+HTML
+// Recipients ride the SMTP envelope only (BCC) with the sender in the
+// visible To header, so the team list never leaks into headers. Send
+// failures return an error the callers must fail the process on, after
+// the report files are already on disk. Since ait srg-kOKT9 the daily
+// digest rides as a text+HTML
 // alternative pair (the text/plain alternative IS the body markdown, so
 // text-only clients keep the original experience) with both markdown
 // files attached; the management report reuses the same builder with no
