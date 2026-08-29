@@ -102,6 +102,7 @@ func completeChat(ctx context.Context, client openai.Client, provider, modelID, 
 	if err != nil {
 		return fmt.Errorf("%s/%s: %w", provider, modelID, err)
 	}
+	addUsage(resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
 	if len(resp.Choices) == 0 {
 		return fmt.Errorf("%s/%s: response had no choices", provider, modelID)
 	}
@@ -145,6 +146,7 @@ func completeAnthropic(ctx context.Context, modelID, system, user string, schema
 	if err != nil {
 		return fmt.Errorf("anthropic/%s: %w", modelID, err)
 	}
+	addUsage(resp.Usage.InputTokens, resp.Usage.OutputTokens)
 	var text strings.Builder
 	for _, block := range resp.Content {
 		if t, ok := block.AsAny().(anthropic.TextBlock); ok {

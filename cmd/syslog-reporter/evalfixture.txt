@@ -1,0 +1,24 @@
+Aug 28 02:14:07 db01.example.test smartd[812]: Device: /dev/sda [SAT], 8 Currently unreadable (pending) sectors
+Aug 28 02:14:07 db01.example.test smartd[812]: Device: /dev/sda [SAT], 8 Offline uncorrectable sectors
+Aug 28 02:44:07 db01.example.test smartd[812]: Device: /dev/sda [SAT], 16 Currently unreadable (pending) sectors
+Aug 28 03:02:51 db01.example.test kernel: blk_update_request: I/O error, dev sda, sector 488282112 op 0x0:(READ) flags 0x0 phys_seg 1 prio class 0
+Aug 28 03:21:44 web02.example.test kernel: Out of memory: Killed process 21437 (mysqld) total-vm:9862140kB, anon-rss:7423188kB
+Aug 28 03:21:45 web02.example.test systemd[1]: mariadb.service: A process of this unit has been killed by the OOM killer.
+Aug 28 03:21:46 web02.example.test systemd[1]: mariadb.service: Main process exited, code=killed, status=9/KILL
+Aug 28 03:21:46 web02.example.test systemd[1]: mariadb.service: Failed with result 'oom-kill'.
+Aug 28 04:05:12 mail01.example.test postfix/smtp[9917]: connect to relay.example.test[192.0.2.25]:25: Connection timed out
+Aug 28 04:10:12 mail01.example.test postfix/smtp[10233]: connect to relay.example.test[192.0.2.25]:25: Connection timed out
+Aug 28 04:15:13 mail01.example.test postfix/qmgr[1341]: warning: mail for relay.example.test is using up 4013 of 4096 active queue entries
+Aug 28 05:17:33 auth01.example.test sshd[30122]: Failed password for root from 198.51.100.44 port 40022 ssh2
+Aug 28 05:17:36 auth01.example.test sshd[30124]: Failed password for root from 198.51.100.44 port 40188 ssh2
+Aug 28 05:17:39 auth01.example.test sshd[30126]: Failed password for invalid user admin from 198.51.100.44 port 40201 ssh2
+Aug 28 05:17:42 auth01.example.test sshd[30128]: Failed password for invalid user admin from 198.51.100.44 port 40244 ssh2
+Aug 28 05:17:44 auth01.example.test sshd[30131]: error: maximum authentication attempts exceeded for root from 198.51.100.44 port 40260 ssh2 [preauth]
+Aug 28 06:40:01 app03.example.test systemd[1]: widgetd.service: Main process exited, code=exited, status=1/FAILURE
+Aug 28 06:40:01 app03.example.test systemd[1]: widgetd.service: Scheduled restart job, restart counter is at 47.
+Aug 28 06:40:02 app03.example.test widgetd[18344]: panic: runtime error: invalid memory address or nil pointer dereference
+Aug 28 06:45:01 app03.example.test systemd[1]: widgetd.service: Scheduled restart job, restart counter is at 48.
+Aug 28 07:03:19 store01.example.test kernel: XFS (dm-3): Filesystem has consumed all available space
+Aug 28 07:03:19 store01.example.test rsyslogd[1027]: file '/var/log/app/audit.log': open error: No space left on device
+Aug 28 07:08:19 store01.example.test rsyslogd[1027]: file '/var/log/app/audit.log': open error: No space left on device
+Aug 28 08:12:55 ntp01.example.test chronyd[901]: System clock wrong by 4.271 seconds, adjustment started

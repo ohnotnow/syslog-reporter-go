@@ -95,6 +95,21 @@ func (r *ReportAgent) Run() string {
 	return b.String()
 }
 
+// EvalFragment renders just the issue/resolution half of a report for the
+// eval command, under the same conventions as the full report (paste
+// caution, model footer). No anomaly or known-knowns sections: eval runs no
+// detectors.
+func EvalFragment(issues *IssueList, resolutions *ResolutionList, model string) string {
+	var b strings.Builder
+	b.WriteString("## Issues\n")
+	b.WriteString(issues.ToMarkdown() + "\n")
+	b.WriteString("\n## Resolutions\n")
+	b.WriteString(commandCaution + "\n")
+	b.WriteString(resolutions.ToMarkdown() + "\n")
+	b.WriteString("\n---\n\n_Analysis by " + model + "_\n")
+	return b.String()
+}
+
 // EmailBody renders the short, scannable digest: the most urgent issues and
 // anomalies, each with paste-ready commands.
 func (r *ReportAgent) EmailBody() string {
