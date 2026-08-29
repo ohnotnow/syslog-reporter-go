@@ -1,6 +1,5 @@
 // syslog-reporter: a batch tool that turns a noisy org-wide rsyslog stream
-// into a short, prioritised report for a sysadmin team. Go port of the
-// Python syslog_reporter; this entry point mirrors main.py.
+// into a short, prioritised report for a sysadmin team.
 package main
 
 import (
@@ -25,11 +24,13 @@ import (
 
 	"github.com/ohnotnow/syslog-reporter-go/internal/cli"
 	"github.com/ohnotnow/syslog-reporter-go/internal/reporter"
+	"github.com/ohnotnow/syslog-reporter-go/internal/selfupdate"
 	"github.com/ohnotnow/syslog-reporter-go/internal/web"
 )
 
-// version is stamped by the release build via -ldflags "-X main.version=...".
-var version = "dev"
+// version is stamped by the release build via -ldflags onto
+// internal/selfupdate.Version; this alias keeps the call sites short.
+var version = selfupdate.Version
 
 type logger struct {
 	debugEnabled bool
@@ -64,8 +65,8 @@ func getenvDefault(key, fallback string) string {
 	return fallback
 }
 
-// readLines mimics Python's readlines(): every line keeps its trailing
-// newline; a final line without one is kept as-is.
+// readLines reads all lines, each keeping its trailing newline; a final
+// line without one is kept as-is.
 func readLines(r io.Reader) ([]string, error) {
 	br := bufio.NewReaderSize(r, 1024*1024)
 	var lines []string
@@ -84,8 +85,8 @@ func readLines(r io.Reader) ([]string, error) {
 }
 
 func main() {
-	// Like python-dotenv: pick up a .env beside the binary's working
-	// directory without overriding variables already in the environment.
+	// Pick up a .env in the working directory without overriding variables
+	// already in the environment.
 	_ = godotenv.Load()
 
 	// Subcommand dispatch ahead of batch flag parsing. Later issues add
@@ -109,6 +110,10 @@ func main() {
 		case "mgmt-report":
 			runMgmtReport(os.Args[2:])
 			return
+		case "self-update":
+			// Explicit invocation only: nothing in the batch pipeline may
+			// trigger this. Exits directly; --check uses 0/1/2 codes.
+			os.Exit(selfupdate.Run(os.Args[2:]))
 		}
 	}
 	runBatch(os.Args[1:])
@@ -365,13 +370,16 @@ func runBatch(cliArgs []string) {
 		"Print the filtered log lines and exit (parity/debug tool).")
 	showVersion := fs.Bool("version", false, "Print the version and exit.")
 
-	// Python's argparse accepts flags after the positional logfile.
+	// Flags are accepted before or after the positional logfile.
 	positionals := cli.ParseFlagsAnywhere(fs, cliArgs)
 	if len(positionals) > 1 {
 		fatal("unrecognised extra arguments: %s", strings.Join(positionals[1:], " "))
 	}
 	if *showVersion {
 		fmt.Printf("syslog-reporter %s\n", version)
+		// Release builds also mention a newer release when one exists;
+		// dev builds and lookup failures stay a single line.
+		selfupdate.VersionCheck(os.Stdout)
 		return
 	}
 

@@ -42,7 +42,7 @@ jobs:
           ext=""
           if [ "$GOOS" = "windows" ]; then ext=".exe"; fi
           VERSION="${GITHUB_REF_NAME}"
-          go build -ldflags "-X main.version=${VERSION}" -o "syslog-reporter-${GOOS}-${GOARCH}${ext}" .
+          go build -ldflags "-X github.com/ohnotnow/syslog-reporter-go/internal/selfupdate.Version=${VERSION}" -o "syslog-reporter-${GOOS}-${GOARCH}${ext}" ./cmd/syslog-reporter
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
