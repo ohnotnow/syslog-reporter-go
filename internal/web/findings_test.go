@@ -180,6 +180,7 @@ func TestFindingDetailRendersBothKinds(t *testing.T) {
 		"VFS: file-max limit reached",
 		"logrotate unit disabled", "df -h /var",
 		"systemctl enable --now logrotate.timer", "Check retention policy first.",
+		"Review before pasting", // the paste caution (srg-so8ja.5)
 		"Did this fix it?", "Fixed it", "Did not fix it",
 	} {
 		if !strings.Contains(body, want) {
@@ -192,6 +193,7 @@ func TestFindingDetailRendersBothKinds(t *testing.T) {
 		"Chattier than its peers", "480 lines vs peer median 12",
 		"debian", "Failed password", "Credential scanning.",
 		"Check auth log source addresses", "lastb | head",
+		"Review before pasting", // the paste caution (srg-so8ja.5)
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("anomaly detail missing %q", want)

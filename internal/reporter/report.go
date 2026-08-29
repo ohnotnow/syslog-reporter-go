@@ -23,6 +23,12 @@ const AttachmentName = "email_attachment.md"
 // happen.
 const llmSkippedNote = "_Skipped - this was a --no-llm run, so no issue analysis was performed._\n"
 
+// commandCaution is the one factual safety line beside LLM-written commands
+// (srg-so8ja.5): log text is attacker-influenceable, so nobody gets to paste
+// unread and say they were never told. Same register as the truncation
+// notice - no greetings, no drama.
+const commandCaution = "_The commands in this report were written by an LLM from log text. Review before pasting; anything marked CHANGES STATE modifies the system._\n"
+
 type ReportAgent struct {
 	Issues      *IssueList
 	Resolutions *ResolutionList
@@ -65,6 +71,9 @@ func (r *ReportAgent) Run() string {
 	b.WriteString("## Issues\n")
 	b.WriteString(issues + "\n")
 	b.WriteString("\n## Resolutions\n")
+	if !r.LLMSkipped {
+		b.WriteString(commandCaution + "\n")
+	}
 	b.WriteString(resolutions + "\n")
 	b.WriteString("\n## Unusual Activity\n")
 	b.WriteString(r.anomaliesMarkdown() + "\n")
@@ -110,6 +119,9 @@ func (r *ReportAgent) emailBodyN(topIssues, topAnomalies int) string {
 	if totalIssues > len(issues) {
 		fmt.Fprintf(&b, "The %d most pressing of %d issues are below; the full breakdown is attached.\n\n",
 			len(issues), totalIssues)
+	}
+	if !r.LLMSkipped && (len(issues) > 0 || len(anomalies) > 0) {
+		b.WriteString(commandCaution + "\n")
 	}
 
 	if len(issues) == 0 {

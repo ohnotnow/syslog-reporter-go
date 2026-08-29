@@ -20,6 +20,7 @@
     <pre><code>{{.ExampleLogEntry}}</code></pre>
     {{if .Resolution}}{{with .Resolution}}
     <h2>Suggested resolution</h2>
+    <p class="quiet">These commands were written by an LLM from log text. Review before pasting; anything marked CHANGES STATE modifies the system.</p>
     <p><strong>Root cause:</strong> {{.RootCause}}</p>
     <h3>Investigate</h3>
     <pre><code>{{.Investigate}}</code></pre>
@@ -54,6 +55,7 @@
     {{end}}
     <h2>Suggested commands</h2>
     {{if .SuggestedCommands}}
+    <p class="quiet">These commands were written by an LLM from log text. Review before pasting; anything marked CHANGES STATE modifies the system.</p>
     <pre><code>{{range $i, $c := .SuggestedCommands}}{{if $i}}
 {{end}}{{$c}}{{end}}</code></pre>
     {{else}}

@@ -261,3 +261,34 @@ func tail(s string) string {
 	}
 	return s
 }
+
+// The paste caution (srg-so8ja.5) appears exactly once per layout when the
+// LLM stages ran, and never on a --no-llm run - there are no LLM commands
+// to warn about then, and clutter is its own failure.
+func TestCommandCautionOnBothLayoutsWhenLLMRan(t *testing.T) {
+	rep := &ReportAgent{
+		Issues:      &IssueList{Issues: []*Issue{testIssue("stuck", "high")}},
+		Resolutions: &ResolutionList{Resolutions: []*Resolution{testResolution("stuck")}},
+		Anomalies:   []*ExplainedAnomaly{testAnomaly()},
+		Model:       "openai/gpt-test",
+	}
+	for name, out := range map[string]string{"digest": rep.EmailBody(), "full": rep.Run()} {
+		if got := strings.Count(out, "Review before pasting"); got != 1 {
+			t.Errorf("%s layout: caution appears %d times, want exactly 1:\n%s", name, got, out)
+		}
+	}
+}
+
+func TestCommandCautionAbsentOnNoLLMRun(t *testing.T) {
+	rep := &ReportAgent{
+		Issues:      &IssueList{},
+		Resolutions: &ResolutionList{},
+		Anomalies:   []*ExplainedAnomaly{testAnomaly()},
+		LLMSkipped:  true,
+	}
+	for name, out := range map[string]string{"digest": rep.EmailBody(), "full": rep.Run()} {
+		if strings.Contains(out, "Review before pasting") {
+			t.Errorf("%s layout: caution present on a --no-llm run:\n%s", name, out)
+		}
+	}
+}
