@@ -29,39 +29,86 @@ var templateFS embed.FS
 //go:embed static
 var staticFS embed.FS
 
-type Config struct {
-	Listen   string // SYSLOG_WEB_LISTEN, host:port
-	CertFile string // SYSLOG_WEB_TLS_CERT; with KeyFile, serve HTTPS
-	KeyFile  string // SYSLOG_WEB_TLS_KEY
-	DBPath   string // SYSLOG_DB_PATH, the same file batch mode writes
-	AuthMode string // SYSLOG_AUTH_MODE: none (default) | local | oidc
-	Version  string // stamped binary version, shown in the footer
-	// SecureCookies (SYSLOG_WEB_SECURE_COOKIES=1) forces the session
-	// cookie's Secure flag on for the reverse-proxy deployment: the proxy
-	// owns TLS, this binary serves plain HTTP on loopback, and without the
-	// override the flag would be derived (wrongly, for the browser) from
-	// the built-in TLS setting alone (srg-so8ja.9).
-	SecureCookies bool
+// Logger is the slice of the CLI logger serve mode uses: request lines at
+// debug, security-relevant events (failed logins) at warn. A nil Logger
+// silences both.
+type Logger interface {
+	Debug(format string, args ...any)
+	Warn(format string, args ...any)
 }
 
-// ConfigFromEnv reads the SYSLOG_WEB_* settings. Plain HTTP (LAN and solo
-// use) is a supported first-class case, so no TLS vars is fine; exactly one
-// of the pair set is a configuration mistake and errors at startup.
+type Config struct {
+	Listen   string // --listen / SYSLOG_WEB_LISTEN, host:port
+	CertFile string // --tls-cert / SYSLOG_WEB_TLS_CERT; with KeyFile, serve HTTPS
+	KeyFile  string // --tls-key / SYSLOG_WEB_TLS_KEY
+	DBPath   string // --db / SYSLOG_DB_PATH, the same file batch mode writes
+	AuthMode string // --auth / SYSLOG_AUTH_MODE: none (default) | local | oidc
+	Version  string // stamped binary version, shown in the footer
+	// SecureCookies (--secure-cookies / SYSLOG_WEB_SECURE_COOKIES) forces
+	// the session cookie's Secure flag on for the reverse-proxy deployment:
+	// the proxy owns TLS, this binary serves plain HTTP on loopback, and
+	// without the override the flag would be derived (wrongly, for the
+	// browser) from the built-in TLS setting alone (srg-so8ja.9).
+	SecureCookies bool
+	Debug         bool   // log one line per request via Logger
+	Logger        Logger // nil silences request and login logging
+}
+
+// ConfigFromEnv reads the SYSLOG_WEB_* settings into a Config. Flags layer
+// on top of this in serve mode (flag wins), so this does NOT validate the
+// TLS pair: the pair may only become whole once flags are applied. Callers
+// run Validate after any overrides.
 func ConfigFromEnv() (Config, error) {
-	cfg := Config{
+	secure, err := parseBoolEnv("SYSLOG_WEB_SECURE_COOKIES")
+	if err != nil {
+		return Config{}, err
+	}
+	return Config{
 		// Port 7373: 73 kilos is what Vila weighs (owner's choice, Blake's 7).
 		Listen:        getenvDefault("SYSLOG_WEB_LISTEN", "127.0.0.1:7373"),
 		CertFile:      os.Getenv("SYSLOG_WEB_TLS_CERT"),
 		KeyFile:       os.Getenv("SYSLOG_WEB_TLS_KEY"),
 		DBPath:        getenvDefault("SYSLOG_DB_PATH", "syslog_aggregates.db"),
 		AuthMode:      getenvDefault("SYSLOG_AUTH_MODE", "none"),
-		SecureCookies: os.Getenv("SYSLOG_WEB_SECURE_COOKIES") == "1",
+		SecureCookies: secure,
+	}, nil
+}
+
+// Validate checks the combinations no deployment can mean. Plain HTTP (LAN
+// and solo use) is a supported first-class case, so no TLS pair is fine;
+// exactly one of the pair set is a configuration mistake.
+func (c Config) Validate() error {
+	if (c.CertFile == "") != (c.KeyFile == "") {
+		return errors.New(
+			"the TLS certificate and key must be set together (or neither, for plain HTTP)")
 	}
-	if (cfg.CertFile == "") != (cfg.KeyFile == "") {
-		return Config{}, errors.New(
-			"SYSLOG_WEB_TLS_CERT and SYSLOG_WEB_TLS_KEY must be set together (or neither, for plain HTTP)")
+	return nil
+}
+
+// parseBoolEnv reads an on/off environment variable strictly: the usual
+// truthy and falsy spellings work, anything else errors instead of
+// silently meaning off.
+func parseBoolEnv(key string) (bool, error) {
+	switch strings.ToLower(os.Getenv(key)) {
+	case "1", "true", "yes", "on":
+		return true, nil
+	case "", "0", "false", "no", "off":
+		return false, nil
+	default:
+		return false, fmt.Errorf("%s=%q is not a boolean (use 1/true/yes/on or 0/false/no/off)", key, os.Getenv(key))
 	}
-	return cfg, nil
+}
+
+func (c Config) logDebug(format string, args ...any) {
+	if c.Logger != nil {
+		c.Logger.Debug(format, args...)
+	}
+}
+
+func (c Config) logWarn(format string, args ...any) {
+	if c.Logger != nil {
+		c.Logger.Warn(format, args...)
+	}
 }
 
 func getenvDefault(key, fallback string) string {
@@ -200,10 +247,38 @@ func New(cfg Config, auth Authenticator, lib *reporter.LibraryStore) (*Server, e
 	return s, nil
 }
 
-// Handler exposes the full stack (CSRF, auth middleware, routes) without
-// the listener, for tests.
+// Handler exposes the full stack (request log, CSRF, auth middleware,
+// routes) without the listener, for tests.
 func (s *Server) Handler() http.Handler {
-	return s.csrf.Handler(s.auth.Middleware(s.mux))
+	h := s.csrf.Handler(s.auth.Middleware(s.mux))
+	if s.cfg.Debug {
+		h = s.requestLog(h)
+	}
+	return h
+}
+
+// statusWriter records the response code for the request log.
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(code int) {
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+// requestLog writes one debug line per request: method, path, status,
+// duration, client. What --debug is for.
+func (s *Server) requestLog(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+		start := time.Now()
+		next.ServeHTTP(sw, r)
+		s.cfg.logDebug("%s %s %d %s %s",
+			r.Method, r.URL.RequestURI(), sw.status,
+			time.Since(start).Round(time.Millisecond), r.RemoteAddr)
+	})
 }
 
 // Listen binds cfg.Listen, wrapped in TLS when a certificate pair is

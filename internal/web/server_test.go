@@ -54,14 +54,16 @@ func TestConfigFromEnvDefaultsToPlainHTTP(t *testing.T) {
 	}
 }
 
-func TestConfigFromEnvRejectsHalfATLSPair(t *testing.T) {
+// Validate (not ConfigFromEnv) owns the TLS-pair check: serve's flags can
+// complete a pair the environment only half-set, so the check runs after
+// any overrides.
+func TestValidateRejectsHalfATLSPair(t *testing.T) {
 	for _, tc := range []struct{ cert, key string }{
 		{"/etc/certs/reporter.pem", ""},
 		{"", "/etc/certs/reporter.key"},
 	} {
-		t.Setenv("SYSLOG_WEB_TLS_CERT", tc.cert)
-		t.Setenv("SYSLOG_WEB_TLS_KEY", tc.key)
-		if _, err := ConfigFromEnv(); err == nil {
+		cfg := Config{CertFile: tc.cert, KeyFile: tc.key}
+		if err := cfg.Validate(); err == nil {
 			t.Errorf("cert=%q key=%q: expected an error", tc.cert, tc.key)
 		}
 	}
@@ -76,6 +78,34 @@ func TestConfigFromEnvAcceptsAFullTLSPair(t *testing.T) {
 	}
 	if cfg.CertFile == "" || cfg.KeyFile == "" {
 		t.Errorf("TLS pair lost: %q / %q", cfg.CertFile, cfg.KeyFile)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("full pair should validate: %v", err)
+	}
+}
+
+func TestSecureCookiesEnvSpellings(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  bool
+	}{
+		{"", false}, {"0", false}, {"false", false}, {"no", false}, {"off", false},
+		{"1", true}, {"true", true}, {"YES", true}, {"On", true},
+	} {
+		t.Setenv("SYSLOG_WEB_SECURE_COOKIES", tc.value)
+		cfg, err := ConfigFromEnv()
+		if err != nil {
+			t.Errorf("value %q: unexpected error %v", tc.value, err)
+			continue
+		}
+		if cfg.SecureCookies != tc.want {
+			t.Errorf("value %q: SecureCookies = %v, want %v", tc.value, cfg.SecureCookies, tc.want)
+		}
+	}
+	// Junk must error, never silently mean off.
+	t.Setenv("SYSLOG_WEB_SECURE_COOKIES", "definitely")
+	if _, err := ConfigFromEnv(); err == nil {
+		t.Error("junk SYSLOG_WEB_SECURE_COOKIES should error")
 	}
 }
 

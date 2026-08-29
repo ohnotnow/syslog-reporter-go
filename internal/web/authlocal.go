@@ -114,8 +114,10 @@ func (a *localAuth) handleLogin(w http.ResponseWriter, r *http.Request) {
 	password := r.PostFormValue("password")
 	next := safeNext(r.PostFormValue("next"))
 	// One generic message for every failure, so the form cannot be used to
-	// enumerate usernames.
+	// enumerate usernames. The log line names the username (this is the
+	// operator's own audit trail, syslog-style), never the password.
 	fail := func() {
+		a.cfg.logWarn("failed login for %q from %s", username, ip)
 		a.throttle.fail(ip)
 		a.renderLogin(w, loginData{
 			Error:    "That username and password combination was not recognised.",
