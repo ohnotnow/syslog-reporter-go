@@ -14,6 +14,8 @@ For a high-level tour of the process see
 [HOW_IT_WORKS.md](HOW_IT_WORKS.md); for a deeper dive see
 [TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md).
 
+![The findings library web UI: a filterable table of findings with date, kind, severity, service, hosts and outcome columns](docs/findings-list.png)
+
 ## What it does
 
 - Filters a day of raw syslog text (or an ELK NDJSON dump) down to the
@@ -27,6 +29,10 @@ For a high-level tour of the process see
   explain the strongest anomalies.
 - Renders a short email digest plus a longer full report, and
   optionally sends them over as an email.
+- Files every run's findings into a local SQLite library, browsable
+  through a built-in web UI or from the terminal, with a
+  worked / didn't-work vote on each finding so the team learns which
+  suggested fixes actually fix things.
 
 ## Getting started
 
@@ -72,6 +78,31 @@ through. `./syslog-reporter --help` lists every flag;
 [TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md) has the full flag and
 environment-variable reference and the known-knowns suppression file.
 
+## The findings library
+
+Each batch run also records what it found (issues merged with their
+suggested fixes, plus the explained anomalies) in the same SQLite file
+as the history, so the morning report stops being throwaway. To browse
+the accumulated findings:
+
+```bash
+# a small web UI on http://127.0.0.1:7373
+./syslog-reporter serve
+
+# or straight from the terminal
+./syslog-reporter findings list --host web-01 --severity high
+./syslog-reporter findings show 42
+./syslog-reporter findings feedback 42 worked --comment "cache cleared, sorted"
+```
+
+The web UI is the same single binary with no extra services: search and
+filters over every past finding, and a worked / didn't-work vote (with
+an optional note) on each one. By default it listens on localhost only
+with no login; for a shared box there is a local-accounts mode
+(`syslog-reporter user add`) and optional TLS. See
+[HOW_IT_WORKS.md](HOW_IT_WORKS.md) for a tour with screenshots and
+[TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md) for the full reference.
+
 ## Example of an issue
 
 ```markdown
@@ -103,6 +134,11 @@ ssh example-host 'uptime; sensors 2>/dev/null; ps -eo pid,pcpu,pmem,cmd --sort=-
 
 _Note: Replace unit placeholders only after identifying the actual runaway unit; take example-host offline or power it down if temperatures remain beyond hardware limits._
 ```
+
+The same write-ups land in the findings library, where each one can
+later be marked as having fixed the problem or not:
+
+![A finding's detail page in the web UI: the issue write-up with severity, impact, an example log entry, and suggested investigate and fix commands](docs/finding-detail.png)
 
 ## Contributing
 

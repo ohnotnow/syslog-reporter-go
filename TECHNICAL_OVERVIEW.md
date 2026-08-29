@@ -1,6 +1,6 @@
 # Technical Overview
 
-Last updated: 2026-08-28
+Last updated: 2026-08-29
 
 ## What this is
 
@@ -8,7 +8,9 @@ A command-line tool that turns a noisy org-wide syslog into a short,
 prioritised report of genuine issues (each with paste-ready investigate/fix
 commands) plus a statistical anomaly check, intended as a morning email for a
 sysadmin team. Input is raw rsyslog text or an NDJSON dump from an ELK
-cluster. A plain-language tour for non-developers lives in
+cluster. Every run also files its findings into a queryable library in the
+same SQLite file, served by the same binary as a small web UI (`serve`) and
+a findings CLI. A plain-language tour for non-developers lives in
 [HOW_IT_WORKS.md](HOW_IT_WORKS.md).
 
 This is the production implementation. The pipeline was first proven in a
@@ -22,16 +24,20 @@ and a model-attribution footer on both report layouts.
 
 ## Stack
 
-- Go (stdlib-first; `flag`, `net/smtp`, `database/sql`, `text/template`)
+- Go (stdlib-first; `flag`, `net/smtp`, `database/sql`, `text/template`,
+  `net/http` with Go 1.22+ pattern routing, `html/template`, `go:embed`)
 - modernc.org/sqlite (pure Go, no CGO, cross-compiles cleanly)
 - Official provider SDKs: openai-go and anthropic-sdk-go
 - pelletier/go-toml (known-knowns file), joho/godotenv (.env loading)
+- Web UI: htmx, vendored and pinned (no CDN); alexedwards/scs for
+  sessions; x/crypto bcrypt and x/term for local accounts
 - Tests use the stdlib `testing` package only
 
 ## Directory structure
 
 ```
-main.go                     CLI entry point; wires the pipeline
+main.go                     CLI entry point; subcommand dispatch (serve, user,
+                            findings) ahead of the batch pipeline
 internal/reporter/
   pyfmt.go                  Python-semantics helpers (split, number formatting,
                             repr); report parity with the original pipeline
@@ -49,6 +55,15 @@ internal/reporter/
   llmagents.go prompts/     the four LLM agents + embedded system prompts
   report.go                 both report layouts (digest + full attachment)
   emailer.go                SMTP send: digest body + markdown attachment
+  capture.go                files one run's findings into the library
+  librarystore.go           the findings library: runs/findings/feedback/users
+                            tables, search, feedback upserts (same SQLite file
+                            as the aggregates)
+internal/web/               serve mode: stdlib+htmx findings UI, auth seam
+                            (none/local drivers), hot-reloading TLS; templates
+                            and static assets embedded via go:embed
+internal/cli/               the findings subcommands (list/show/feedback) and
+                            the argparse-style flag helper
 internal/llm/               provider seam: model-string prefix -> official SDK
 tools/elk_dump.py           day-bounded NDJSON dumper for an ELK cluster
                             (stdlib-only python3; runs on any box with read
@@ -139,9 +154,108 @@ state-changing commands must start `# CHANGES STATE:`.
 Both report layouts end with `_Analysis by <model>_` when the LLM stages
 ran, so teams comparing models can tell reports apart.
 
+## The findings library
+
+Every batch run files its findings into the library at report time
+(`capture.go`): each issue is stored merged with its resolution (the same
+title-match pairing the report itself uses), and each explained anomaly is
+stored whole. The library lives in the SAME SQLite file as the aggregates
+(`librarystore.go`) and keeps the store's minimal-pragma style: default
+rollback journal (no WAL), declarative-only foreign keys, and
+`CREATE TABLE IF NOT EXISTS` as the whole migration story. The new tables
+(`runs`, `findings`, `finding_hosts`, `feedback`, `users`) are additive and
+carry no Python compatibility burden - the aggregates compatibility
+contract is unchanged.
+
+Capture semantics worth knowing:
+
+- Idempotent per day: re-running a date REPLACES that day's run, findings
+  AND any feedback votes on them. Backfills and re-runs stay clean;
+  losing a re-run day's votes is the accepted cost.
+- `--no-store` skips capture entirely (as it skips the aggregates);
+  `--dump-filtered` never reaches capture.
+- A capture failure is logged as a warning and costs the library one
+  day, never the report or the email.
+- On `--no-llm` runs the run's model is stored as NULL and issue-kind
+  findings simply don't exist (no LLM, no issues); the anomaly facts are
+  still captured.
+
+### serve mode
+
+`syslog-reporter serve` is the findings library web UI: one binary, no
+extra services. Stdlib `net/http` with Go 1.22+ pattern routing,
+`html/template`, and `go:embed` for every asset; htmx (vendored, pinned)
+progressively enhances the list page's filtering and the feedback form,
+which both work without JavaScript. Configuration is environment-only
+(`SYSLOG_WEB_LISTEN`, default `127.0.0.1:7373`). Routes: the findings list
+at `/` (substring filters for host/service and title search, exact-match
+severity/kind dropdowns, an inclusive date range, pagination at 50), the
+detail page at `/findings/{id}`, and `POST /findings/{id}/feedback`.
+Cross-origin POSTs are rejected via `http.CrossOriginProtection`. The
+list page's status line is an aria-live region that persists across htmx
+swaps (a replaced live-region node is not reliably announced).
+
+Feedback is one vote per user per finding (a partial-unique upsert;
+anonymous is a single shared voter). A re-vote always updates the verdict,
+and an empty comment on a re-vote KEEPS the existing note - the comment
+box is deliberately never prefilled, so flipping a verdict cannot wipe a
+voter's own note. There is no comment-clearing path.
+
+### Auth modes
+
+`SYSLOG_AUTH_MODE` selects a driver behind one seam (`auth.go`); the rest
+of the app only asks "who is the current user, if anyone?".
+
+- `none` (default): no login, every page open, feedback is the single
+  anonymous vote. The right mode for a solo sysadmin on localhost.
+- `local`: form login against a bcrypt `users` table in the same SQLite
+  file. Accounts are created with
+  `syslog-reporter user add <username> <email>` (password prompted
+  without echo, or `--password-stdin` for scripted use; never a CLI
+  argument). Sessions are held in memory, so a restart logs everyone
+  out - accepted for this tool. Failed logins pay the bcrypt cost even
+  for unknown usernames, so response time is not a username oracle.
+- `oidc`: not built yet; errors at startup.
+
+### TLS
+
+Set `SYSLOG_WEB_TLS_CERT` and `SYSLOG_WEB_TLS_KEY` together for HTTPS
+(neither means plain HTTP; exactly one is a startup error). The
+certificate pair hot-reloads on mtime change at the next handshake, so an
+external renewal script can drop new files in place without a restart; a
+half-written or mismatched pair mid-renewal keeps serving the previous
+good one.
+
+### The findings CLI
+
+For terminal-only use, the same library over plain commands - same
+binary, same SQLite file, no server needed; a local shell on the box IS
+the auth:
+
+```bash
+syslog-reporter findings list [--host S] [--service S] [--severity X]
+                              [--kind X] [--search S] [--since D] [--until D]
+                              [--limit N] [--json]
+syslog-reporter findings show <id> [--json]
+syslog-reporter findings feedback <id> (worked|didnt-work)
+                              [--comment "..."] [--user NAME]
+```
+
+Filters match the web UI's semantics (substring for host/service/search,
+exact for severity/kind). Output is plain tabwriter text, or `--json` for
+scripting. Feedback votes are attributed by matching your OS username
+against the users table, falling back to the anonymous vote; an explicit
+`--user` must match a users-table row (unknown is an error, never a
+silent anonymous fallback). All findings subcommands take `--db`.
+
 ## Configuration
 
 ### CLI flags
+
+The first argument may be a subcommand: `serve` (web UI), `user add`
+(local accounts) and `findings` (list/show/feedback), all documented
+above. Anything else is the batch report path, whose contract is
+unchanged:
 
 ```
 logfile          positional: path to the syslog file; omit (or pass --) to
@@ -186,6 +300,11 @@ Read from the environment or a `.env` beside the working directory
   IPs) so the committed filter stays estate-neutral
 - `SYSLOG_KNOWN_KNOWNS` path to the known-knowns TOML (default
   `known_knowns.toml`; CLI `--known-knowns` overrides; missing file means none)
+- `SYSLOG_WEB_LISTEN` serve mode's host:port (default `127.0.0.1:7373`)
+- `SYSLOG_WEB_TLS_CERT` / `SYSLOG_WEB_TLS_KEY` certificate pair for HTTPS
+  in serve mode; both or neither (see the TLS section above)
+- `SYSLOG_AUTH_MODE` serve mode's auth driver: `none` (default), `local`,
+  or `oidc` (not built yet)
 - `ELK_URL`, `ELK_USERNAME`/`ELK_PASSWORD` or `ELK_API_KEY`, `ELK_INDEX` are
   read by `tools/elk_dump.py` only
 
@@ -221,6 +340,7 @@ go test ./...
 ./syslog-reporter dump.ndjson.gz --no-llm --db /tmp/scratch.db   # free run
 ./syslog-reporter dump.ndjson.gz --model openai/gpt-4o-mini      # full run
 ./syslog-reporter --dump-filtered dump.ndjson.gz                 # filter debug
+SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve           # findings UI
 ```
 
 ## Releases

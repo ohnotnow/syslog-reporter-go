@@ -5,6 +5,9 @@ org-wide syslog stream into a short, prioritised email report for a small
 university sysadmin team. Deterministic code (filters, counts, robust
 statistics) decides *what* is worth surfacing; the LLM only explains
 findings and writes paste-ready commands. Alert fatigue is the enemy.
+Since milestone 3 the same binary also keeps a findings library (every
+run's findings captured to SQLite) served as a stdlib+htmx web UI
+(`serve`) and a findings CLI.
 
 This repo is a **replacement, not a sibling** of the Python original at
 `~/Documents/code/syslog_reporter` (GitHub: ohnotnow's
@@ -40,6 +43,10 @@ internal/reporter/
   models.go report.go       report data models + both report layouts
   llmagents.go prompts/     the four LLM agents + embedded system prompts
   emailer.go                SMTP digest + markdown-attachment sender
+  capture.go                files one run's findings into the library
+  librarystore.go           findings library store (runs/findings/feedback/users)
+internal/web/               serve mode: findings UI, auth seam, hot-reload TLS
+internal/cli/               findings subcommands + ParseFlagsAnywhere
 internal/llm/               provider seam: litellm-style prefix -> official SDK
 tools/elk_dump.py           ELK NDJSON dumper (copied verbatim from the Python repo)
 ```
@@ -50,6 +57,9 @@ tools/elk_dump.py           ELK NDJSON dumper (copied verbatim from the Python r
 go build -o syslog-reporter .        # single static-ish binary
 go test ./...                        # stdlib testing only
 ./syslog-reporter <dump.ndjson.gz> --no-llm --db /tmp/scratch.db   # free run
+SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.0.0.1:7373
+./syslog-reporter findings list --db /tmp/scratch.db     # findings CLI (list/show/feedback)
+./syslog-reporter user add <username> <email>            # local-auth account (--password-stdin)
 ```
 
 ## Conventions and gotchas
@@ -81,6 +91,19 @@ go test ./...                        # stdlib testing only
 - The aggregate store deliberately does NOT enable WAL: the Python
   original leaves SQLite's default journal mode, and drop-in db
   compatibility wins over the usual Go conventions.
+- The findings library lives in the SAME SQLite file as the aggregates
+  (librarystore.go, same no-WAL style). Its tables are additive: the
+  aggregates compatibility contract is unchanged and the new tables
+  carry no Python burden. Capture is idempotent per day - re-running a
+  date REPLACES that day's run, findings AND feedback votes. Feedback is
+  one vote per user per finding (anonymous is a shared singleton);
+  a re-vote updates the verdict but an EMPTY comment keeps the existing
+  note (owner decision 2026-08-28) - there is no comment-clearing path.
+- serve mode is env-configured only (SYSLOG_WEB_LISTEN, SYSLOG_AUTH_MODE,
+  SYSLOG_WEB_TLS_CERT/_KEY). Default port 7373 is a Blake's 7 joke
+  (Vila weighs 73 kilos); do not "fix" it. Auth mode oidc errors at
+  startup - deferred (ait srg-2KY5X.5) until the owner is present for a
+  Keycloak round-trip.
 - `--dump-filtered` prints the post-filter lines and exits. Born as the
   milestone-1 parity diff tool, promoted to a documented filter-tuning
   aid (owner decision 2026-08-28) now the Python repo is archived.

@@ -59,6 +59,38 @@ The design splits the work in two, on purpose:
    day. Each report names the AI model that wrote the analysis, so teams
    trying different models can compare quality against cost.
 
+## The findings library
+
+Each run also files what it found in a small library, kept in the same
+local database as the history. That turns the daily email from a
+throwaway into a growing record: was this host doing the same thing last
+month? Did the suggested fix work when someone tried it?
+
+The library comes with a built-in web page, served by the same program
+with nothing else to install:
+
+![The findings list page: a filterable table of findings with date, kind, severity, service, hosts and outcome columns](docs/findings-list.png)
+
+Findings can be searched and filtered by host, service, severity, kind
+and date. Each one opens into the full write-up from its day's report,
+with the explanation and the ready-to-paste commands:
+
+![A finding's detail page: the issue write-up with severity, impact, an example log entry, and suggested investigate and fix commands](docs/finding-detail.png)
+
+At the bottom of every finding is the part that makes the library more
+than an archive: a "fixed it" / "did not fix it" vote, with room for a
+short note ("the logrotate config had a typo since the June rebuild").
+The team's experience accumulates next to the AI's suggestions, so the
+next person to hit the same problem can see what actually worked.
+
+For sysadmins who live in a terminal, the same library is available as
+plain commands (list, show, give feedback) without running the web page
+at all. Both views read the same database; nothing needs syncing.
+
+The web page listens only on the machine it runs on unless told
+otherwise, and for a shared server it supports named user accounts, so
+votes and notes show who left them.
+
 ## What it costs
 
 The deterministic stages are free and quick to run. The AI stages read only
@@ -84,4 +116,5 @@ between cost, speed and quality; a no-AI mode runs the free half alone.
 Raw logs stay on our own machines. The only data that leaves is the filtered
 residue, sent to the configured AI provider's API for analysis. The provider
 and model are configurable, and the reports themselves are only ever emailed
-to the team.
+to the team. The findings library and its feedback live in the same local
+database file as the history and never leave the machine.
