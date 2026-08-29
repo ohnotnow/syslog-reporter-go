@@ -103,8 +103,8 @@ speed/quality/price trade-off on your own terms:
 ```bash
 ./syslog-reporter eval --model openai/gpt-4o-mini
 ./syslog-reporter eval --model anthropic/claude-sonnet-4-6
-# or point it at a sample of your own filtered lines
-./syslog-reporter eval --model azure/your-deployment --input my-sample.log
+# or point it at a day of your own logs (the noise filter runs first)
+./syslog-reporter eval --model azure/your-deployment --input yesterday.log
 ```
 
 ## The findings library

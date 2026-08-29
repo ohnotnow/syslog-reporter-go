@@ -26,13 +26,15 @@ func TestEvalOutputNameSanitisesTheModelString(t *testing.T) {
 
 func TestEvalFrontMatterRendersEveryField(t *testing.T) {
 	meta := evalMeta{
-		Model:     "openai/gpt-4o-mini",
-		Generated: time.Date(2026, 8, 29, 15, 12, 3, 0, time.UTC),
-		Detect:    1500 * time.Millisecond,
-		Dedupe:    250 * time.Millisecond,
-		Resolve:   2 * time.Second,
-		Total:     3750 * time.Millisecond,
-		Usage:     llm.Usage{PromptTokens: 1234, CompletionTokens: 567},
+		Model:         "openai/gpt-4o-mini",
+		Generated:     time.Date(2026, 8, 29, 15, 12, 3, 0, time.UTC),
+		InputLines:    5000,
+		FilteredLines: 480,
+		Detect:        1500 * time.Millisecond,
+		Dedupe:        250 * time.Millisecond,
+		Resolve:       2 * time.Second,
+		Total:         3750 * time.Millisecond,
+		Usage:         llm.Usage{PromptTokens: 1234, CompletionTokens: 567},
 	}
 	got := evalFrontMatter(meta)
 	if !strings.HasPrefix(got, "---\n") || !strings.HasSuffix(got, "---\n") {
@@ -41,6 +43,8 @@ func TestEvalFrontMatterRendersEveryField(t *testing.T) {
 	for _, want := range []string{
 		"model: openai/gpt-4o-mini",
 		"generated: 2026-08-29T15:12:03Z",
+		"input_lines: 5000",
+		"filtered_lines: 480",
 		"duration_detection: 1.5s",
 		"duration_dedupe: 250ms",
 		"duration_resolution: 2s",

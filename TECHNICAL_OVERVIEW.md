@@ -327,14 +327,15 @@ logfile          positional: path to the syslog file; omit (or pass --) to
 ```
 
 `eval --model <provider/model>` compares provider/model combinations
-cheaply: it runs the real detection -> dedupe -> resolution stages through
-the production provider seam over a bundled fictional-hostname fixture
-(`--input` overrides it) and writes
-`eval_<sanitised-model>_<timestamp>.md` (`--out` overrides): front-matter
-with per-stage durations and the SDK-reported prompt/completion token
-counts, then the report fragment. No cost is computed - multiply the
-tokens by your own price sheet. Compare several models with a shell loop
-over `--model` invocations.
+cheaply: it runs the noise filter and then the real detection -> dedupe ->
+resolution stages through the production provider seam, over a bundled
+fictional-hostname sample (`--input <file>` overrides it, raw or filtered
+lines), and writes `eval_<sanitised-model>_<timestamp>.md` (`--out`
+overrides): front-matter with input/filtered line counts, per-stage
+durations and the SDK-reported prompt/completion token counts, then the
+report fragment. No cost is computed - multiply the tokens by your own
+price sheet. Compare several models with a shell loop over `--model`
+invocations.
 
 ### Environment variables
 
