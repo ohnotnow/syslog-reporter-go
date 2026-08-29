@@ -39,6 +39,18 @@ func ParseFlagsAnywhere(fs *flag.FlagSet, args []string) []string {
 
 const findingsUsage = "usage: syslog-reporter findings <list|show|feedback> [options]"
 
+const findingsHelp = `Query the findings library and record fix outcomes from the terminal.
+` + findingsUsage + `
+
+  list      list findings; filter by --host, --service, --severity, --kind,
+            --since/--until, --search; --json for scripting
+  show      full detail for one finding, including its suggested resolution
+  feedback  record a worked / didnt-work verdict with an optional --comment
+
+Run 'syslog-reporter findings <subcommand> --help' for each one's flags.
+All three read the shared SQLite file (SYSLOG_DB_PATH or --db).
+`
+
 // RunFindings dispatches the findings subcommands. defaultDB is the
 // resolved SYSLOG_DB_PATH default; each subcommand's --db can override it.
 func RunFindings(defaultDB string, args []string, out io.Writer) error {
@@ -46,6 +58,9 @@ func RunFindings(defaultDB string, args []string, out io.Writer) error {
 		return fmt.Errorf("%s", findingsUsage)
 	}
 	switch args[0] {
+	case "--help", "-h", "help":
+		fmt.Fprint(out, findingsHelp)
+		return nil
 	case "list":
 		return runList(defaultDB, args[1:], out)
 	case "show":

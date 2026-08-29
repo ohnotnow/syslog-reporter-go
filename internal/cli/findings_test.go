@@ -238,3 +238,15 @@ func TestFeedbackAttribution(t *testing.T) {
 func intArg(id int64) string {
 	return strconv.FormatInt(id, 10)
 }
+
+func TestFindingsHelpListsTheSubcommands(t *testing.T) {
+	var out bytes.Buffer
+	if err := RunFindings("unused.db", []string{"--help"}, &out); err != nil {
+		t.Fatalf("--help should not error: %v", err)
+	}
+	for _, want := range []string{"list", "show", "feedback", "SYSLOG_DB_PATH"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("findings help missing %q", want)
+		}
+	}
+}

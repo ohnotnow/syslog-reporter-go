@@ -37,7 +37,13 @@ func Run(args []string) int {
 	fs.BoolVar(&yes, "y", false, "")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			fmt.Println("usage: syslog-reporter self-update [--check] [--yes]")
+			fmt.Print(`Replace this binary with the latest GitHub release (checksum-verified).
+usage: syslog-reporter self-update [--check] [--yes]
+  --check    report whether a newer release exists without downloading;
+             exits 0 when current, 1 when newer is available, 2 on lookup failure
+  --yes, -y  skip the confirmation prompt
+Release builds only: a dev build refuses to overwrite itself.
+`)
 			return 0
 		}
 		fmt.Fprintf(os.Stderr, "syslog-reporter: self-update: %v\n", err)

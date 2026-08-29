@@ -97,34 +97,7 @@ func main() {
 		llm.SetRedactions(strings.Split(v, ","))
 	}
 
-	// Subcommand dispatch ahead of batch flag parsing. Later issues add
-	// more subcommands (user, findings) alongside serve; everything else
-	// falls through to the batch report path, whose CLI contract
-	// (positional dump path, flags in any position) is unchanged.
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "serve":
-			runServe(os.Args[2:])
-			return
-		case "user":
-			runUser(os.Args[2:])
-			return
-		case "findings":
-			defaultDB := getenvDefault("SYSLOG_DB_PATH", "syslog_aggregates.db")
-			if err := cli.RunFindings(defaultDB, os.Args[2:], os.Stdout); err != nil {
-				fatal("%v", err)
-			}
-			return
-		case "mgmt-report":
-			runMgmtReport(os.Args[2:])
-			return
-		case "self-update":
-			// Explicit invocation only: nothing in the batch pipeline may
-			// trigger this. Exits directly; --check uses 0/1/2 codes.
-			os.Exit(selfupdate.Run(os.Args[2:]))
-		}
-	}
-	runBatch(os.Args[1:])
+	os.Exit(dispatch(os.Args[1:], os.Stdout, os.Stderr))
 }
 
 // runMgmtReport renders the periodic management summary (ait srg-YHETx): a
@@ -137,6 +110,7 @@ func main() {
 // SYSLOG_SMTP_RECIPIENTS).
 func runMgmtReport(args []string) {
 	fs := flag.NewFlagSet("mgmt-report", flag.ExitOnError)
+	setUsage(fs, mgmtHelpIntro, mgmtHelpEnv)
 	days := fs.Int("days", 30, "Number of days the report covers, ending yesterday")
 	sendEmail := fs.Bool("send-email", false, "Email the report to SYSLOG_MGMT_RECIPIENTS")
 	dbPath := fs.String("db", getenvDefault("SYSLOG_DB_PATH", "syslog_aggregates.db"),
@@ -218,6 +192,7 @@ func runMgmtReport(args []string) {
 // SYSLOG_DB_PATH.
 func runServe(args []string) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
+	setUsage(fs, serveHelpIntro, serveHelpEnv)
 	debug := fs.Bool("debug", false, "Print extra debug information")
 	fs.Parse(args)
 	if fs.NArg() > 0 {
@@ -278,10 +253,15 @@ func runServe(args []string) {
 // accepted as a CLI argument and never echoed or logged.
 func runUser(args []string) {
 	const usage = "usage: syslog-reporter user add <username> <email> [--password-stdin] [--db <path>]"
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h" || args[0] == "help") {
+		fmt.Print(userHelp)
+		return
+	}
 	if len(args) == 0 || args[0] != "add" {
 		fatal(usage)
 	}
 	fs := flag.NewFlagSet("user add", flag.ExitOnError)
+	fs.Usage = func() { fmt.Fprint(fs.Output(), userHelp) }
 	passwordStdin := fs.Bool("password-stdin", false,
 		"Read the password from stdin instead of prompting (for scripted use).")
 	dbPath := fs.String("db", getenvDefault("SYSLOG_DB_PATH", "syslog_aggregates.db"),
@@ -361,7 +341,8 @@ func runBatch(cliArgs []string) {
 		fatal("SYSLOG_DB_KEEP_DAYS must be an integer: %v", err)
 	}
 
-	fs := flag.NewFlagSet("syslog-reporter", flag.ExitOnError)
+	fs := flag.NewFlagSet("run", flag.ExitOnError)
+	setUsage(fs, runHelpIntro, runHelpEnv)
 	model := fs.String("model", defaultModel, "Model to use (litellm format)")
 	filePath := fs.String("file", "--", "Alternative way to pass the file; or -- for stdin")
 	format := fs.String("format", "auto",
@@ -384,20 +365,12 @@ func runBatch(cliArgs []string) {
 		"Skip every LLM stage (issue detection, dedupe, resolutions, anomaly "+
 			"explanations) so the run costs nothing.")
 	dumpFiltered := fs.Bool("dump-filtered", false,
-		"Print the filtered log lines and exit (parity/debug tool).")
-	showVersion := fs.Bool("version", false, "Print the version and exit.")
+		"Print the filtered log lines and exit (the filter-tuning aid).")
 
 	// Flags are accepted before or after the positional logfile.
 	positionals := cli.ParseFlagsAnywhere(fs, cliArgs)
 	if len(positionals) > 1 {
 		fatal("unrecognised extra arguments: %s", strings.Join(positionals[1:], " "))
-	}
-	if *showVersion {
-		fmt.Printf("syslog-reporter %s\n", version)
-		// Release builds also mention a newer release when one exists;
-		// dev builds and lookup failures stay a single line.
-		selfupdate.VersionCheck(os.Stdout)
-		return
 	}
 
 	// The positional path wins; fall back to --file; "--" (or nothing) means stdin.
