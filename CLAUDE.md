@@ -69,11 +69,13 @@ SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.
   copyright notice in the README. Never soften to MIT/Apache.
 - **No em dashes anywhere, including output** (owner decision 2026-08-28):
   the Go report emits plain hyphens where the Python original emits em
-  dashes. The only other deliberate report divergence is the model
-  footer (`_Analysis by <model>_`, owner decision 2026-08-28) appended
-  to both layouts when the LLM stages ran. Everything else is
-  byte-identical; parity tooling must canonicalise dashes and strip the
-  footer before diffing.
+  dashes. The other deliberate report divergences: the model footer
+  (`_Analysis by <model>_`, owner decision 2026-08-28) appended to both
+  layouts when the LLM stages ran, and the digest's cheery greeting line
+  removed (owner decision 2026-08-29, "Eddie the Computer" fatigue) -
+  only a factual truncation notice remains, and only when issues were
+  actually truncated. Everything else is byte-identical; parity tooling
+  must canonicalise dashes and strip the footer before diffing.
 - The LLM stages live in `internal/reporter/llmagents.go` with prompts
   embedded from `internal/reporter/prompts/` (ports of the Python
   `agents/prompts/*.j2`, em dashes replaced per the dash rule);
@@ -84,7 +86,13 @@ SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.
   OpenAI verbatim; for Anthropic it maps onto `output_config.effort`
   (`none`/`minimal` clamp to `low`). `--send-email` is ported and was
   verified against a local mailhog: recipients ride the SMTP envelope
-  only (BCC), the To header carries the sender.
+  only (BCC), the To header carries the sender. Since srg-kOKT9 (owner
+  decision 2026-08-29) the daily email body is multipart/alternative -
+  plain part = digest markdown VERBATIM, HTML part = goldmark render
+  (GFM only: never Typographer, which smartens hyphens into banned
+  dashes; never WithUnsafe, the body embeds LLM prose) - with both
+  markdown files attached. The Python original sent plain-only; it is
+  an archived prototype, so this divergence is deliberate.
 - `internal/reporter` reproduces Python dict insertion order with ordered
   map types (Counts, PairTotals, PairHistory) so stable-sort tie-breaks
   land where the original's do. Don't swap them for plain Go maps.

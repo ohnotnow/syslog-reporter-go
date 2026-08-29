@@ -100,6 +100,67 @@ func TestLibraryOpenOnExistingAggregatesDBLeavesAggregatesAlone(t *testing.T) {
 	}
 }
 
+func TestLibraryOpenRetrofitsStatsColumnsOnOldDatabase(t *testing.T) {
+	// A database created before srg-YHETx.1: runs table without the stats
+	// columns, one captured row. Opening the store must add the columns,
+	// keep the old row readable with NULL stats, and let new runs record
+	// theirs.
+	path := filepath.Join(t.TempDir(), "old.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE runs (
+		id         INTEGER PRIMARY KEY,
+		log_date   TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		model      TEXT
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(
+		"INSERT INTO runs (log_date, created_at, model) VALUES (?, ?, ?)",
+		"2026-05-01", "2026-05-02T06:00:00Z", "openai/gpt-test"); err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	lib := openTestLibrary(t, path)
+	var rawLines, filteredLines sql.NullInt64
+	if err := lib.db.QueryRow(
+		"SELECT raw_lines, filtered_lines FROM runs WHERE log_date = '2026-05-01'").
+		Scan(&rawLines, &filteredLines); err != nil {
+		t.Fatalf("old row after retrofit: %v", err)
+	}
+	if rawLines.Valid || filteredLines.Valid {
+		t.Errorf("pre-change row should have NULL stats, got %+v/%+v", rawLines, filteredLines)
+	}
+
+	runID, err := lib.BeginRun(day(2026, 6, 1), "")
+	if err != nil {
+		t.Fatalf("begin run on retrofitted db: %v", err)
+	}
+	if err := lib.SetRunStats(runID, 2000, 75); err != nil {
+		t.Fatalf("set run stats: %v", err)
+	}
+	if err := lib.db.QueryRow(
+		"SELECT raw_lines, filtered_lines FROM runs WHERE id = ?", runID).
+		Scan(&rawLines, &filteredLines); err != nil {
+		t.Fatal(err)
+	}
+	if rawLines.Int64 != 2000 || filteredLines.Int64 != 75 {
+		t.Errorf("new run stats = %d/%d, want 2000/75", rawLines.Int64, filteredLines.Int64)
+	}
+
+	// Reopening must be a no-op, not a duplicate-column error.
+	again := openTestLibrary(t, path)
+	if _, err := again.BeginRun(day(2026, 6, 2), ""); err != nil {
+		t.Fatalf("second open: %v", err)
+	}
+}
+
 func TestLibraryFindingPayloadsRoundTrip(t *testing.T) {
 	lib := newTestLibrary(t)
 	runID, err := lib.BeginRun(day(2026, 6, 1), "openai/gpt-test")

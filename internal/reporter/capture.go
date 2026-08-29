@@ -6,14 +6,20 @@ package reporter
 // match via ByIssue) and stores each issue merged with its resolution
 // rather than as two separate lists; the pairing only exists here and at
 // render time, nowhere in the db. Idempotent per day via BeginRun's
-// replace semantics.
+// replace semantics. rawLines/filteredLines are the day's ingest funnel
+// (srg-YHETx.1), persisted here rather than at report time so the history
+// keeps accumulating even if nobody asks for a management report.
 
 import "time"
 
 func CaptureRun(lib *LibraryStore, logDate time.Time, model string,
+	rawLines, filteredLines int,
 	issues *IssueList, resolutions *ResolutionList, anomalies []*ExplainedAnomaly) error {
 	runID, err := lib.BeginRun(logDate, model)
 	if err != nil {
+		return err
+	}
+	if err := lib.SetRunStats(runID, rawLines, filteredLines); err != nil {
 		return err
 	}
 	var byIssue map[string]*Resolution

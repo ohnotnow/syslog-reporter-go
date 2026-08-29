@@ -106,9 +106,94 @@ func main() {
 				fatal("%v", err)
 			}
 			return
+		case "mgmt-report":
+			runMgmtReport(os.Args[2:])
+			return
 		}
 	}
 	runBatch(os.Args[1:])
+}
+
+// runMgmtReport renders the periodic management summary (ait srg-YHETx): a
+// pure reader of the runs/findings/feedback tables, with per-day volume
+// borrowed from the aggregates baseline for days predating the run stats
+// columns. Always writes mgmt_report.html to the working directory, like
+// the daily report's file drops; --send-email posts it to the separate
+// SYSLOG_MGMT_RECIPIENTS list (management is a different audience from the
+// team digest, so there is deliberately no fallback to
+// SYSLOG_SMTP_RECIPIENTS).
+func runMgmtReport(args []string) {
+	fs := flag.NewFlagSet("mgmt-report", flag.ExitOnError)
+	days := fs.Int("days", 30, "Number of days the report covers, ending yesterday")
+	sendEmail := fs.Bool("send-email", false, "Email the report to SYSLOG_MGMT_RECIPIENTS")
+	dbPath := fs.String("db", getenvDefault("SYSLOG_DB_PATH", "syslog_aggregates.db"),
+		"Path to the SQLite database")
+	outPath := fs.String("out", "mgmt_report.html", "Where to write the HTML report")
+	debug := fs.Bool("debug", false, "Print extra debug information")
+	fs.Parse(args)
+	if fs.NArg() > 0 {
+		fatal("unrecognised extra arguments: %s", strings.Join(fs.Args(), " "))
+	}
+	if *days < 1 {
+		fatal("--days must be at least 1")
+	}
+	log := &logger{debugEnabled: *debug}
+
+	recipients := os.Getenv("SYSLOG_MGMT_RECIPIENTS")
+	if *sendEmail && recipients == "" {
+		fatal("--send-email needs SYSLOG_MGMT_RECIPIENTS to be set")
+	}
+
+	// The period ends yesterday: log dates cover completed days, and
+	// anchoring to the calendar (not the newest run) keeps a stalled cron
+	// visible as "no data" days rather than silently reporting stale weeks.
+	to := time.Now().AddDate(0, 0, -1)
+	from := to.AddDate(0, 0, -(*days - 1))
+
+	lib, err := reporter.OpenLibraryStore(*dbPath)
+	if err != nil {
+		fatal("opening findings library %s: %v", *dbPath, err)
+	}
+	defer lib.Close()
+	agg, err := reporter.OpenAggregateStore(*dbPath)
+	if err != nil {
+		fatal("opening aggregate store %s: %v", *dbPath, err)
+	}
+	defer agg.Close()
+
+	stats, err := reporter.GatherMgmtStats(lib, agg, from, to)
+	if err != nil {
+		fatal("gathering management stats: %v", err)
+	}
+	log.Debug("Gathered stats: %d/%d days with data, %d findings",
+		stats.DaysWithData, len(stats.Days), stats.TotalFindings)
+
+	html, err := reporter.RenderMgmtHTML(stats, version)
+	if err != nil {
+		fatal("rendering management report: %v", err)
+	}
+	if err := os.WriteFile(*outPath, []byte(html), 0o644); err != nil {
+		fatal("writing %s: %v", *outPath, err)
+	}
+	log.Info("Wrote %s", *outPath)
+
+	text := reporter.RenderMgmtText(stats)
+	fmt.Print(text)
+
+	if *sendEmail {
+		agent := &reporter.EmailAgent{
+			BodyText:   text,
+			HTMLBody:   html,
+			Recipients: recipients,
+			Subject: fmt.Sprintf("Syslog management summary - %s",
+				reporter.MgmtPeriodLabel(stats.From, stats.To)),
+			SMTPServer: os.Getenv("SYSLOG_SMTP_SERVER"),
+			Sender:     os.Getenv("SYSLOG_SMTP_SENDER"),
+		}
+		agent.Run()
+	} else {
+		log.Info("Skipping email")
+	}
 }
 
 // runServe starts the findings library web app (serve mode). Configuration
@@ -567,7 +652,8 @@ func run(cfg runConfig) {
 		if lib, err := reporter.OpenLibraryStore(cfg.dbPath); err != nil {
 			log.Warn("opening findings library %s: %v", cfg.dbPath, err)
 		} else {
-			if err := reporter.CaptureRun(lib, logDate, captureModel, issues, resolutions, explained); err != nil {
+			if err := reporter.CaptureRun(lib, logDate, captureModel,
+				len(cfg.lines), len(filteredLines), issues, resolutions, explained); err != nil {
 				log.Warn("capturing findings: %v", err)
 			} else {
 				log.Info("Captured %d findings for %s",
@@ -593,7 +679,14 @@ func run(cfg runConfig) {
 
 	if cfg.sendEmail {
 		log.Info("Sending email to %s", cfg.recipients)
-		agent, err := reporter.NewEmailAgent(emailBody, fullReport, cfg.recipients)
+		// The HTML alternative is a nicety: if rendering ever fails, send
+		// the markdown-only email rather than losing the morning report.
+		htmlBody, err := reporter.RenderDigestHTML(emailBody, version)
+		if err != nil {
+			log.Warn("rendering HTML digest, falling back to plain text: %v", err)
+			htmlBody = ""
+		}
+		agent, err := reporter.NewEmailAgent(emailBody, htmlBody, fullReport, cfg.recipients)
 		if err != nil {
 			fatal("%v", err)
 		}

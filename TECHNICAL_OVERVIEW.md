@@ -257,14 +257,39 @@ against the users table, falling back to the anonymous vote; an explicit
 `--user` must match a users-table row (unknown is an error, never a
 silent anonymous fallback). All findings subcommands take `--db`.
 
+### The management report
+
+`mgmt-report` renders a periodic summary for senior IT management as a
+self-contained, email-safe HTML page (tables and inline styles only, no
+scripts or SVG, so Outlook's Word renderer copes): headline numbers, a
+daily volume bar chart, issues by severity, most flagged services, and
+the team's feedback votes.
+
+```bash
+syslog-reporter mgmt-report [--days N] [--send-email] [--db PATH]
+                            [--out FILE] [--debug]
+```
+
+The period is the last `--days` days (default 30) ending yesterday; days
+the tool did not run show as "no data" rather than being papered over.
+It is a pure reader of the never-pruned runs/findings/feedback tables
+(ant ADR srg-9X77J): per-run `raw_lines`/`filtered_lines` provide the
+volume trend, and days predating those columns borrow an approximate
+volume from the aggregates table while the prune window still holds
+them (marked with an asterisk in the chart). The HTML always lands in
+`--out` (default `mgmt_report.html`); `--send-email` posts it as a
+text+HTML alternative message to `SYSLOG_MGMT_RECIPIENTS`, which is
+deliberately separate from the daily digest's list with no fallback
+between them.
+
 ## Configuration
 
 ### CLI flags
 
 The first argument may be a subcommand: `serve` (web UI), `user add`
-(local accounts) and `findings` (list/show/feedback), all documented
-above. Anything else is the batch report path, whose contract is
-unchanged:
+(local accounts), `findings` (list/show/feedback) and `mgmt-report`
+(management summary), all documented above. Anything else is the batch
+report path, whose contract is unchanged:
 
 ```
 logfile          positional: path to the syslog file; omit (or pass --) to
@@ -301,7 +326,14 @@ Read from the environment or a `.env` beside the working directory
   (the resource's v1 endpoint; see the provider routing section)
 - `SYSLOG_REASONING_EFFORT` reasoning effort, see above; unset = provider default
 - `SYSLOG_SMTP_SERVER`, `SYSLOG_SMTP_SENDER`, `SYSLOG_SMTP_RECIPIENTS` for
-  `--send-email` (recipients ride the SMTP envelope as BCC)
+  `--send-email` (recipients ride the SMTP envelope as BCC). The daily
+  email is a text+HTML alternative pair - the plain part is the digest
+  markdown verbatim, the HTML part its on-brand rendering - with both
+  markdown files attached (`email_body.md`, `email_attachment.md`) for
+  copy/paste or feeding to an agent
+- `SYSLOG_MGMT_RECIPIENTS` recipients for `mgmt-report --send-email`;
+  separate audience from the daily digest, so no fallback to
+  `SYSLOG_SMTP_RECIPIENTS` in either direction
 - `SYSLOG_DB_PATH` SQLite aggregate-store path (default
   `syslog_aggregates.db`; CLI `--db` overrides; `--no-store` skips
   persistence and the history-based detectors)

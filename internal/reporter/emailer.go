@@ -1,10 +1,13 @@
 package reporter
 
-// Port of agents/emailer.py: the short digest as the message body, the full
-// report as a text/markdown attachment, recipients on the envelope only
-// (BCC) with the sender in the visible To header. Send failures print a
-// message rather than crash, matching the Python behaviour, so a cron run
-// still leaves the report files behind.
+// Grew from a port of agents/emailer.py: recipients on the envelope only
+// (BCC) with the sender in the visible To header, and send failures print
+// a message rather than crash so a cron run still leaves the report files
+// behind. Since ait srg-kOKT9 the daily digest rides as a text+HTML
+// alternative pair (the text/plain alternative IS the body markdown, so
+// text-only clients keep the original experience) with both markdown
+// files attached; the management report reuses the same builder with no
+// attachments.
 
 import (
 	"encoding/base64"
@@ -18,17 +21,26 @@ import (
 	"strings"
 )
 
-type EmailAgent struct {
-	BodyText           string
-	AttachmentText     string
-	AttachmentFilename string
-	Recipients         string // comma-separated
-	Subject            string
-	SMTPServer         string
-	Sender             string
+// EmailAttachment is one text/markdown attachment.
+type EmailAttachment struct {
+	Filename string
+	Text     string
 }
 
-func NewEmailAgent(bodyText, attachmentText, recipients string) (*EmailAgent, error) {
+type EmailAgent struct {
+	BodyText    string // always sent; the sole body when HTMLBody is empty
+	HTMLBody    string // when set, body becomes multipart/alternative
+	Attachments []EmailAttachment
+	Recipients  string // comma-separated
+	Subject     string
+	SMTPServer  string
+	Sender      string
+}
+
+// NewEmailAgent builds the daily digest email: markdown digest as the
+// plain body, its HTML rendering as the preferred alternative, and both
+// markdown files attached for copy/paste or feeding to an agent.
+func NewEmailAgent(bodyText, htmlBody, attachmentText, recipients string) (*EmailAgent, error) {
 	if recipients == "" {
 		recipients = os.Getenv("SYSLOG_SMTP_RECIPIENTS")
 	}
@@ -36,13 +48,16 @@ func NewEmailAgent(bodyText, attachmentText, recipients string) (*EmailAgent, er
 		return nil, errors.New("no recipients specified for email agent")
 	}
 	return &EmailAgent{
-		BodyText:           bodyText,
-		AttachmentText:     attachmentText,
-		AttachmentFilename: "email_attachment.md",
-		Recipients:         recipients,
-		Subject:            "Syslog Report",
-		SMTPServer:         os.Getenv("SYSLOG_SMTP_SERVER"),
-		Sender:             os.Getenv("SYSLOG_SMTP_SENDER"),
+		BodyText: bodyText,
+		HTMLBody: htmlBody,
+		Attachments: []EmailAttachment{
+			{Filename: "email_body.md", Text: bodyText},
+			{Filename: "email_attachment.md", Text: attachmentText},
+		},
+		Recipients: recipients,
+		Subject:    "Syslog Report",
+		SMTPServer: os.Getenv("SYSLOG_SMTP_SERVER"),
+		Sender:     os.Getenv("SYSLOG_SMTP_SENDER"),
 	}, nil
 }
 
@@ -58,9 +73,53 @@ func (e *EmailAgent) recipientList() []string {
 	return out
 }
 
-// BuildMessage assembles the email: short digest as the body, full report
-// attached. Recipients travel only on the SMTP envelope, so the message
-// shows the sender in To and no BCC header.
+// contentHeader and contentBody describe the message's readable content:
+// plain text alone, or a multipart/alternative of plain and HTML. The two
+// are produced together so BuildMessage can place them at the top level
+// (no attachments) or nest them as the first part of a multipart/mixed.
+func (e *EmailAgent) content() (textproto.MIMEHeader, []byte, error) {
+	if e.HTMLBody == "" {
+		var buf strings.Builder
+		if err := writeQuotedPrintable(&buf, e.BodyText); err != nil {
+			return nil, nil, err
+		}
+		return textproto.MIMEHeader{
+			"Content-Type":              {"text/plain; charset=\"utf-8\""},
+			"Content-Transfer-Encoding": {"quoted-printable"},
+		}, []byte(buf.String()), nil
+	}
+
+	var parts strings.Builder
+	mw := multipart.NewWriter(&parts)
+	for _, alt := range []struct{ ctype, text string }{
+		{"text/plain", e.BodyText},
+		{"text/html", e.HTMLBody},
+	} {
+		part, err := mw.CreatePart(textproto.MIMEHeader{
+			"Content-Type":              {alt.ctype + "; charset=\"utf-8\""},
+			"Content-Transfer-Encoding": {"quoted-printable"},
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+		qp := quotedprintable.NewWriter(part)
+		if _, err := qp.Write([]byte(alt.text)); err != nil {
+			return nil, nil, err
+		}
+		if err := qp.Close(); err != nil {
+			return nil, nil, err
+		}
+	}
+	if err := mw.Close(); err != nil {
+		return nil, nil, err
+	}
+	return textproto.MIMEHeader{
+		"Content-Type": {fmt.Sprintf("multipart/alternative; boundary=%q", mw.Boundary())},
+	}, []byte(parts.String()), nil
+}
+
+// BuildMessage assembles the email. Recipients travel only on the SMTP
+// envelope, so the message shows the sender in To and no BCC header.
 func (e *EmailAgent) BuildMessage() ([]byte, error) {
 	var msg strings.Builder
 	fmt.Fprintf(&msg, "From: %s\n", e.Sender)
@@ -68,42 +127,44 @@ func (e *EmailAgent) BuildMessage() ([]byte, error) {
 	fmt.Fprintf(&msg, "Subject: %s\n", e.Subject)
 	msg.WriteString("MIME-Version: 1.0\n")
 
-	if e.AttachmentText == "" {
-		msg.WriteString("Content-Type: text/plain; charset=\"utf-8\"\n")
-		msg.WriteString("Content-Transfer-Encoding: quoted-printable\n\n")
-		if err := writeQuotedPrintable(&msg, e.BodyText); err != nil {
-			return nil, err
+	header, body, err := e.content()
+	if err != nil {
+		return nil, err
+	}
+
+	if len(e.Attachments) == 0 {
+		for _, key := range []string{"Content-Type", "Content-Transfer-Encoding"} {
+			if v := header.Get(key); v != "" {
+				fmt.Fprintf(&msg, "%s: %s\n", key, v)
+			}
 		}
+		msg.WriteString("\n")
+		msg.Write(body)
 		return []byte(msg.String()), nil
 	}
 
 	var parts strings.Builder
 	mw := multipart.NewWriter(&parts)
-	body, err := mw.CreatePart(textproto.MIMEHeader{
-		"Content-Type":              {"text/plain; charset=\"utf-8\""},
-		"Content-Transfer-Encoding": {"quoted-printable"},
-	})
+	contentPart, err := mw.CreatePart(header)
 	if err != nil {
 		return nil, err
 	}
-	qp := quotedprintable.NewWriter(body)
-	if _, err := qp.Write([]byte(e.BodyText)); err != nil {
+	if _, err := contentPart.Write(body); err != nil {
 		return nil, err
 	}
-	if err := qp.Close(); err != nil {
-		return nil, err
-	}
-	attachment, err := mw.CreatePart(textproto.MIMEHeader{
-		"Content-Type": {"text/markdown; charset=\"utf-8\""},
-		"Content-Disposition": {
-			fmt.Sprintf("attachment; filename=%q", e.AttachmentFilename)},
-		"Content-Transfer-Encoding": {"base64"},
-	})
-	if err != nil {
-		return nil, err
-	}
-	if _, err := attachment.Write(wrapBase64([]byte(e.AttachmentText))); err != nil {
-		return nil, err
+	for _, att := range e.Attachments {
+		part, err := mw.CreatePart(textproto.MIMEHeader{
+			"Content-Type": {"text/markdown; charset=\"utf-8\""},
+			"Content-Disposition": {
+				fmt.Sprintf("attachment; filename=%q", att.Filename)},
+			"Content-Transfer-Encoding": {"base64"},
+		})
+		if err != nil {
+			return nil, err
+		}
+		if _, err := part.Write(wrapBase64([]byte(att.Text))); err != nil {
+			return nil, err
+		}
 	}
 	if err := mw.Close(); err != nil {
 		return nil, err
@@ -135,7 +196,7 @@ func wrapBase64(data []byte) []byte {
 	return []byte(out.String())
 }
 
-// Run sends the digest (with the full report attached) to recipients as BCC.
+// Run sends the message to recipients as BCC.
 func (e *EmailAgent) Run() {
 	msg, err := e.BuildMessage()
 	if err != nil {

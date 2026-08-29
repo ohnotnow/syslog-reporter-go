@@ -5,7 +5,8 @@ package reporter
 // the SAME SQLite file as the aggregates baseline, and keeps store.go's
 // minimal-pragma style on purpose: default rollback journal (no WAL), no
 // PRAGMA foreign_keys (the REFERENCES clauses stay declarative), and
-// CREATE TABLE IF NOT EXISTS as the whole migration story. The Python
+// CREATE TABLE IF NOT EXISTS plus ALTER-if-missing column checks as the
+// whole migration story. The Python
 // original is archived, so unlike the aggregates schema these tables carry
 // no compatibility constraint - see ADR srg-VXQvH for the reasoning.
 
@@ -21,10 +22,12 @@ import (
 
 const librarySchema = `
 CREATE TABLE IF NOT EXISTS runs (
-    id         INTEGER PRIMARY KEY,
-    log_date   TEXT NOT NULL,           -- ISO 'YYYY-MM-DD' the report covered
-    created_at TEXT NOT NULL,           -- RFC3339 UTC
-    model      TEXT                     -- NULL on --no-llm runs
+    id             INTEGER PRIMARY KEY,
+    log_date       TEXT NOT NULL,       -- ISO 'YYYY-MM-DD' the report covered
+    created_at     TEXT NOT NULL,       -- RFC3339 UTC
+    model          TEXT,                -- NULL on --no-llm runs
+    raw_lines      INTEGER,             -- dump size before filtering (srg-YHETx.1)
+    filtered_lines INTEGER              -- after LogFilter; NULL = not recorded
 );
 CREATE TABLE IF NOT EXISTS findings (
     id       INTEGER PRIMARY KEY,
@@ -93,7 +96,47 @@ func OpenLibraryStore(path string) (*LibraryStore, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := ensureRunsStatsColumns(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &LibraryStore{db: db}, nil
+}
+
+// ensureRunsStatsColumns retrofits the srg-YHETx.1 stats columns onto a runs
+// table created by an older binary: CREATE TABLE IF NOT EXISTS never alters
+// an existing table, so databases from before the columns landed need an
+// explicit ADD COLUMN. Rows from before the change keep NULL in both columns
+// (meaning "not recorded", distinct from a genuine zero-line day).
+func ensureRunsStatsColumns(db *sql.DB) error {
+	rows, err := db.Query("PRAGMA table_info(runs)")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	have := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			return err
+		}
+		have[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, col := range []string{"raw_lines", "filtered_lines"} {
+		if have[col] {
+			continue
+		}
+		if _, err := db.Exec("ALTER TABLE runs ADD COLUMN " + col + " INTEGER"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *LibraryStore) Close() error {
@@ -142,6 +185,17 @@ func (s *LibraryStore) BeginRun(logDate time.Time, model string) (int64, error) 
 		return 0, err
 	}
 	return id, tx.Commit()
+}
+
+// SetRunStats records the day's ingest funnel on the run row: the dump's
+// line count before filtering and the count LogFilter left behind. Written
+// at capture time so the numbers survive the aggregate store's prune (ant
+// ADR srg-9X77J); the management report reads them, never writes them.
+func (s *LibraryStore) SetRunStats(runID int64, rawLines, filteredLines int) error {
+	_, err := s.db.Exec(
+		"UPDATE runs SET raw_lines = ?, filtered_lines = ? WHERE id = ?",
+		rawLines, filteredLines, runID)
+	return err
 }
 
 // AddFinding persists one finding plus its per-host rows in one transaction

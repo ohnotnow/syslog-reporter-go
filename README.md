@@ -72,7 +72,9 @@ Then point it at a day of syslog:
 # (tools/elk_dump.py pulls a day of syslog from an ELK cluster into this format)
 ./syslog-reporter syslog-2026-08-27.ndjson.gz
 
-# email the report
+# email the report: an HTML rendering of the digest for easy reading,
+# with the digest and full report attached as markdown for copy/paste
+# (or for handing straight to your own sysadmin agents)
 ./syslog-reporter syslog-2026-08-27.ndjson.gz --send-email --recipients team@example.ac.uk
 ```
 
@@ -108,6 +110,21 @@ with no login; for a shared box there is a local-accounts mode
 (`syslog-reporter user add`) and optional TLS. See
 [HOW_IT_WORKS.md](HOW_IT_WORKS.md) for a tour with screenshots and
 [TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md) for the full reference.
+
+## The management report
+
+Once a few weeks of history have accumulated, the same binary can render
+a periodic summary for management: headline numbers,
+a daily volume chart, issues by severity and the team's feedback votes,
+as a self-contained HTML email.
+
+```bash
+# writes mgmt_report.html covering the last 30 days
+./syslog-reporter mgmt-report
+
+# a weekly flavour, emailed to the management list
+SYSLOG_MGMT_RECIPIENTS=manager@example.ac.uk ./syslog-reporter mgmt-report --days 7 --send-email
+```
 
 ## Example of an issue
 

@@ -161,6 +161,30 @@ func TestMergeExplanations(t *testing.T) {
 	}
 }
 
+// Models pad some list entries with leading whitespace (gpt-5.6-luna,
+// 2026-08-29); mergeExplanations trims commands and steps at the parse
+// boundary so the markdown files and the email agree.
+func TestMergeExplanationsTrimsModelPadding(t *testing.T) {
+	anomalies := []Anomaly{
+		&stubAnomaly{host: "app1", program: "systemd", kind: "peer",
+			headline: "Unusually noisy", summary: "1000 vs 10", osFamily: "unknown"},
+	}
+	explanations := []*AnomalyExplanation{{
+		Host: "app1", Program: "systemd",
+		LikelyCauses:       "a stuck unit",
+		InvestigationSteps: []string{" check journal "},
+		SuggestedCommands:  []string{" # padded comment", "journalctl -u foo "},
+	}}
+	got := mergeExplanations(anomalies, explanations)
+	if got[0].InvestigationSteps[0] != "check journal" {
+		t.Errorf("step not trimmed: %q", got[0].InvestigationSteps[0])
+	}
+	if got[0].SuggestedCommands[0] != "# padded comment" ||
+		got[0].SuggestedCommands[1] != "journalctl -u foo" {
+		t.Errorf("commands not trimmed: %q", got[0].SuggestedCommands)
+	}
+}
+
 func TestExplainerPayload(t *testing.T) {
 	anomalies := []Anomaly{&stubAnomaly{
 		host: "app1", program: "systemd", kind: "peer",

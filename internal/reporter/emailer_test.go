@@ -14,13 +14,14 @@ import (
 
 func testEmailAgent() *EmailAgent {
 	return &EmailAgent{
-		BodyText:           "# Digest\n\nAll quiet on the estate.\n",
-		AttachmentText:     "# Full report\n\nLots of detail café.\n",
-		AttachmentFilename: "email_attachment.md",
-		Recipients:         "team-a@example.ac.uk, team-b@example.ac.uk",
-		Subject:            "Syslog Report",
-		SMTPServer:         "localhost:1025",
-		Sender:             "reporter@example.ac.uk",
+		BodyText: "# Digest\n\nAll quiet on the estate.\n",
+		Attachments: []EmailAttachment{
+			{Filename: "email_attachment.md", Text: "# Full report\n\nLots of detail café.\n"},
+		},
+		Recipients: "team-a@example.ac.uk, team-b@example.ac.uk",
+		Subject:    "Syslog Report",
+		SMTPServer: "localhost:1025",
+		Sender:     "reporter@example.ac.uk",
 	}
 }
 
@@ -81,14 +82,14 @@ func TestBuildMessageHeadersAndParts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("attachment is not valid base64: %v", err)
 	}
-	if string(decoded) != agent.AttachmentText {
+	if string(decoded) != agent.Attachments[0].Text {
 		t.Errorf("attachment round-trip mismatch: %q", decoded)
 	}
 }
 
 func TestBuildMessageWithoutAttachment(t *testing.T) {
 	agent := testEmailAgent()
-	agent.AttachmentText = ""
+	agent.Attachments = nil
 	raw, err := agent.BuildMessage()
 	if err != nil {
 		t.Fatal(err)
@@ -118,11 +119,11 @@ func TestRecipientList(t *testing.T) {
 
 func TestNewEmailAgentRequiresRecipients(t *testing.T) {
 	t.Setenv("SYSLOG_SMTP_RECIPIENTS", "")
-	if _, err := NewEmailAgent("body", "attachment", ""); err == nil {
+	if _, err := NewEmailAgent("body", "<html></html>", "attachment", ""); err == nil {
 		t.Error("expected an error with no recipients anywhere")
 	}
 	t.Setenv("SYSLOG_SMTP_RECIPIENTS", "fallback@example.ac.uk")
-	agent, err := NewEmailAgent("body", "attachment", "")
+	agent, err := NewEmailAgent("body", "<html></html>", "attachment", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,12 +131,85 @@ func TestNewEmailAgentRequiresRecipients(t *testing.T) {
 		t.Errorf("env fallback not used: %q", agent.Recipients)
 	}
 	// An explicit recipients argument wins over the env var.
-	agent, err = NewEmailAgent("body", "attachment", "explicit@example.ac.uk")
+	agent, err = NewEmailAgent("body", "<html></html>", "attachment", "explicit@example.ac.uk")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if agent.Recipients != "explicit@example.ac.uk" {
 		t.Errorf("explicit recipients lost: %q", agent.Recipients)
+	}
+}
+
+// TestDailyDigestMessageShape pins the srg-kOKT9 daily email: a
+// multipart/mixed whose first part is a text+HTML alternative (the plain
+// alternative being the body markdown verbatim), followed by BOTH
+// markdown files as attachments.
+func TestDailyDigestMessageShape(t *testing.T) {
+	body := "# Digest\n\nAll quiet on the estate.\n"
+	full := "# Full report\n\nLots of detail café.\n"
+	agent, err := NewEmailAgent(body, "<html><body>rendered</body></html>", full,
+		"team-a@example.ac.uk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent.Sender = "reporter@example.ac.uk"
+	raw, err := agent.BuildMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, err := mail.ReadMessage(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("message does not parse: %v", err)
+	}
+	mediaType, params, err := mime.ParseMediaType(msg.Header.Get("Content-Type"))
+	if err != nil || mediaType != "multipart/mixed" {
+		t.Fatalf("Content-Type = %q (%v)", mediaType, err)
+	}
+	mr := multipart.NewReader(msg.Body, params["boundary"])
+
+	content, err := mr.NextPart()
+	if err != nil {
+		t.Fatal(err)
+	}
+	altType, altParams, err := mime.ParseMediaType(content.Header.Get("Content-Type"))
+	if err != nil || altType != "multipart/alternative" {
+		t.Fatalf("first part = %q, want multipart/alternative (%v)", altType, err)
+	}
+	ar := multipart.NewReader(content, altParams["boundary"])
+	plain, err := ar.NextPart()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodedPlain, _ := io.ReadAll(quotedprintable.NewReader(plain))
+	if string(decodedPlain) != strings.ReplaceAll(body, "\n", "\r\n") {
+		t.Errorf("plain alternative is not the body markdown verbatim: %q", decodedPlain)
+	}
+	htmlPart, err := ar.NextPart()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ct := htmlPart.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Errorf("second alternative = %q, want text/html", ct)
+	}
+
+	wantFiles := []string{"email_body.md", "email_attachment.md"}
+	wantTexts := []string{body, full}
+	for i, wantName := range wantFiles {
+		att, err := mr.NextPart()
+		if err != nil {
+			t.Fatalf("attachment %d: %v", i, err)
+		}
+		if fn := att.FileName(); fn != wantName {
+			t.Errorf("attachment %d filename = %q, want %q", i, fn, wantName)
+		}
+		b64, _ := io.ReadAll(att)
+		decoded, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(string(b64), "\n", ""))
+		if err != nil {
+			t.Fatalf("attachment %d is not valid base64: %v", i, err)
+		}
+		if string(decoded) != wantTexts[i] {
+			t.Errorf("attachment %d round-trip mismatch: %q", i, decoded)
+		}
 	}
 }
 

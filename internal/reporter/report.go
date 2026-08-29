@@ -110,11 +110,13 @@ func (r *ReportAgent) emailBodyN(topIssues, topAnomalies int) string {
 
 	var b strings.Builder
 	b.WriteString("# Syslog digest - " + todaysDate() + "\n\n")
-	b.WriteString("Morning! Here's a quick look at what stood out")
+	// No greeting line (owner decision 2026-08-29: cheery wears thin by the
+	// 50th email). Only the load-bearing fact survives: a truncation notice
+	// when there are more issues than the digest shows.
 	if totalIssues > len(issues) {
-		fmt.Fprintf(&b, " - the %d most pressing of %d issues", len(issues), totalIssues)
+		fmt.Fprintf(&b, "The %d most pressing of %d issues are below; the full breakdown is attached.\n\n",
+			len(issues), totalIssues)
 	}
-	b.WriteString(". Each comes with commands to dig straight in; the full breakdown is attached.\n\n")
 
 	if len(issues) == 0 {
 		if r.LLMSkipped {

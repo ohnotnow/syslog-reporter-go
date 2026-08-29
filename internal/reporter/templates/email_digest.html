@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Syslog digest</title>
+<style>
+  /* Graceful degradation on purpose: clients that strip this block
+     (Outlook's Word renderer, mainly) still get readable semantic HTML.
+     Palette matches the serve UI and the management report. */
+  body { margin:0; padding:0; background-color:#F5F5F5; }
+  .shell { max-width:720px; margin:0 auto; padding:24px; }
+  .card { background-color:#FFFFFF; }
+  .brand { background-color:#011451; padding:16px 24px; }
+  .brand p { margin:0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif;
+             font-size:14px; color:#CCD0DC; }
+  .content { padding:8px 24px 24px 24px;
+             font-family:'Noto Sans','Segoe UI',Arial,sans-serif;
+             font-size:15px; line-height:1.55; color:#323232; }
+  .content h1 { font-size:24px; color:#011451; margin:16px 0 8px 0; }
+  .content h2 { font-size:19px; color:#011451; margin:24px 0 8px 0;
+                border-bottom:1px solid #E6E6E6; padding-bottom:4px; }
+  .content h3 { font-size:16px; color:#005398; margin:20px 0 6px 0; }
+  .content a { color:#005398; }
+  /* pre-wrap, not overflow scroll: mail clients rarely give a pre its
+     own scrollbar, so long command lines must wrap visibly. Copy/paste
+     keeps the full line; the attached markdown has the unwrapped text. */
+  .content pre { background-color:#F5F5F5; border:1px solid #E6E6E6;
+                 border-left:4px solid #005398; padding:12px;
+                 font-size:13px; line-height:1.45;
+                 white-space:pre-wrap; word-break:break-word; }
+  .content code { font-family:ui-monospace,Menlo,Consolas,monospace;
+                  font-size:13px; background-color:#F5F5F5; }
+  .content pre code { background-color:transparent; }
+  /* '# comment' lines: the narrative of the investigation, set heavier
+     than the commands so it can be read on its own. */
+  .content pre .cmt { font-weight:700; color:#011451; }
+  .content hr { border:none; border-top:1px solid #E6E6E6; margin:24px 0; }
+  .content blockquote { margin:8px 0; padding:4px 16px;
+                        border-left:4px solid #CCD0DC; color:#4D4D4D; }
+  .foot { background-color:#011451; padding:12px 24px; }
+  .foot p { margin:0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif;
+            font-size:12px; color:#CCD0DC; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="card">
+    <div class="brand"><p>Syslog Reporter</p></div>
+    <div class="content">
+{{.Body}}
+    </div>
+    <div class="foot"><p>syslog-reporter {{.Version}}. The markdown originals are attached: the digest (email_body.md) and the full report (email_attachment.md).</p></div>
+  </div>
+</div>
+</body>
+</html>

@@ -43,7 +43,7 @@ func TestCaptureRunLLMShape(t *testing.T) {
 	resolutions := &ResolutionList{Resolutions: []*Resolution{sample.Resolution}}
 	anom := sampleAnomaly()
 
-	if err := CaptureRun(lib, day(2026, 6, 1), "openai/gpt-test",
+	if err := CaptureRun(lib, day(2026, 6, 1), "openai/gpt-test", 41230, 812,
 		issues, resolutions, []*ExplainedAnomaly{anom}); err != nil {
 		t.Fatalf("capture: %v", err)
 	}
@@ -52,11 +52,17 @@ func TestCaptureRunLLMShape(t *testing.T) {
 		t.Fatalf("runs = %d, want 1", n)
 	}
 	var model string
-	if err := lib.db.QueryRow("SELECT model FROM runs").Scan(&model); err != nil {
+	var rawLines, filteredLines int
+	if err := lib.db.QueryRow(
+		"SELECT model, raw_lines, filtered_lines FROM runs").
+		Scan(&model, &rawLines, &filteredLines); err != nil {
 		t.Fatal(err)
 	}
 	if model != "openai/gpt-test" {
 		t.Errorf("model = %q", model)
+	}
+	if rawLines != 41230 || filteredLines != 812 {
+		t.Errorf("run stats = %d/%d, want 41230/812", rawLines, filteredLines)
 	}
 
 	found := readFindings(t, lib)
@@ -84,7 +90,7 @@ func TestCaptureRunLLMShape(t *testing.T) {
 
 func TestCaptureRunNoLLMShape(t *testing.T) {
 	lib := newTestLibrary(t)
-	if err := CaptureRun(lib, day(2026, 6, 1), "",
+	if err := CaptureRun(lib, day(2026, 6, 1), "", 500, 20,
 		nil, nil, []*ExplainedAnomaly{sampleAnomaly()}); err != nil {
 		t.Fatalf("capture: %v", err)
 	}
@@ -110,7 +116,7 @@ func TestCaptureRunUnmatchedResolutionIsNull(t *testing.T) {
 	orphan := &Resolution{Issue: "A different title entirely", RootCause: "n/a"}
 	resolutions := &ResolutionList{Resolutions: []*Resolution{orphan}}
 
-	if err := CaptureRun(lib, day(2026, 6, 1), "openai/gpt-test",
+	if err := CaptureRun(lib, day(2026, 6, 1), "openai/gpt-test", 100, 5,
 		issues, resolutions, nil); err != nil {
 		t.Fatalf("capture: %v", err)
 	}
@@ -132,12 +138,20 @@ func TestCaptureRunSameDayTwiceLeavesOneRun(t *testing.T) {
 	lib := newTestLibrary(t)
 	anoms := []*ExplainedAnomaly{sampleAnomaly()}
 	for i := 0; i < 2; i++ {
-		if err := CaptureRun(lib, day(2026, 6, 1), "", nil, nil, anoms); err != nil {
+		if err := CaptureRun(lib, day(2026, 6, 1), "", 1000+i, 40+i, nil, nil, anoms); err != nil {
 			t.Fatalf("capture %d: %v", i, err)
 		}
 	}
 	if n := countRows(t, lib, "runs"); n != 1 {
 		t.Errorf("runs = %d, want 1", n)
+	}
+	var rawLines, filteredLines int
+	if err := lib.db.QueryRow(
+		"SELECT raw_lines, filtered_lines FROM runs").Scan(&rawLines, &filteredLines); err != nil {
+		t.Fatal(err)
+	}
+	if rawLines != 1001 || filteredLines != 41 {
+		t.Errorf("re-run kept stale stats: %d/%d, want 1001/41", rawLines, filteredLines)
 	}
 	if n := countRows(t, lib, "findings"); n != 1 {
 		t.Errorf("findings = %d, want 1", n)

@@ -245,7 +245,22 @@ func (a *ResolutionAgent) Run(ctx context.Context) (*ResolutionList, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Models pad some list entries with stray leading whitespace (seen from
+	// gpt-5.6-luna, 2026-08-29: '# comment' lines with one leading space).
+	// Trim at the parse boundary so every downstream view - markdown files,
+	// email, findings library - agrees.
+	for _, r := range got.Resolutions {
+		r.Investigate = strings.TrimSpace(r.Investigate)
+		trimEach(r.FixCommands)
+	}
 	return &got, nil
+}
+
+// trimEach TrimSpaces a list of LLM-supplied lines in place.
+func trimEach(ss []string) {
+	for i := range ss {
+		ss[i] = strings.TrimSpace(ss[i])
+	}
 }
 
 // AnomalyExplanation is the LLM-generated half of an explained anomaly.
@@ -325,6 +340,8 @@ func mergeExplanations(anomalies []Anomaly, explanations []*AnomalyExplanation) 
 			LikelyCauses: "(no explanation generated)",
 		}
 		if e, ok := byKey[[2]string{a.Host(), a.Program()}]; ok {
+			trimEach(e.InvestigationSteps)
+			trimEach(e.SuggestedCommands)
 			ea.LikelyCauses = e.LikelyCauses
 			ea.InvestigationSteps = e.InvestigationSteps
 			ea.SuggestedCommands = e.SuggestedCommands
