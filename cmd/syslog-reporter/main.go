@@ -23,6 +23,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/ohnotnow/syslog-reporter-go/internal/cli"
+	"github.com/ohnotnow/syslog-reporter-go/internal/llm"
 	"github.com/ohnotnow/syslog-reporter-go/internal/reporter"
 	"github.com/ohnotnow/syslog-reporter-go/internal/selfupdate"
 	"github.com/ohnotnow/syslog-reporter-go/internal/web"
@@ -88,6 +89,13 @@ func main() {
 	// Pick up a .env in the working directory without overriding variables
 	// already in the environment.
 	_ = godotenv.Load()
+
+	// SYSLOG_REDACT: comma-separated literal strings stripped from every
+	// provider-bound message (ant ADR srg-Mzvjf). Parsed once here; the llm
+	// package never reads the environment itself.
+	if v := os.Getenv("SYSLOG_REDACT"); v != "" {
+		llm.SetRedactions(strings.Split(v, ","))
+	}
 
 	// Subcommand dispatch ahead of batch flag parsing. Later issues add
 	// more subcommands (user, findings) alongside serve; everything else
@@ -177,7 +185,7 @@ func runMgmtReport(args []string) {
 	if err != nil {
 		fatal("rendering management report: %v", err)
 	}
-	if err := os.WriteFile(*outPath, []byte(html), 0o644); err != nil {
+	if err := os.WriteFile(*outPath, []byte(html), 0o600); err != nil {
 		fatal("writing %s: %v", *outPath, err)
 	}
 	log.Info("Wrote %s", *outPath)
@@ -195,7 +203,11 @@ func runMgmtReport(args []string) {
 			SMTPServer: os.Getenv("SYSLOG_SMTP_SERVER"),
 			Sender:     os.Getenv("SYSLOG_SMTP_SENDER"),
 		}
-		agent.Run()
+		// The report file is already on disk; a failed send must still
+		// fail the process so cron notices.
+		if err := agent.Run(); err != nil {
+			fatal("%v", err)
+		}
 	} else {
 		log.Info("Skipping email")
 	}
@@ -217,6 +229,11 @@ func runServe(args []string) {
 		fatal("%v", err)
 	}
 	cfg.Version = version
+	// Risky-but-supported combinations announce themselves; the operator's
+	// call stands (warn, never refuse - srg-so8ja.9).
+	for _, warning := range cfg.StartupWarnings() {
+		log.Warn("%s", warning)
+	}
 	// The findings pages read the library on every request, so serve mode
 	// always opens the store; the local auth driver shares the same handle.
 	lib, err := reporter.OpenLibraryStore(cfg.DBPath)
@@ -674,10 +691,10 @@ func run(cfg runConfig) {
 	}
 
 	// While we refine things, always drop the two files to the working directory.
-	if err := os.WriteFile("email_body.md", []byte(emailBody), 0o644); err != nil {
+	if err := os.WriteFile("email_body.md", []byte(emailBody), 0o600); err != nil {
 		fatal("%v", err)
 	}
-	if err := os.WriteFile("email_attachment.md", []byte(fullReport), 0o644); err != nil {
+	if err := os.WriteFile("email_attachment.md", []byte(fullReport), 0o600); err != nil {
 		fatal("%v", err)
 	}
 	log.Info("Wrote email_body.md and email_attachment.md")
@@ -698,7 +715,11 @@ func run(cfg runConfig) {
 		if err != nil {
 			fatal("%v", err)
 		}
-		agent.Run()
+		// email_body.md and email_attachment.md are already on disk; a
+		// failed send must still fail the process so cron notices.
+		if err := agent.Run(); err != nil {
+			fatal("%v", err)
+		}
 	} else {
 		log.Info("Skipping email")
 	}
