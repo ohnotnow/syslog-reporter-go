@@ -57,6 +57,12 @@ OPENAI_API_KEY=sk-...                     # or ANTHROPIC_API_KEY for anthropic/ 
 # SYSLOG_DEFAULT_MODEL=azure/your-deployment-name
 # AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/openai/v1/
 # AZURE_OPENAI_API_KEY=...
+
+# optional: literal strings to strip from anything sent to the LLM
+# provider, e.g. your domain. Case-insensitive, replaced with [redacted].
+# A courtesy for hiding estate identity - NOT PII/compliance redaction;
+# if your logs need that, stick to --no-llm.
+# SYSLOG_REDACT=example.ac.uk,10.20.
 ```
 
 Then point it at a day of syslog:

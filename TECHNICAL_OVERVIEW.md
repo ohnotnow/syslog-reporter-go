@@ -231,6 +231,20 @@ external renewal script can drop new files in place without a restart; a
 half-written or mismatched pair mid-renewal keeps serving the previous
 good one.
 
+Risky-but-supported combinations warn at startup rather than refuse
+(plain HTTP on a trusted LAN is a deliberate first-class case): no auth
+on a non-loopback listen, and local auth over non-loopback plain HTTP,
+each get one loud warning and then run as configured.
+
+For TLS terminated at a reverse proxy (proxy speaks HTTPS to browsers,
+this binary listens on loopback plain HTTP behind it), set
+`SYSLOG_WEB_SECURE_COOKIES=1` so the session cookie carries the `Secure`
+flag the browser-facing transport deserves; without it the flag is
+derived from the built-in TLS setting alone. The app never reads
+forwarded/client-IP headers, so the login throttle sees the proxy's
+address - keep any per-client rate limiting at the proxy if you need it
+there.
+
 ### The findings CLI
 
 For terminal-only use, the same library over plain commands - same
@@ -321,6 +335,13 @@ Read from the environment or a `.env` beside the working directory
 - `AZURE_OPENAI_ENDPOINT` + `AZURE_OPENAI_API_KEY` for `azure/` models
   (the resource's v1 endpoint; see the provider routing section)
 - `SYSLOG_REASONING_EFFORT` reasoning effort, see above; unset = provider default
+- `SYSLOG_REDACT` comma-separated literal strings stripped
+  (case-insensitively, replaced with `[redacted]`) from every
+  provider-bound message, e.g. `SYSLOG_REDACT=example.ac.uk,10.20.` to
+  keep your domain and address range out of API traffic. A count of
+  replacements is printed, never the values. This is an estate-identity
+  courtesy, not PII or compliance redaction: if your log classification
+  needs that, use `--no-llm` or a suitably contracted endpoint
 - `SYSLOG_SMTP_SERVER`, `SYSLOG_SMTP_SENDER`, `SYSLOG_SMTP_RECIPIENTS` for
   `--send-email` (recipients ride the SMTP envelope as BCC). The daily
   email is a text+HTML alternative pair - the plain part is the digest
@@ -344,6 +365,9 @@ Read from the environment or a `.env` beside the working directory
   `known_knowns.toml`; CLI `--known-knowns` overrides; missing file means none)
 - `SYSLOG_WEB_LISTEN` serve mode's host:port (default `127.0.0.1:7373`)
 - `SYSLOG_WEB_TLS_CERT` / `SYSLOG_WEB_TLS_KEY` certificate pair for HTTPS
+- `SYSLOG_WEB_SECURE_COOKIES` set to `1` to force the session cookie's
+  `Secure` flag when TLS is terminated at a reverse proxy (see the TLS
+  section)
   in serve mode; both or neither (see the TLS section above)
 - `SYSLOG_AUTH_MODE` serve mode's auth driver: `none` (default), `local`,
   or `oidc` (not built yet)

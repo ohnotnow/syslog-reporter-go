@@ -83,6 +83,11 @@ SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.
   (AZURE_OPENAI_ENDPOINT + AZURE_OPENAI_API_KEY, no Azure SDK dependency).
   `SYSLOG_REASONING_EFFORT` passes to OpenAI verbatim; for Anthropic it
   maps onto `output_config.effort` (`none`/`minimal` clamp to `low`).
+  `SYSLOG_REDACT` strips operator-listed literals from every
+  provider-bound user message (llm.Complete is the choke point) - an
+  estate-identity courtesy, deliberately NOT PII scrubbing (ant ADR
+  srg-Mzvjf). All four prompts carry a trust-boundary block and both
+  report layouts a paste caution, each pinned by tests - keep them.
 - `--send-email` was verified against a local mailhog: recipients ride the
   SMTP envelope only (BCC), the To header carries the sender. Since
   srg-kOKT9 (owner decision 2026-08-29) the daily email body is
@@ -108,10 +113,12 @@ SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.
   verdict but an EMPTY comment keeps the existing note (owner decision
   2026-08-28) - there is no comment-clearing path.
 - serve mode is env-configured only (SYSLOG_WEB_LISTEN, SYSLOG_AUTH_MODE,
-  SYSLOG_WEB_TLS_CERT/_KEY). Default port 7373 is a Blake's 7 joke
+  SYSLOG_WEB_TLS_CERT/_KEY, SYSLOG_WEB_SECURE_COOKIES for
+  proxy-terminated TLS). Default port 7373 is a Blake's 7 joke
   (Vila weighs 73 kilos); do not "fix" it. Auth mode oidc errors at
   startup - deferred (ait srg-2KY5X.5) until the owner is present for a
-  Keycloak round-trip.
+  Keycloak round-trip. Risky listen/auth combos WARN at startup, never
+  refuse - plain HTTP on a LAN is a supported case (owner stance).
 - `--dump-filtered` prints the post-filter lines and exits - the
   documented filter-tuning aid (owner decision 2026-08-28).
 - Sample dumps (syslog-*.ndjson.gz) and the aggregate db are gitignored
