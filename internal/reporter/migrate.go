@@ -8,7 +8,10 @@ package reporter
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
+	"os"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -16,6 +19,19 @@ import (
 // openDatabase opens the SQLite file, applies the standard pragmas and
 // brings the schema up to date.
 func openDatabase(path string) (*sql.DB, error) {
+	// A NEW database file is created 0600 before the driver touches the
+	// path: the file carries log-derived detail, account emails and bcrypt
+	// hashes, so it must not default to the umask (srg-so8ja.10). An
+	// existing file keeps whatever mode its administrator chose. WAL
+	// sidecars inherit the main file's permissions.
+	if path != ":memory:" && !strings.HasPrefix(path, "file:") {
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			f.Close()
+		} else if !errors.Is(err, os.ErrExist) {
+			return nil, fmt.Errorf("creating %s: %w", path, err)
+		}
+	}
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, err

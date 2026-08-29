@@ -6,6 +6,7 @@ package reporter
 
 import (
 	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -233,5 +234,49 @@ func TestMigrateSharedFileBothStores(t *testing.T) {
 	if _, err := lib.AddFinding(runID, "issue", "low", "t", "sshd",
 		[]string{"hostA"}, map[string]string{}); err != nil {
 		t.Fatalf("add finding: %v", err)
+	}
+}
+
+// New database files are born 0600 (srg-so8ja.10): the file holds
+// log-derived detail, account emails and bcrypt hashes, so it must not
+// default to the process umask. An existing file's mode is the
+// administrator's choice and survives reopening untouched.
+func TestNewDatabaseFileCreated0600(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fresh.db")
+	lib, err := OpenLibraryStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lib.Close()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("new database mode = %o, want 600", perm)
+	}
+}
+
+func TestExistingDatabaseKeepsItsMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "existing.db")
+	lib, err := OpenLibraryStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lib.Close()
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	again, err := OpenLibraryStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer again.Close()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o644 {
+		t.Errorf("existing database mode = %o, want the admin's 644 untouched", perm)
 	}
 }
