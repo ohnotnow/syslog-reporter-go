@@ -10,6 +10,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -657,5 +658,128 @@ func TestLibraryAggregatePruneLeavesLibraryRows(t *testing.T) {
 	}
 	if n := countRows(t, lib, "findings"); n != 1 {
 		t.Errorf("findings = %d, want 1 (Prune must not touch the library)", n)
+	}
+}
+
+func TestRequireDatabase(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "not-there.db")
+	err := RequireDatabase(missing)
+	if err == nil {
+		t.Fatal("missing db should error")
+	}
+	if want := "a report run creates it"; !errContains(err, want) {
+		t.Errorf("error should explain how the db comes to exist, got: %v", err)
+	}
+	existing := filepath.Join(t.TempDir(), "there.db")
+	openTestLibrary(t, existing)
+	if err := RequireDatabase(existing); err != nil {
+		t.Errorf("existing db should pass: %v", err)
+	}
+	if err := RequireDatabase(":memory:"); err != nil {
+		t.Errorf(":memory: should pass: %v", err)
+	}
+}
+
+func errContains(err error, want string) bool {
+	return err != nil && strings.Contains(err.Error(), want)
+}
+
+func TestListUsersOrderedByUsername(t *testing.T) {
+	s := newTestLibrary(t)
+	for _, u := range []struct{ name, email string }{
+		{"zara", "zara@example.test"},
+		{"alba", "alba@example.test"},
+	} {
+		if _, err := s.CreateUser(u.name, u.email, "hash"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	users, err := s.ListUsers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(users) != 2 || users[0].Username != "alba" || users[1].Username != "zara" {
+		t.Errorf("expected alba then zara, got %+v", users)
+	}
+}
+
+func TestSetUserPassword(t *testing.T) {
+	s := newTestLibrary(t)
+	if _, err := s.CreateUser("opsuser", "opsuser@example.test", "oldhash"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetUserPassword("opsuser", "newhash"); err != nil {
+		t.Fatal(err)
+	}
+	u, err := s.UserByUsername("opsuser")
+	if err != nil || u == nil {
+		t.Fatalf("reload user: %v", err)
+	}
+	if u.PasswordHash.String != "newhash" {
+		t.Errorf("hash not updated: %q", u.PasswordHash.String)
+	}
+	if err := s.SetUserPassword("nobody", "hash"); err == nil {
+		t.Error("unknown username should error, not silently no-op")
+	}
+}
+
+// RemoveUser keeps the finding history: votes become anonymous, except
+// where an anonymous vote already exists on the same finding (then the
+// leaver's vote is dropped - one anonymous vote per finding).
+func TestRemoveUserReassignsVotesToAnonymous(t *testing.T) {
+	s := newTestLibrary(t)
+	runID, err := s.BeginRun(time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC), "m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := s.AddFinding(runID, "issue", "high", "t1", "svc", nil, sampleIssuePayload())
+	if err != nil {
+		t.Fatal(err)
+	}
+	contested, err := s.AddFinding(runID, "issue", "high", "t2", "svc", nil, sampleIssuePayload())
+	if err != nil {
+		t.Fatal(err)
+	}
+	uid, err := s.CreateUser("leaver", "leaver@example.test", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The leaver votes on both findings; an anonymous vote already exists
+	// on the contested one.
+	if err := s.RecordFeedback(plain, &uid, "worked", "note"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordFeedback(contested, &uid, "worked", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordFeedback(contested, nil, "didnt_work", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.RemoveUser("leaver"); err != nil {
+		t.Fatal(err)
+	}
+	if u, err := s.UserByUsername("leaver"); err != nil || u != nil {
+		t.Fatalf("user should be gone, got %+v (%v)", u, err)
+	}
+	// The plain finding keeps its vote, now anonymous.
+	plainRows, err := s.FeedbackFor(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plainRows) != 1 || plainRows[0].UserID != nil || plainRows[0].Verdict != "worked" {
+		t.Errorf("plain finding: expected one anonymous 'worked' vote, got %+v", plainRows)
+	}
+	// The contested finding keeps only the pre-existing anonymous vote.
+	contestedRows, err := s.FeedbackFor(contested)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contestedRows) != 1 || contestedRows[0].UserID != nil || contestedRows[0].Verdict != "didnt_work" {
+		t.Errorf("contested finding: expected the anonymous 'didnt_work' vote only, got %+v", contestedRows)
+	}
+
+	if err := s.RemoveUser("nobody"); err == nil {
+		t.Error("unknown username should error")
 	}
 }

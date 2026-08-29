@@ -16,6 +16,26 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// RequireDatabase errors when the SQLite file does not exist yet. Every
+// command that only READS the store (serve, findings, mgmt-report, user)
+// calls this before opening: without it a typo'd path silently creates an
+// empty database and the operator sees "no findings" instead of their
+// mistake. Only a batch run may create the file. :memory: and file: URI
+// paths are exempt, matching openDatabase's own creation guard.
+func RequireDatabase(path string) error {
+	if path == ":memory:" || strings.HasPrefix(path, "file:") {
+		return nil
+	}
+	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf(
+				"database %s does not exist (a report run creates it; check --db or SYSLOG_DB_PATH)", path)
+		}
+		return fmt.Errorf("checking database %s: %w", path, err)
+	}
+	return nil
+}
+
 // openDatabase opens the SQLite file, applies the standard pragmas and
 // brings the schema up to date.
 func openDatabase(path string) (*sql.DB, error) {

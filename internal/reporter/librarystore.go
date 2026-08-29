@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -396,6 +397,79 @@ func (s *LibraryStore) CreateUser(username, email, passwordHash string) (int64, 
 		return 0, err
 	}
 	return res.LastInsertId()
+}
+
+// ListUsers returns every account, ordered by username.
+func (s *LibraryStore) ListUsers() ([]*User, error) {
+	rows, err := s.db.Query(
+		"SELECT id, email, username, forenames, surname, password_hash, created_at " +
+			"FROM users ORDER BY username")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*User
+	for rows.Next() {
+		u := &User{}
+		if err := rows.Scan(&u.ID, &u.Email, &u.Username, &u.Forenames, &u.Surname,
+			&u.PasswordHash, &u.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+// SetUserPassword replaces the named user's password hash. An unknown
+// username is an error, never a silent no-op.
+func (s *LibraryStore) SetUserPassword(username, passwordHash string) error {
+	res, err := s.db.Exec(
+		"UPDATE users SET password_hash = ? WHERE username = ?", passwordHash, username)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("no user named %q", username)
+	}
+	return nil
+}
+
+// RemoveUser deletes the named account. Their feedback votes are
+// reassigned to the shared anonymous voter (user_id NULL) rather than
+// deleted, so a finding's worked/didnt counts survive the leaver; where an
+// anonymous vote already exists on the same finding, the leaver's vote is
+// dropped (one anonymous vote per finding is the schema's invariant).
+func (s *LibraryStore) RemoveUser(username string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var id int64
+	err = tx.QueryRow("SELECT id FROM users WHERE username = ?", username).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("no user named %q", username)
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(
+		"DELETE FROM feedback WHERE user_id = ? AND finding_id IN "+
+			"(SELECT finding_id FROM feedback WHERE user_id IS NULL)", id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(
+		"UPDATE feedback SET user_id = NULL WHERE user_id = ?", id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM users WHERE id = ?", id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // UserByUsername returns nil, nil when no user matches.
