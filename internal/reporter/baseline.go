@@ -1,7 +1,7 @@
 package reporter
 
-// Port of agents/baseline_agent.py: day-over-day per-host baseline anomaly
-// detection. Where the peer detector asks "is this host unlike its fleet
+// Day-over-day per-host baseline anomaly detection.
+// Where the peer detector asks "is this host unlike its fleet
 // peers?", this asks "is this host unlike its own recent normal?", scoring
 // today's per-(host, program) volume against that host's trailing-N-day
 // history from the SQLite aggregate store. It catches what peer comparison
@@ -13,7 +13,6 @@ package reporter
 import (
 	"fmt"
 	"math"
-	"sort"
 	"time"
 )
 
@@ -61,14 +60,14 @@ func (a *BaselineAnomaly) Summary() string {
 		return fmt.Sprintf(
 			"No events today - this host normally emits about %s/day of %s "+
 				"(median over %d days). It has gone silent.",
-			pyCommaF0(a.BaselineMedian), a.program, a.DaysSeen)
+			thousandsFloat(a.BaselineMedian), a.program, a.DaysSeen)
 	}
 	verb := "up from"
 	if a.Direction == "quieter" {
 		verb = "down from"
 	}
 	return fmt.Sprintf("%s events today, %s an own %d-day median of %s.",
-		pyThousands(a.Count), verb, a.DaysSeen, pyCommaF0(a.BaselineMedian))
+		thousands(a.Count), verb, a.DaysSeen, thousandsFloat(a.BaselineMedian))
 }
 
 // BaselineDetector scores today's per-(host, program) volume against each
@@ -107,35 +106,28 @@ func (d *BaselineDetector) Run() ([]Anomaly, error) {
 	families := osFamilies(d.agg.HostPrograms)
 
 	// Union of series seen in history or today: a series present in history
-	// but absent today is exactly the "gone silent" case. (The Python
-	// original iterates this union as a set, so its order there is
-	// arbitrary; here it is history order then today-only order, with the
-	// stable score sort below deciding what actually surfaces.)
-	union := append([]PairKey{}, history.Keys()...)
-	seen := map[PairKey]struct{}{}
-	for _, k := range history.Keys() {
-		seen[k] = struct{}{}
+	// but absent today is exactly the "gone silent" case. Iteration order is
+	// arbitrary; the rankAnomalies sort below fixes the output order.
+	union := map[PairKey]struct{}{}
+	for k := range history {
+		union[k] = struct{}{}
 	}
-	for _, k := range today.Keys() {
-		if _, ok := seen[k]; !ok {
-			union = append(union, k)
-		}
+	for k := range today {
+		union[k] = struct{}{}
 	}
 
 	var anomalies []Anomaly
-	for _, key := range union {
-		var population []float64
-		if days, ok := history.Get(key); ok {
-			population = make([]float64, 0, len(days))
-			for _, total := range days {
-				population = append(population, float64(total))
-			}
+	for key := range union {
+		days := history[key]
+		population := make([]float64, 0, len(days))
+		for _, total := range days {
+			population = append(population, float64(total))
 		}
 		if len(population) < d.MinHistoryDays {
 			continue
 		}
 		baselineMedian := median(population)
-		todayCount, _ := today.Get(key)
+		todayCount := today[key]
 
 		if todayCount == 0 {
 			if baselineMedian >= d.MinSilentBaseline {
@@ -164,9 +156,7 @@ func (d *BaselineDetector) Run() ([]Anomaly, error) {
 
 	// Rank by magnitude: a host gone silent (large negative) matters as much
 	// as one gone loud (large positive).
-	sort.SliceStable(anomalies, func(i, j int) bool {
-		return math.Abs(anomalies[i].Score()) > math.Abs(anomalies[j].Score())
-	})
+	rankAnomalies(anomalies, func(a Anomaly) float64 { return math.Abs(a.Score()) })
 	return anomalies, nil
 }
 

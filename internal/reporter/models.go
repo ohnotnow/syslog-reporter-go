@@ -1,9 +1,8 @@
 package reporter
 
-// Ports of the deterministic halves of issue_agent.py, resolution_agent.py
-// and anomaly_explainer.py: the data models and their markdown rendering.
-// The LLM calls that populate Issues and Resolutions arrive in a later
-// milestone; the report path needs the types and rendering now.
+// The report's data models (issues, resolutions, explained anomalies) and
+// their markdown rendering. The LLM stages in llmagents.go populate them;
+// the JSON schemas there mirror these structs.
 
 import (
 	"fmt"
@@ -13,9 +12,9 @@ import (
 // SeverityRank orders issues for the short email body. Lower = more urgent.
 var SeverityRank = map[string]int{"critical": 0, "high": 1, "medium": 2, "low": 3}
 
-// The json tags mirror the Pydantic field names; the LLM structured output
+// The json tags are the structured-output field names: the LLM response
 // decodes straight into these, and the dedupe agent re-serialises them in
-// field order to match Python's model_dump().
+// declared field order.
 type Issue struct {
 	Issue              string   `json:"issue"`
 	Severity           string   `json:"severity"` // critical / high / medium / low

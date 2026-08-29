@@ -50,7 +50,7 @@ func newKnownEntry(host, reason, match, program string, added, expires *time.Tim
 	// Compile eagerly so a bad regex fails loudly at startup, not
 	// silently on every line.
 	if e.Match != "" {
-		re, err := compilePyPattern(e.Match)
+		re, err := compileLinePattern(e.Match)
 		if err != nil {
 			return nil, fmt.Errorf("known-known entry for host '%s': bad match regex: %w", e.Host, err)
 		}
@@ -86,7 +86,7 @@ func NewKnownKnowns(entries []*KnownEntry, logDate time.Time) *KnownKnowns {
 }
 
 // rawKnownsFile mirrors the TOML shape. Dates are toml.LocalDate so bare
-// TOML dates (2026-08-27, no time part) parse, matching Python's tomllib.
+// TOML dates (2026-08-27, no time part) parse without a time component.
 type rawKnownsFile struct {
 	Known []rawKnownEntry `toml:"known"`
 }

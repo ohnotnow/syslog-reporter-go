@@ -316,11 +316,11 @@ func buildMgmtView(stats *MgmtStats, version string) *mgmtView {
 		PeriodLabel:   MgmtPeriodLabel(stats.From, stats.To),
 		GeneratedAt:   time.Now().Format("02 Jan 2006"),
 		Version:       version,
-		TotalRaw:      pyThousands(int(stats.TotalRaw)),
-		TotalFiltered: pyThousands(int(stats.TotalFiltered)),
+		TotalRaw:      thousands(int(stats.TotalRaw)),
+		TotalFiltered: thousands(int(stats.TotalFiltered)),
 		HaveFiltered:  stats.HaveFiltered,
-		TotalFindings: pyThousands(stats.TotalFindings),
-		AnomalyCount:  pyThousands(stats.AnomalyCount),
+		TotalFindings: thousands(stats.TotalFindings),
+		AnomalyCount:  thousands(stats.AnomalyCount),
 		DaysWithData:  stats.DaysWithData,
 		TotalDays:     len(stats.Days),
 		ApproxDays:    stats.ApproxDays,
@@ -345,7 +345,7 @@ func buildMgmtView(stats *MgmtStats, version string) *mgmtView {
 		if d.RawLines >= 0 {
 			dv.HasData = true
 			dv.Approx = d.Approx
-			dv.VolLabel = pyThousands(int(d.RawLines))
+			dv.VolLabel = thousands(int(d.RawLines))
 			if maxRaw > 0 {
 				dv.Percent = int(100 * d.RawLines / maxRaw)
 				if dv.Percent < 1 && d.RawLines > 0 {

@@ -5,10 +5,9 @@ import (
 	"testing"
 )
 
-// pyRepr is pinned by CPython-captured vectors (python3, 2026-08-28):
-// repr() of each input, so the explainer payload quotes free text the way
-// the Python original's !r formatting did.
-func TestPyRepr(t *testing.T) {
+// quoteField is pinned by these vectors (captured 2026-08-28) so the
+// explainer payload's quoting of free text never drifts.
+func TestQuoteField(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"plain text", `'plain text'`},
 		{"it's got an apostrophe", `"it's got an apostrophe"`},
@@ -21,8 +20,8 @@ func TestPyRepr(t *testing.T) {
 		{"", `''`},
 	}
 	for _, c := range cases {
-		if got := pyRepr(c.in); got != c.want {
-			t.Errorf("pyRepr(%q) = %s, want %s", c.in, got, c.want)
+		if got := quoteField(c.in); got != c.want {
+			t.Errorf("quoteField(%q) = %s, want %s", c.in, got, c.want)
 		}
 	}
 }
@@ -42,8 +41,8 @@ func TestChunkLines(t *testing.T) {
 	}
 }
 
-// The dedupe payload mirrors Python's json.dumps(indent=2): pydantic field
-// order, two-space indent, no HTML escaping.
+// The dedupe payload is two-space-indented JSON in declared field order,
+// with no HTML escaping.
 func TestDedupePayload(t *testing.T) {
 	issues := &IssueList{Issues: []*Issue{{
 		Issue:              "A <b> & 'thing'",

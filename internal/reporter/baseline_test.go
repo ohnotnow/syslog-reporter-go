@@ -1,6 +1,7 @@
 package reporter
 
-// Port of tests/test_baseline_agent.py from the Python original.
+// Tests for the day-over-day baseline detector: gone loud, gone quiet,
+// gone silent, and the history thresholds.
 
 import (
 	"strings"
@@ -24,9 +25,9 @@ func seedBaseline(t *testing.T, s *AggregateStore, host, program string, values 
 // todayAggregate builds the Aggregate for a single series today; n < 0 means
 // no data at all for the host today (the "gone silent" case).
 func todayAggregate(host, program string, n int) *Aggregate {
-	counts := NewCounts()
+	counts := map[AggKey]int{}
 	if n >= 0 {
-		counts.Add(AggKey{host, program, "00:00"}, n)
+		counts[AggKey{host, program, "00:00"}] = n
 	}
 	return &Aggregate{
 		Counts:       counts,

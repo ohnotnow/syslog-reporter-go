@@ -1,10 +1,10 @@
 package reporter
 
-// Ports of the LLM halves of issue_agent.py, issue_dedupe_agent.py,
-// resolution_agent.py and anomaly_explainer.py. Prompts are embedded so the
-// binary ships self-contained; the JSON schemas mirror the Pydantic models
-// the Python original hands to instructor. All calls go through the
-// internal/llm seam, which routes on the litellm-style model prefix.
+// The four LLM stages: issue detection, issue dedupe, resolutions, and
+// anomaly explanation. Prompts are embedded so the binary ships
+// self-contained; the hand-written JSON schemas mirror the data models in
+// models.go. All calls go through the internal/llm seam, which routes on
+// the litellm-style model prefix.
 
 import (
 	"bytes"
@@ -37,8 +37,8 @@ var resolutionTemplateRaw string
 
 var resolutionTmpl = template.Must(template.New("resolution").Parse(resolutionTemplateRaw))
 
-// issueItemSchema mirrors the Pydantic Issue model; used by both the
-// detector and the deduplicator (they share the IssueList response model).
+// issueItemSchema mirrors the Issue model; used by both the detector and
+// the deduplicator (they share the IssueList response model).
 func issueItemSchema() map[string]any {
 	str := func() map[string]any { return map[string]any{"type": "string"} }
 	return map[string]any{
@@ -174,9 +174,9 @@ func NewIssueDeduplicator(issues *IssueList, model string) *IssueDeduplicatorAge
 	return &IssueDeduplicatorAgent{Issues: issues, Model: model}
 }
 
-// dedupePayload renders the issues as indented JSON like Python's
-// json.dumps(indent=2): full fidelity (complete affected_host lists) so the
-// model can merge host lists properly.
+// dedupePayload renders the issues as two-space-indented JSON: full
+// fidelity (complete affected_host lists) so the model can merge host
+// lists properly.
 func dedupePayload(issues *IssueList) (string, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -220,15 +220,20 @@ func NewResolutionAgent(issues *IssueList, model string, hostOS map[string]strin
 type hostOSEntry struct{ Host, OS string }
 
 // resolutionPrompt renders the system prompt, embedding the per-host OS
-// inventory when the log source knows it (jinja dictsort is
-// case-insensitive by key, hence the lowered comparison).
+// inventory when the log source knows it, sorted case-insensitively by
+// host (exact host as the tie-break, so the order never depends on map
+// iteration).
 func resolutionPrompt(hostOS map[string]string) string {
 	entries := make([]hostOSEntry, 0, len(hostOS))
 	for host, osName := range hostOS {
 		entries = append(entries, hostOSEntry{Host: host, OS: osName})
 	}
-	sort.SliceStable(entries, func(i, j int) bool {
-		return strings.ToLower(entries[i].Host) < strings.ToLower(entries[j].Host)
+	sort.Slice(entries, func(i, j int) bool {
+		li, lj := strings.ToLower(entries[i].Host), strings.ToLower(entries[j].Host)
+		if li != lj {
+			return li < lj
+		}
+		return entries[i].Host < entries[j].Host
 	})
 	var buf strings.Builder
 	_ = resolutionTmpl.Execute(&buf, struct{ HostOS []hostOSEntry }{entries})
@@ -290,13 +295,13 @@ func NewAnomalyExplainer(anomalies []Anomaly, model string) *AnomalyExplainerAge
 }
 
 // explainerPayload lists the anomalies one per line, quoting the free-text
-// fields the way Python's !r formatting did.
+// fields so multi-line log text stays on one payload line.
 func explainerPayload(anomalies []Anomaly) string {
 	lines := make([]string, len(anomalies))
 	for i, a := range anomalies {
 		lines[i] = fmt.Sprintf("%d. host=%s program=%s os_family=%s what=%s detail=%s example=%s",
 			i+1, a.Host(), a.Program(), a.OSFamily(),
-			pyRepr(a.Headline()), pyRepr(a.Summary()), pyRepr(a.ExampleLine()))
+			quoteField(a.Headline()), quoteField(a.Summary()), quoteField(a.ExampleLine()))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -351,11 +356,11 @@ func mergeExplanations(anomalies []Anomaly, explanations []*AnomalyExplanation) 
 	return explained
 }
 
-// pyRepr reproduces CPython's repr() of a string: single quotes unless the
-// string contains a single quote and no double quote; backslash escapes for
-// the quote, backslash, \n \r \t; \xhh (or \u/\U) for other non-printables.
-// Pinned by CPython-captured vectors in the tests.
-func pyRepr(s string) string {
+// quoteField quotes a string for the explainer payload: single quotes
+// unless the string contains a single quote and no double quote; backslash
+// escapes for the quote, backslash, \n \r \t; \xhh (or \u/\U) for other
+// non-printables. The exact output is pinned by test vectors.
+func quoteField(s string) string {
 	quote := rune('\'')
 	if strings.ContainsRune(s, '\'') && !strings.ContainsRune(s, '"') {
 		quote = '"'

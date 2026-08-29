@@ -1,6 +1,6 @@
 package reporter
 
-// Port of tests/test_elk_source.py from the Python original.
+// Tests for the ELK NDJSON dump renderer.
 
 import (
 	"compress/gzip"
@@ -111,9 +111,9 @@ func TestElkNoPidRendersBareProgramTag(t *testing.T) {
 
 func TestElkEmptyProcessNameKeepsEmptyTag(t *testing.T) {
 	// Seen in a real dump: process.name present but empty, pid still set.
-	// Python's doc.get(key, default) keeps the empty string, so the line
-	// renders as 'host [pid]: message' and ParseLine later rejects it; the
-	// "unknown" default applies only when the key is absent entirely.
+	// valueOrDefault keeps the empty string, so the line renders as
+	// 'host [pid]: message' and ParseLine later rejects it; the "unknown"
+	// default applies only when the key is absent entirely.
 	doc := makeDoc(map[string]any{"process.name": ""})
 	path := writeNDJSON(t, []map[string]any{doc}, ".ndjson")
 	_, lines := runElk(t, path)

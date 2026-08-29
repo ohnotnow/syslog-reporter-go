@@ -1,15 +1,15 @@
 package reporter
 
-// Port of agents/elk_source.py: turn dumped Elasticsearch syslog documents
-// back into classic rsyslog text lines. The rest of the pipeline parses raw
+// Turns dumped Elasticsearch syslog documents back into classic rsyslog
+// text lines. The rest of the pipeline parses raw
 // 'Mon DD HH:MM:SS host program[pid]: message' lines by whitespace split, so
 // rather than teach every stage a second data model we render each ES
 // document back into that shape.
 //
-// Input is the NDJSON produced by tools/elk_dump.py in the Python repo: one
-// JSON object per line, flat dotted keys (@timestamp, host.name,
-// host.hostname, process.name, process.pid, message), optionally
-// gzip-compressed (.gz suffix).
+// Input is the NDJSON produced by tools/elk_dump.py: one JSON object per
+// line, flat dotted keys (@timestamp, host.name, host.hostname,
+// process.name, process.pid, message), optionally gzip-compressed
+// (.gz suffix).
 
 import (
 	"bufio"
@@ -69,7 +69,7 @@ func (s *ElkSource) Run() ([]string, error) {
 	for scanner.Scan() {
 		lineno++
 		raw := scanner.Text()
-		if pyStrip(raw) == "" {
+		if strings.TrimSpace(raw) == "" {
 			continue
 		}
 		var doc map[string]any
@@ -113,11 +113,13 @@ func docString(doc map[string]any, key string) string {
 	if !ok || v == nil {
 		return ""
 	}
-	return pyStr(v)
+	return valueString(v)
 }
 
-// pyStr renders a decoded JSON value the way Python's str() would.
-func pyStr(v any) string {
+// valueString renders a decoded JSON value as line text: strings pass
+// through, numbers keep their JSON spelling, and null and booleans render
+// as None/True/False - the rendered-line shape the fixtures pin.
+func valueString(v any) string {
 	switch val := v.(type) {
 	case nil:
 		return "None"
@@ -135,16 +137,15 @@ func pyStr(v any) string {
 	}
 }
 
-// pyGetStr mirrors Python's str(doc.get(key, default)): the default applies
-// only when the key is absent, so a present-but-empty value stays empty
-// (the 2026-08-26 dump has a pid-only doc that must render as 'host [pid]:',
-// exactly as the Python original does).
-func pyGetStr(doc map[string]any, key, def string) string {
+// valueOrDefault renders doc[key], falling back to def only when the key is
+// MISSING: a present-but-empty value stays empty (an NDJSON data contract -
+// the 2026-08-26 dump has a pid-only doc that must render as 'host [pid]:').
+func valueOrDefault(doc map[string]any, key, def string) string {
 	v, exists := doc[key]
 	if !exists {
 		return def
 	}
-	return pyStr(v)
+	return valueString(v)
 }
 
 func (s *ElkSource) noteHostOS(doc map[string]any, host string) {
@@ -155,7 +156,7 @@ func (s *ElkSource) noteHostOS(doc map[string]any, host string) {
 	if name == "" {
 		return
 	}
-	version := strings.SplitN(pyGetStr(doc, "host.os.version", ""), " ", 2)[0]
+	version := strings.SplitN(valueOrDefault(doc, "host.os.version", ""), " ", 2)[0]
 	s.HostOS[host] = strings.TrimSpace(name + " " + version)
 }
 
@@ -175,12 +176,12 @@ func (s *ElkSource) render(doc map[string]any) (line string, ts time.Time, ok bo
 	stamp := fmt.Sprintf("%s %2d %s", ts.Format("Jan"), ts.Day(), ts.Format("15:04:05"))
 	host := docString(doc, "host.hostname")
 	if host == "" {
-		host = strings.SplitN(pyGetStr(doc, "host.name", "unknown"), ".", 2)[0]
+		host = strings.SplitN(valueOrDefault(doc, "host.name", "unknown"), ".", 2)[0]
 	}
 	s.noteHostOS(doc, host)
 	// Default only when the key is absent: a present-but-empty process.name
-	// renders an empty program, exactly like the Python original.
-	program := pyGetStr(doc, "process.name", "unknown")
+	// renders an empty program.
+	program := valueOrDefault(doc, "process.name", "unknown")
 	var tag string
 	if pid, exists := doc["process.pid"]; exists && pid != nil {
 		tag = fmt.Sprintf("%s[%s]:", program, docString(doc, "process.pid"))

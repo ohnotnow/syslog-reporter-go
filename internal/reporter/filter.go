@@ -1,7 +1,7 @@
 package reporter
 
-// Port of agents/log_agent.py: deterministic noise removal ahead of the LLM
-// issue path. The anomaly detectors deliberately run upstream of this filter.
+// Deterministic noise removal ahead of the LLM issue path. The anomaly
+// detectors deliberately run upstream of this filter.
 
 import (
 	"os"
@@ -11,16 +11,15 @@ import (
 
 var pidBracketRe = regexp.MustCompile(`\[\d+\]`)
 
-// compilePyPattern compiles a Python-re pattern for use on single lines that
-// may retain their trailing newline. The (?m) flag makes Go's `$` match just
-// before that newline, which is what Python's non-multiline `$` does with a
-// final newline; no pattern in this codebase uses `^`, so the flag changes
-// nothing else.
-func compilePyPattern(pattern string) (*regexp.Regexp, error) {
+// compileLinePattern compiles a rule pattern for use on single lines that
+// may retain their trailing newline: the (?m) flag makes `$` match just
+// before that newline, so rules anchored at end-of-message still fire. No
+// pattern in this codebase uses `^`, so the flag changes nothing else.
+func compileLinePattern(pattern string) (*regexp.Regexp, error) {
 	return regexp.Compile("(?m)" + pattern)
 }
 
-func mustCompilePyPatterns(patterns []string) []*regexp.Regexp {
+func mustCompileLinePatterns(patterns []string) []*regexp.Regexp {
 	res := make([]*regexp.Regexp, len(patterns))
 	for i, p := range patterns {
 		res[i] = regexp.MustCompile("(?m)" + p)
@@ -29,7 +28,7 @@ func mustCompilePyPatterns(patterns []string) []*regexp.Regexp {
 }
 
 var (
-	compiledRegexIgnores = mustCompilePyPatterns(regexIgnoreList)
+	compiledRegexIgnores = mustCompileLinePatterns(regexIgnoreList)
 	compiledNormalise    = func() []*regexp.Regexp {
 		res := make([]*regexp.Regexp, len(normaliseMap))
 		for i, rule := range normaliseMap {
@@ -132,9 +131,8 @@ func (f *LogFilter) normaliseLines(lines []string) []string {
 				parts := splitWS(out, 4)
 				if len(parts) >= 5 {
 					// Keep timestamp and hostname, replace message with replacement.
-					// NB like the Python original this collapses the timestamp's
-					// double space ("Nov  8" becomes "Nov 8") and drops the
-					// line's trailing newline.
+					// NB this collapses the timestamp's double space ("Nov  8"
+					// becomes "Nov 8") and drops the line's trailing newline.
 					out = strings.Join(parts[:4], " ") + " " + normaliseMap[i].replacement
 				} else {
 					out = normaliseMap[i].replacement
@@ -159,7 +157,7 @@ func (f *LogFilter) removeDuplicates(lines []string) []string {
 		if len(parts) >= 5 {
 			message = parts[4]
 		} else {
-			message = pyStrip(line)
+			message = strings.TrimSpace(line)
 		}
 		normalisedMessage := pidBracketRe.ReplaceAllString(message, "")
 		if messageCounts[normalisedMessage] < 3 {

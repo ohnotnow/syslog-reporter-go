@@ -1,7 +1,7 @@
 package reporter
 
-// Port of tests/test_report.py from the Python original (the SMTP
-// EmailAgent tests live in emailer_test.go).
+// Tests for both report layouts (the SMTP EmailAgent tests live in
+// emailer_test.go).
 
 import (
 	"fmt"
@@ -219,8 +219,7 @@ func TestNoKnownsAtAllIsFine(t *testing.T) {
 }
 
 // The model footer names which model did the analysis, so teams comparing
-// models can tell reports apart (owner decision 2026-08-28; a deliberate
-// divergence from the Python report layout).
+// models can tell reports apart (owner decision 2026-08-28).
 func TestModelFooterOnBothLayouts(t *testing.T) {
 	rep := &ReportAgent{
 		Issues:      &IssueList{Issues: []*Issue{testIssue("disk-full", "critical")}},

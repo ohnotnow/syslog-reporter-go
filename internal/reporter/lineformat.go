@@ -1,8 +1,9 @@
 package reporter
 
-// Helpers that reproduce specific Python stdlib semantics the report's
-// byte-parity contract depends on. Each mirrors one CPython behaviour;
-// change them only against a fresh diff with the Python original.
+// Small parsing and number-formatting helpers shared across the pipeline.
+// Their exact behaviour is pinned by tests: splitWS is the input contract
+// for rsyslog's column format, and the formatting helpers fix the report's
+// number style.
 
 import (
 	"fmt"
@@ -12,10 +13,13 @@ import (
 	"unicode/utf8"
 )
 
-// splitWS mimics Python's str.split(None, maxsplit): runs of Unicode
-// whitespace separate fields, leading whitespace is skipped, and once
-// maxsplit fields have been taken the remainder (internal and trailing
-// whitespace intact) becomes the final element. maxsplit < 0 means no limit.
+// splitWS splits on RUNS of Unicode whitespace with a maxsplit: leading
+// whitespace is skipped, and once maxsplit fields have been taken the
+// remainder (internal and trailing whitespace intact) becomes the final
+// element. maxsplit < 0 means no limit. This is the correct parse for
+// rsyslog's column format, which pads single-digit days with a double space
+// ("Aug  6 ..."); strings.SplitN on a single space would produce an empty
+// field there.
 func splitWS(s string, maxsplit int) []string {
 	var parts []string
 	i, n := 0, len(s)
@@ -43,11 +47,6 @@ func splitWS(s string, maxsplit int) []string {
 	return parts
 }
 
-// pyStrip mimics Python's str.strip(): trims Unicode whitespace from both ends.
-func pyStrip(s string) string {
-	return strings.TrimFunc(s, unicode.IsSpace)
-}
-
 // groupThousands inserts commas into a plain digit string ("1234567" becomes "1,234,567").
 func groupThousands(digits string) string {
 	n := len(digits)
@@ -68,8 +67,8 @@ func groupThousands(digits string) string {
 	return b.String()
 }
 
-// pyThousands mimics Python's format(n, ','): comma-grouped integer.
-func pyThousands(n int) string {
+// thousands formats an integer comma-grouped: 1234567 becomes "1,234,567".
+func thousands(n int) string {
 	s := strconv.Itoa(n)
 	neg := strings.HasPrefix(s, "-")
 	s = strings.TrimPrefix(s, "-")
@@ -80,9 +79,9 @@ func pyThousands(n int) string {
 	return s
 }
 
-// pyCommaF0 mimics Python's format(x, ',.0f'): rounded to no decimal places
-// (ties to even, which Go's %.0f also does) and comma-grouped.
-func pyCommaF0(x float64) string {
+// thousandsFloat rounds to a whole number (ties to even, as Go's %.0f does)
+// and comma-groups the result.
+func thousandsFloat(x float64) string {
 	s := fmt.Sprintf("%.0f", x)
 	neg := strings.HasPrefix(s, "-")
 	s = strings.TrimPrefix(s, "-")
@@ -93,9 +92,9 @@ func pyCommaF0(x float64) string {
 	return s
 }
 
-// pyG mimics Python's format(x, 'g'): 6 significant digits, trailing zeros
-// stripped, switching to exponent notation at 1e6 and below 1e-4. These are
-// the C %g rules, which Go's 'g' verb with an explicit precision also follows.
-func pyG(x float64) string {
+// compactFloat renders 6 significant digits with trailing zeros stripped,
+// switching to exponent notation at 1e6 and below 1e-4 (the C %g rules,
+// which Go's 'g' verb with an explicit precision follows).
+func compactFloat(x float64) string {
 	return fmt.Sprintf("%.6g", x)
 }

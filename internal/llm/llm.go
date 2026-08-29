@@ -1,8 +1,8 @@
 // Package llm is the one seam between the pipeline and LLM providers.
 //
-// Model strings keep the litellm format the Python original used
-// ("openai/gpt-4o-mini", "anthropic/claude-sonnet-4-6") so every existing
-// .env carries over unchanged: the prefix picks the official SDK, the rest
+// Model strings use litellm-style prefixes
+// ("openai/gpt-4o-mini", "anthropic/claude-sonnet-4-6"):
+// the prefix picks the official SDK, the rest
 // is passed through as the provider's model id. azure/ rides the OpenAI
 // backend against an Azure OpenAI resource's v1 endpoint. Only
 // structured-output completions exist in this pipeline, so Complete is the
@@ -42,8 +42,8 @@ func Complete(ctx context.Context, model, system, user, schemaName string, schem
 	}
 }
 
-// reasoningEffort reads SYSLOG_REASONING_EFFORT at call time, mirroring the
-// Python agents/llm.py wrapper. Unset means provider default.
+// reasoningEffort reads SYSLOG_REASONING_EFFORT at call time. Unset means
+// provider default.
 func reasoningEffort() string {
 	return os.Getenv("SYSLOG_REASONING_EFFORT")
 }

@@ -1,8 +1,8 @@
 package reporter
 
-// Direct port of agents/log_filters.py from the Python original. The three
-// lists are meant to be edited per estate; keep entries and order identical
-// to the Python file until the parity milestone is signed off.
+// The noise filter rule lists. The three lists are meant to be edited per
+// estate; estate-identifying entries (hostnames, internal IPs) belong in
+// SYSLOG_BLANKET_IGNORE, not here.
 
 var ignoreList = []string{
 	"Hello recv from server",

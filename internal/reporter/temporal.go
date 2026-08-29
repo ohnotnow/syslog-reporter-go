@@ -1,7 +1,7 @@
 package reporter
 
-// Port of agents/temporal_agent.py: temporal burst detection WITH seasonality
-// handling. Naive within-day burst detection is dominated by expected
+// Temporal burst detection WITH seasonality handling.
+// Naive within-day burst detection is dominated by expected
 // seasonality (labs rebooting at ~10:00 dump kernel logs every morning), so
 // we compare like with like: today's count in a time-of-day window against
 // the SAME window on prior days, per (host, program). A normal morning
@@ -52,7 +52,7 @@ func (a *TemporalAnomaly) Summary() string {
 	return fmt.Sprintf(
 		"%s events in the %s window today vs an own median of %s for that "+
 			"time of day (over %d days) - a burst beyond its usual rhythm.",
-		pyThousands(a.Count), a.Window, pyCommaF0(a.BaselineMedian), a.DaysSeen)
+		thousands(a.Count), a.Window, thousandsFloat(a.BaselineMedian), a.DaysSeen)
 }
 
 // TemporalDetector flags (host, program, window) counts unusual for that
@@ -87,9 +87,8 @@ func (d *TemporalDetector) Run() ([]Anomaly, error) {
 	}
 	families := osFamilies(d.agg.HostPrograms)
 
-	var anomalies []Anomaly
-	for _, key := range d.agg.Counts.Keys() {
-		todayCount, _ := d.agg.Counts.Get(key)
+	var anomalies []*TemporalAnomaly
+	for key, todayCount := range d.agg.Counts {
 		if todayCount < d.MinCount {
 			continue
 		}
@@ -123,8 +122,25 @@ func (d *TemporalDetector) Run() ([]Anomaly, error) {
 		})
 	}
 
-	sort.SliceStable(anomalies, func(i, j int) bool {
-		return anomalies[i].Score() > anomalies[j].Score()
+	// Highest score first; ties break lexicographically by (host, program,
+	// window) - a (host, program) can burst in several windows, so the
+	// window is part of the tie-break.
+	sort.Slice(anomalies, func(i, j int) bool {
+		a, b := anomalies[i], anomalies[j]
+		if a.score != b.score {
+			return a.score > b.score
+		}
+		if a.host != b.host {
+			return a.host < b.host
+		}
+		if a.program != b.program {
+			return a.program < b.program
+		}
+		return a.Window < b.Window
 	})
-	return anomalies, nil
+	out := make([]Anomaly, len(anomalies))
+	for i, a := range anomalies {
+		out[i] = a
+	}
+	return out, nil
 }

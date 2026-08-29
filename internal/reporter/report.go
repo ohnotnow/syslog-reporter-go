@@ -1,16 +1,11 @@
 package reporter
 
-// Port of agents/report_agent.py plus the two Jinja layouts it renders
-// (prompts/report.j2 and prompts/email_body.j2). The Python templates are
-// rendered with trim_blocks and lstrip_blocks; the string building below
-// reproduces that output byte for byte, with two deliberate exceptions
-// (both owner's choice, 2026-08-28): the Python literals' em dashes are
-// plain hyphens here (the parity diff normalises dashes before comparing),
-// and a model-attribution footer is appended when the LLM stages ran.
-//
-// Rendered as Go code rather than text/template: the layouts are fixed by
-// the compatibility contract, and exact whitespace is far easier to audit
-// in string literals than through a second templating dialect.
+// The two report layouts: the full report (the email attachment) and the
+// short digest (the email body). Both are deliberately plain string
+// building rather than text/template: exact whitespace is far easier to
+// audit in string literals than through a templating dialect. House rules:
+// no em dashes anywhere (plain hyphens only), and a model-attribution
+// footer when the LLM stages ran (both owner decisions, 2026-08-28).
 
 import (
 	"fmt"
@@ -35,8 +30,7 @@ type ReportAgent struct {
 	LLMSkipped  bool
 	// Model is the litellm-style model string that did the analysis, shown
 	// as a footer so teams comparing models can tell reports apart (owner
-	// decision 2026-08-28, ant ADR: a deliberate divergence from the Python
-	// report, like the dash change). Empty or --no-llm means no footer.
+	// decision 2026-08-28). Empty or --no-llm means no footer.
 	Model string
 	// Optional KnownKnowns: suppression must stay visible in the report, or
 	// a muted entry can quietly become a real fault nobody looks at.

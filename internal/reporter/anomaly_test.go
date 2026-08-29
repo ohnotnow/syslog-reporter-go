@@ -1,6 +1,6 @@
 package reporter
 
-// Port of tests/test_anomaly_agent.py from the Python original.
+// Tests for line parsing, the robust z-score, and the peer detector.
 
 import (
 	"math"

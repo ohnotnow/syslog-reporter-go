@@ -1,6 +1,6 @@
 package reporter
 
-// Port of tests/test_known_knowns.py from the Python original.
+// Tests for the known-knowns TOML suppression file.
 
 import (
 	"os"

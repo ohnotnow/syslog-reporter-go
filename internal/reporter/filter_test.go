@@ -1,6 +1,6 @@
 package reporter
 
-// Port of tests/test_log_agent.py from the Python original. Hostnames are
+// Tests for the deterministic noise filter. Hostnames are
 // fictional, as there.
 
 import (

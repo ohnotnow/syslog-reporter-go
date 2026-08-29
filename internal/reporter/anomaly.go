@@ -1,14 +1,14 @@
 package reporter
 
-// Port of agents/anomaly_agent.py: peer-comparison anomaly detection over the
-// RAW syslog, upstream of the denylist so it can see the high-volume programs
-// the filter deletes. Deliberately stdlib-style: parse the program field,
-// count per (host, program, window), and flag hosts doing far more of a
-// program than their fleet peers via a robust (median/MAD) z-score.
+// Peer-comparison anomaly detection over the RAW syslog, upstream of the
+// denylist so it can see the high-volume programs the filter deletes.
+// Deliberately stdlib-style: parse the program field, count per (host,
+// program, window), and flag hosts doing far more of a program than their
+// fleet peers via a robust (median/MAD) z-score.
 //
-// Where the Python original relied on dict insertion order, the ordered
-// structures below preserve it, so tie-breaks in the stable sorts land the
-// same way.
+// Output ordering is deterministic by construction: every ranked list is
+// sorted by score with an explicit lexicographic (host, program) tie-break,
+// never by map iteration order.
 
 import (
 	"fmt"
@@ -42,58 +42,6 @@ type PairKey struct {
 	Host    string
 	Program string
 }
-
-// Counts is an insertion-ordered map of (host, program, window) to a count,
-// mirroring a Python dict's ordering guarantees.
-type Counts struct {
-	keys []AggKey
-	m    map[AggKey]int
-}
-
-func NewCounts() *Counts {
-	return &Counts{m: map[AggKey]int{}}
-}
-
-func (c *Counts) Add(k AggKey, n int) {
-	if _, ok := c.m[k]; !ok {
-		c.keys = append(c.keys, k)
-	}
-	c.m[k] += n
-}
-
-func (c *Counts) Get(k AggKey) (int, bool) {
-	n, ok := c.m[k]
-	return n, ok
-}
-
-func (c *Counts) Len() int { return len(c.keys) }
-
-// Keys returns the keys in first-seen order. Callers must not mutate it.
-func (c *Counts) Keys() []AggKey { return c.keys }
-
-// PairTotals is an insertion-ordered map of (host, program) to a day total.
-type PairTotals struct {
-	keys []PairKey
-	m    map[PairKey]int
-}
-
-func NewPairTotals() *PairTotals {
-	return &PairTotals{m: map[PairKey]int{}}
-}
-
-func (p *PairTotals) Add(k PairKey, n int) {
-	if _, ok := p.m[k]; !ok {
-		p.keys = append(p.keys, k)
-	}
-	p.m[k] += n
-}
-
-func (p *PairTotals) Get(k PairKey) (int, bool) {
-	n, ok := p.m[k]
-	return n, ok
-}
-
-func (p *PairTotals) Keys() []PairKey { return p.keys }
 
 // Anomaly is the common interface shared by every anomaly type (peer /
 // baseline / temporal) so the explainer and report can treat them uniformly.
@@ -132,7 +80,7 @@ func (a *PeerAnomaly) Headline() string { return "Louder than its peers" }
 
 func (a *PeerAnomaly) Summary() string {
 	return fmt.Sprintf("%s events vs a fleet median of %s across peer hosts.",
-		pyThousands(a.Count), pyG(a.FleetMedian))
+		thousands(a.Count), compactFloat(a.FleetMedian))
 }
 
 // ParsedLine is the (host, program, window, raw) tuple parse_line returns.
@@ -163,8 +111,8 @@ func ParseLine(line string) *ParsedLine {
 	}
 	minute, err := strconv.Atoi(tstamp[3:5])
 	if err != nil {
-		// The Python original would crash on a non-numeric minute after a
-		// plausible-looking timestamp; treat it as unparseable instead.
+		// A non-numeric minute after a plausible-looking timestamp: treat
+		// the line as unparseable rather than guessing a window.
 		return nil
 	}
 	window := fmt.Sprintf("%s:%02d", tstamp[:2], (minute/BucketMinutes)*BucketMinutes)
@@ -209,13 +157,28 @@ func RobustZ(value float64, population []float64) float64 {
 
 // CollapseToPairs collapses window-keyed counts to per-(host, program) day
 // totals. Shared by the peer detector and the day-over-day baseline detector.
-func CollapseToPairs(counts *Counts) *PairTotals {
-	pairs := NewPairTotals()
-	for _, k := range counts.Keys() {
-		n, _ := counts.Get(k)
-		pairs.Add(PairKey{Host: k.Host, Program: k.Program}, n)
+func CollapseToPairs(counts map[AggKey]int) map[PairKey]int {
+	pairs := map[PairKey]int{}
+	for k, n := range counts {
+		pairs[PairKey{Host: k.Host, Program: k.Program}] += n
 	}
 	return pairs
+}
+
+// rankAnomalies sorts by the given score key, highest first, breaking ties
+// lexicographically by (host, program) so the order never depends on map
+// iteration.
+func rankAnomalies(anomalies []Anomaly, key func(Anomaly) float64) {
+	sort.Slice(anomalies, func(i, j int) bool {
+		a, b := anomalies[i], anomalies[j]
+		if ka, kb := key(a), key(b); ka != kb {
+			return ka > kb
+		}
+		if a.Host() != b.Host() {
+			return a.Host() < b.Host()
+		}
+		return a.Program() < b.Program()
+	})
 }
 
 // CombineAnomalies merges anomalies from several detectors into one ranked
@@ -224,27 +187,21 @@ func CollapseToPairs(counts *Counts) *PairTotals {
 // strongest signal. Scores are all modified z-scores, so their magnitudes are
 // comparable across detectors and the union ranks by |score|.
 func CombineAnomalies(lists ...[]Anomaly) []Anomaly {
-	var order []PairKey
 	merged := map[PairKey]Anomaly{}
 	for _, list := range lists {
 		for _, a := range list {
 			key := PairKey{Host: a.Host(), Program: a.Program()}
 			existing, ok := merged[key]
-			if !ok {
-				order = append(order, key)
-				merged[key] = a
-			} else if math.Abs(a.Score()) > math.Abs(existing.Score()) {
+			if !ok || math.Abs(a.Score()) > math.Abs(existing.Score()) {
 				merged[key] = a
 			}
 		}
 	}
-	result := make([]Anomaly, len(order))
-	for i, key := range order {
-		result[i] = merged[key]
+	result := make([]Anomaly, 0, len(merged))
+	for _, a := range merged {
+		result = append(result, a)
 	}
-	sort.SliceStable(result, func(i, j int) bool {
-		return math.Abs(result[i].Score()) > math.Abs(result[j].Score())
-	})
+	rankAnomalies(result, func(a Anomaly) float64 { return math.Abs(a.Score()) })
 	return result
 }
 
@@ -285,7 +242,7 @@ func osFamilies(hostPrograms map[string]map[string]struct{}) map[string]string {
 // Aggregate is what PeerDetector.Aggregate returns: window-keyed counts, the
 // first raw line seen per (host, program), and each host's program set.
 type Aggregate struct {
-	Counts       *Counts
+	Counts       map[AggKey]int
 	Examples     map[PairKey]string
 	HostPrograms map[string]map[string]struct{}
 }
@@ -311,7 +268,7 @@ func (d *PeerDetector) Aggregate() *Aggregate {
 		return d.agg
 	}
 	agg := &Aggregate{
-		Counts:       NewCounts(),
+		Counts:       map[AggKey]int{},
 		Examples:     map[PairKey]string{},
 		HostPrograms: map[string]map[string]struct{}{},
 	}
@@ -320,7 +277,7 @@ func (d *PeerDetector) Aggregate() *Aggregate {
 		if rec == nil {
 			continue
 		}
-		agg.Counts.Add(AggKey{Host: rec.Host, Program: rec.Program, Window: rec.Window}, 1)
+		agg.Counts[AggKey{Host: rec.Host, Program: rec.Program, Window: rec.Window}]++
 		pair := PairKey{Host: rec.Host, Program: rec.Program}
 		if _, ok := agg.Examples[pair]; !ok {
 			agg.Examples[pair] = rec.Raw
@@ -339,29 +296,23 @@ func (d *PeerDetector) Run() []Anomaly {
 	agg := d.Aggregate()
 
 	// Collapse windows to (host, program) day totals, then group host totals
-	// by program so each program is its own peer group. Insertion order is
-	// preserved throughout to match Python's dict semantics.
+	// by program so each program is its own peer group. Iteration order is
+	// arbitrary here; the final rankAnomalies sort fixes the output order.
 	pairTotals := CollapseToPairs(agg.Counts)
 
 	type hostCount struct {
 		host string
 		n    int
 	}
-	var programOrder []string
 	byProgram := map[string][]hostCount{}
-	for _, pair := range pairTotals.Keys() {
-		n, _ := pairTotals.Get(pair)
-		if _, ok := byProgram[pair.Program]; !ok {
-			programOrder = append(programOrder, pair.Program)
-		}
+	for pair, n := range pairTotals {
 		byProgram[pair.Program] = append(byProgram[pair.Program], hostCount{pair.Host, n})
 	}
 
 	families := osFamilies(agg.HostPrograms)
 
 	var anomalies []Anomaly
-	for _, program := range programOrder {
-		hostCounts := byProgram[program]
+	for program, hostCounts := range byProgram {
 		if len(hostCounts) < d.MinHosts {
 			continue
 		}
@@ -393,8 +344,6 @@ func (d *PeerDetector) Run() []Anomaly {
 			})
 		}
 	}
-	sort.SliceStable(anomalies, func(i, j int) bool {
-		return anomalies[i].Score() > anomalies[j].Score()
-	})
+	rankAnomalies(anomalies, Anomaly.Score)
 	return anomalies
 }

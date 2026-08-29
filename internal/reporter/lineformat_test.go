@@ -5,11 +5,11 @@ import (
 	"testing"
 )
 
-// Expected values in these tests were captured from CPython 3.13 on
-// 2026-08-28 (format(x, 'g'), format(x, ','), format(x, ',.0f'),
-// str.split(None, 4)); the helpers must keep matching them.
+// These vectors pin the exact split semantics and number formats the
+// report depends on (captured 2026-08-28); the helpers must keep matching
+// them, or report output changes shape.
 
-func TestSplitWSMimicsPythonSplit(t *testing.T) {
+func TestSplitWSSplitsOnWhitespaceRuns(t *testing.T) {
 	cases := []struct {
 		in       string
 		maxsplit int
@@ -32,7 +32,7 @@ func TestSplitWSMimicsPythonSplit(t *testing.T) {
 	}
 }
 
-func TestPyGMatchesPythonGFormat(t *testing.T) {
+func TestCompactFloatSixSignificantDigits(t *testing.T) {
 	cases := []struct {
 		in   float64
 		want string
@@ -48,13 +48,13 @@ func TestPyGMatchesPythonGFormat(t *testing.T) {
 		{42.0, "42"},
 	}
 	for _, c := range cases {
-		if got := pyG(c.in); got != c.want {
-			t.Errorf("pyG(%v) = %q, want %q", c.in, got, c.want)
+		if got := compactFloat(c.in); got != c.want {
+			t.Errorf("compactFloat(%v) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }
 
-func TestPyThousandsMatchesPythonCommaFormat(t *testing.T) {
+func TestThousandsCommaGroups(t *testing.T) {
 	cases := []struct {
 		in   int
 		want string
@@ -66,26 +66,26 @@ func TestPyThousandsMatchesPythonCommaFormat(t *testing.T) {
 		{-1234567, "-1,234,567"},
 	}
 	for _, c := range cases {
-		if got := pyThousands(c.in); got != c.want {
-			t.Errorf("pyThousands(%d) = %q, want %q", c.in, got, c.want)
+		if got := thousands(c.in); got != c.want {
+			t.Errorf("thousands(%d) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }
 
-func TestPyCommaF0MatchesPythonCommaPointZeroF(t *testing.T) {
+func TestThousandsFloatRoundsThenGroups(t *testing.T) {
 	cases := []struct {
 		in   float64
 		want string
 	}{
-		{2.5, "2"}, // Python rounds half to even, and so does Go's %.0f
+		{2.5, "2"}, // %.0f rounds half to even
 		{3.5, "4"},
 		{1234567.5, "1,234,568"},
 		{100.0, "100"},
 		{999.4, "999"},
 	}
 	for _, c := range cases {
-		if got := pyCommaF0(c.in); got != c.want {
-			t.Errorf("pyCommaF0(%v) = %q, want %q", c.in, got, c.want)
+		if got := thousandsFloat(c.in); got != c.want {
+			t.Errorf("thousandsFloat(%v) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }

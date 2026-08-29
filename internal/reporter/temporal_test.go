@@ -1,6 +1,7 @@
 package reporter
 
-// Port of tests/test_temporal_agent.py from the Python original.
+// Tests for the temporal burst detector: same-window comparison,
+// seasonality, and the history thresholds.
 
 import (
 	"strings"
@@ -21,8 +22,7 @@ func seedTemporal(t *testing.T, s *AggregateStore, values []int) {
 }
 
 func temporalTodayAggregate(n int) *Aggregate {
-	counts := NewCounts()
-	counts.Add(AggKey{"lab1", "kernel", temporalWindow}, n)
+	counts := map[AggKey]int{{"lab1", "kernel", temporalWindow}: n}
 	return &Aggregate{
 		Counts:       counts,
 		Examples:     map[PairKey]string{{"lab1", "kernel"}: "Jun 13 10:00:00 lab1 kernel: boot"},
