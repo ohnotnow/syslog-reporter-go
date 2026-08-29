@@ -404,7 +404,8 @@ func RenderMgmtText(stats *MgmtStats) string {
 	if v.HaveFiltered {
 		fmt.Fprintf(&b, "After filtering: %s (%s)\n", v.TotalFiltered, v.Reduction)
 	}
-	fmt.Fprintf(&b, "Findings surfaced: %s (plus %s anomalies)\n", v.TotalFindings, v.AnomalyCount)
+	// "including", not "plus": TotalFindings already counts the anomalies.
+	fmt.Fprintf(&b, "Findings surfaced: %s (including %s anomalies)\n", v.TotalFindings, v.AnomalyCount)
 	if v.FeedbackLabel != "" {
 		fmt.Fprintf(&b, "Feedback: %s\n", v.FeedbackLabel)
 	}

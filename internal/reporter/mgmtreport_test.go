@@ -164,7 +164,9 @@ func TestRenderMgmtTextHeadlines(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := RenderMgmtText(stats)
-	for _, want := range []string{"1,650", "Findings surfaced: 3", "1 of 2 reviewed findings"} {
+	// "including": anomalies are part of the findings total, not on top of
+	// it, and the wording must never drift back to "plus" (srg-so8ja.3).
+	for _, want := range []string{"1,650", "Findings surfaced: 3 (including", "1 of 2 reviewed findings"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("text missing %q in:\n%s", want, text)
 		}
