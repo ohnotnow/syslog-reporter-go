@@ -3,8 +3,10 @@
 // Model strings keep the litellm format the Python original used
 // ("openai/gpt-4o-mini", "anthropic/claude-sonnet-4-6") so every existing
 // .env carries over unchanged: the prefix picks the official SDK, the rest
-// is passed through as the provider's model id. Only structured-output
-// completions exist in this pipeline, so Complete is the whole interface.
+// is passed through as the provider's model id. azure/ rides the OpenAI
+// backend against an Azure OpenAI resource's v1 endpoint. Only
+// structured-output completions exist in this pipeline, so Complete is the
+// whole interface.
 package llm
 
 import (
@@ -16,6 +18,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/shared"
 )
 
@@ -30,10 +33,12 @@ func Complete(ctx context.Context, model, system, user, schemaName string, schem
 	switch provider {
 	case "openai":
 		return completeOpenAI(ctx, modelID, system, user, schemaName, schema, out)
+	case "azure":
+		return completeAzure(ctx, modelID, system, user, schemaName, schema, out)
 	case "anthropic":
 		return completeAnthropic(ctx, modelID, system, user, schema, out)
 	default:
-		return fmt.Errorf("unsupported provider prefix %q in model %q (supported: openai/, anthropic/)", provider, model)
+		return fmt.Errorf("unsupported provider prefix %q in model %q (supported: openai/, azure/, anthropic/)", provider, model)
 	}
 }
 
@@ -45,6 +50,30 @@ func reasoningEffort() string {
 
 func completeOpenAI(ctx context.Context, modelID, system, user, schemaName string, schema map[string]any, out any) error {
 	client := openai.NewClient() // OPENAI_API_KEY / OPENAI_BASE_URL from env
+	return completeChat(ctx, client, "openai", modelID, system, user, schemaName, schema, out)
+}
+
+// completeAzure rides the OpenAI chat path against an Azure OpenAI
+// resource's v1 endpoint (https://<resource>.openai.azure.com/openai/v1/).
+// The v1 surface behaves like OpenAI proper - model id in the body, bearer
+// auth - so none of the SDK's azure subpackage machinery (per-deployment
+// URL rewriting, api-version, azcore) is needed. The trailing slash on the
+// base URL is load-bearing: request paths resolve relative to it, and
+// without the slash the endpoint's final path segment is silently dropped.
+func completeAzure(ctx context.Context, modelID, system, user, schemaName string, schema map[string]any, out any) error {
+	endpoint := os.Getenv("AZURE_OPENAI_ENDPOINT")
+	apiKey := os.Getenv("AZURE_OPENAI_API_KEY")
+	if endpoint == "" || apiKey == "" {
+		return fmt.Errorf("azure/%s needs AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY set", modelID)
+	}
+	client := openai.NewClient(
+		option.WithBaseURL(strings.TrimRight(endpoint, "/")+"/"),
+		option.WithAPIKey(apiKey),
+	)
+	return completeChat(ctx, client, "azure", modelID, system, user, schemaName, schema, out)
+}
+
+func completeChat(ctx context.Context, client openai.Client, provider, modelID, system, user, schemaName string, schema map[string]any, out any) error {
 	params := openai.ChatCompletionNewParams{
 		Model: modelID,
 		Messages: []openai.ChatCompletionMessageParamUnion{
@@ -68,14 +97,14 @@ func completeOpenAI(ctx context.Context, modelID, system, user, schemaName strin
 	}
 	resp, err := client.Chat.Completions.New(ctx, params)
 	if err != nil {
-		return fmt.Errorf("openai/%s: %w", modelID, err)
+		return fmt.Errorf("%s/%s: %w", provider, modelID, err)
 	}
 	if len(resp.Choices) == 0 {
-		return fmt.Errorf("openai/%s: response had no choices", modelID)
+		return fmt.Errorf("%s/%s: response had no choices", provider, modelID)
 	}
 	content := resp.Choices[0].Message.Content
 	if err := json.Unmarshal([]byte(content), out); err != nil {
-		return fmt.Errorf("openai/%s: decoding structured output: %w", modelID, err)
+		return fmt.Errorf("%s/%s: decoding structured output: %w", provider, modelID, err)
 	}
 	return nil
 }

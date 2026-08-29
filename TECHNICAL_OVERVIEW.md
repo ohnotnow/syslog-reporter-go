@@ -142,6 +142,15 @@ explanations), constrained by hand-written JSON schemas that mirror the data
 models. OpenAI gets a strict `json_schema` response format; Anthropic gets
 `output_config.format`.
 
+An `azure/` prefix targets OpenAI models hosted on Azure OpenAI: it rides
+the same openai-go chat path with the client pointed at the resource's v1
+endpoint, configured by `AZURE_OPENAI_ENDPOINT`
+(`https://<resource>.openai.azure.com/openai/v1/`) and
+`AZURE_OPENAI_API_KEY` (sent as a bearer token). The v1 GA surface takes
+the model id in the request body like OpenAI proper, so there is no
+per-deployment URL rewriting, no api-version parameter, and no Azure SDK
+dependency; older non-v1 endpoints are not supported.
+
 `SYSLOG_REASONING_EFFORT` passes to OpenAI verbatim (`none` is right for
 batch runs); for Anthropic it maps onto `output_config.effort`, with
 `none`/`minimal` clamped to `low` (Anthropic's floor).
@@ -288,6 +297,8 @@ Read from the environment or a `.env` beside the working directory
 
 - `SYSLOG_DEFAULT_MODEL` default model, litellm format
 - `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` for whichever provider is used
+- `AZURE_OPENAI_ENDPOINT` + `AZURE_OPENAI_API_KEY` for `azure/` models
+  (the resource's v1 endpoint; see the provider routing section)
 - `SYSLOG_REASONING_EFFORT` reasoning effort, see above; unset = provider default
 - `SYSLOG_SMTP_SERVER`, `SYSLOG_SMTP_SENDER`, `SYSLOG_SMTP_RECIPIENTS` for
   `--send-email` (recipients ride the SMTP envelope as BCC)

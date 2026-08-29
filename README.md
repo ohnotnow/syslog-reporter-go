@@ -53,6 +53,10 @@ where you run it:
 ```bash
 SYSLOG_DEFAULT_MODEL=openai/gpt-5.6-luna # litellm-style provider/model
 OPENAI_API_KEY=sk-...                     # or ANTHROPIC_API_KEY for anthropic/ models
+# for azure/ models on Azure OpenAI, set:
+# SYSLOG_DEFAULT_MODEL=azure/your-deployment-name
+# AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/openai/v1/
+# AZURE_OPENAI_API_KEY=...
 ```
 
 Then point it at a day of syslog:

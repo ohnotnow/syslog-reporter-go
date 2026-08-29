@@ -78,7 +78,9 @@ SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.
   embedded from `internal/reporter/prompts/` (ports of the Python
   `agents/prompts/*.j2`, em dashes replaced per the dash rule);
   `internal/llm` routes `openai/` and `anthropic/` model prefixes to the
-  official SDKs (azure/ not yet). `SYSLOG_REASONING_EFFORT` passes to
+  official SDKs; `azure/` rides the openai-go client against an Azure
+  OpenAI v1 endpoint (AZURE_OPENAI_ENDPOINT + AZURE_OPENAI_API_KEY, no
+  Azure SDK dependency). `SYSLOG_REASONING_EFFORT` passes to
   OpenAI verbatim; for Anthropic it maps onto `output_config.effort`
   (`none`/`minimal` clamp to `low`). `--send-email` is ported and was
   verified against a local mailhog: recipients ride the SMTP envelope
