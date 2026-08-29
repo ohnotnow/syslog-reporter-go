@@ -30,9 +30,9 @@ implementation replaced it outright and maintains no compatibility with it.
 ## Directory structure
 
 ```
-cmd/syslog-reporter/        CLI entry point; subcommand dispatch (serve, user,
-                            findings, mgmt-report, self-update) ahead of the
-                            batch pipeline
+cmd/syslog-reporter/        CLI entry point; explicit command dispatch (run,
+                            eval, serve, user, findings, mgmt-report,
+                            self-update) from one registry - no default mode
 internal/selfupdate/        Version/RepoURL (ldflags-stamped), the --version
                             latest-release check, and the self-update command
 internal/reporter/
@@ -296,10 +296,12 @@ between them.
 
 ### CLI flags
 
-The first argument may be a subcommand: `serve` (web UI), `user add`
-(local accounts), `findings` (list/show/feedback) and `mgmt-report`
-(management summary), all documented above. Anything else is the batch
-report path:
+The first argument is always a command: `run` (the daily batch report),
+`eval` (model comparison), `serve` (web UI), `user add` (local accounts),
+`findings` (list/show/feedback), `mgmt-report` (management summary) and
+`self-update`. A bare invocation or an unknown command prints the command
+list and exits non-zero; there is no default mode. `--help` and
+`--version` work at top level. The `run` flags:
 
 ```
 logfile          positional: path to the syslog file; omit (or pass --) to
@@ -322,8 +324,17 @@ logfile          positional: path to the syslog file; omit (or pass --) to
                  to see what your ignore rules are letting through when
                  tuning the filter for your estate
 --debug          extra progress detail on stderr
---version        print the version and exit
 ```
+
+`eval --model <provider/model>` compares provider/model combinations
+cheaply: it runs the real detection -> dedupe -> resolution stages through
+the production provider seam over a bundled fictional-hostname fixture
+(`--input` overrides it) and writes
+`eval_<sanitised-model>_<timestamp>.md` (`--out` overrides): front-matter
+with per-stage durations and the SDK-reported prompt/completion token
+counts, then the report fragment. No cost is computed - multiply the
+tokens by your own price sheet. Compare several models with a shell loop
+over `--model` invocations.
 
 ### Environment variables
 
@@ -403,9 +414,9 @@ script.
 ```bash
 go build -o syslog-reporter ./cmd/syslog-reporter
 go test ./...
-./syslog-reporter dump.ndjson.gz --no-llm --db /tmp/scratch.db   # free run
-./syslog-reporter dump.ndjson.gz --model openai/gpt-4o-mini      # full run
-./syslog-reporter --dump-filtered dump.ndjson.gz                 # filter debug
+./syslog-reporter run dump.ndjson.gz --no-llm --db /tmp/scratch.db   # free run
+./syslog-reporter run dump.ndjson.gz --model openai/gpt-4o-mini      # full run
+./syslog-reporter run --dump-filtered dump.ndjson.gz                 # filter debug
 SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve           # findings UI
 ```
 

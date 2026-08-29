@@ -26,9 +26,9 @@ local development stores.
 ## Layout
 
 ```
-cmd/syslog-reporter/        CLI entry point; subcommand dispatch (serve, user,
-                            findings, mgmt-report, self-update) ahead of the
-                            batch pipeline
+cmd/syslog-reporter/        CLI entry point; explicit command dispatch (run,
+                            eval, serve, user, findings, mgmt-report,
+                            self-update) from one registry - no default mode
 internal/selfupdate/        Version/RepoURL, --version latest-release check,
                             and the self-update command
 internal/reporter/
@@ -59,7 +59,8 @@ tools/elk_dump.py           ELK NDJSON dumper (stdlib-only python3; runs on
 ```bash
 go build -o syslog-reporter ./cmd/syslog-reporter   # single static-ish binary
 go test ./...                        # stdlib testing only
-./syslog-reporter <dump.ndjson.gz> --no-llm --db /tmp/scratch.db   # free run
+./syslog-reporter run <dump.ndjson.gz> --no-llm --db /tmp/scratch.db   # free run
+./syslog-reporter eval --model openai/gpt-4o-mini    # model comparison (bundled fixture)
 SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.0.0.1:7373
 ./syslog-reporter findings list --db /tmp/scratch.db     # findings CLI (list/show/feedback)
 ./syslog-reporter user add <username> <email>            # local-auth account (--password-stdin)

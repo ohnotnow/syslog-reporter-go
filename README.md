@@ -10,7 +10,9 @@ for investigation and fixing them.
 Also highlights things like boxes that suddenly become noisy, or conversely boxes
 that go suspiciously quiet.
 
-For a high-level tour of the process see
+New here? [GETTING_STARTED.md](GETTING_STARTED.md) walks from "I have a
+pile of syslog" to the daily email and the findings library, one free
+step at a time. For a high-level tour of the process see
 [HOW_IT_WORKS.md](HOW_IT_WORKS.md); for a deeper dive see
 [TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md).
 
@@ -69,28 +71,41 @@ Then point it at a day of syslog:
 
 ```bash
 # free run: filter + anomaly detection only, no LLM cost
-./syslog-reporter /var/log/messages-20260827 --no-llm
+./syslog-reporter run /var/log/messages-20260827 --no-llm
 
 # full run
-./syslog-reporter /var/log/messages-20260827
+./syslog-reporter run /var/log/messages-20260827
 
 # an ELK NDJSON dump works too, and .gz is handled
 # (tools/elk_dump.py pulls a day of syslog from an ELK cluster into this format)
-./syslog-reporter syslog-2026-08-27.ndjson.gz
+./syslog-reporter run syslog-2026-08-27.ndjson.gz
 
 # email the report: an HTML rendering of the digest for easy reading,
 # with the digest and full report attached as markdown for copy/paste
 # (or for handing straight to your own sysadmin agents)
-./syslog-reporter syslog-2026-08-27.ndjson.gz --send-email --recipients team@example.ac.uk
+./syslog-reporter run syslog-2026-08-27.ndjson.gz --send-email --recipients team@example.ac.uk
 ```
 
 The first week or two, run it daily (or backfill historical days with
 `--no-llm --date YYYY-MM-DD`) so the SQLite history builds up. The noise
 filter and the per-estate ignore lists are meant to be tuned to your
 estate, and `--dump-filtered` shows exactly what they are letting
-through. `./syslog-reporter --help` lists every flag;
+through. `./syslog-reporter --help` lists every command and
+`./syslog-reporter run --help` every batch flag;
 [TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md) has the full flag and
 environment-variable reference and the known-knowns suppression file.
+
+Not sure which model to use? `eval` runs just the LLM stages over a small
+bundled log sample and writes the resulting report fragment with per-stage
+timings and token counts in its front-matter, so you can judge the
+speed/quality/price trade-off on your own terms:
+
+```bash
+./syslog-reporter eval --model openai/gpt-4o-mini
+./syslog-reporter eval --model anthropic/claude-sonnet-4-6
+# or point it at a sample of your own filtered lines
+./syslog-reporter eval --model azure/your-deployment --input my-sample.log
+```
 
 ## The findings library
 
