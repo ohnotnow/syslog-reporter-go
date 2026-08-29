@@ -1,9 +1,9 @@
 package reporter
 
-// Port of agents/known_knowns.py: operator-maintained "known knowns", estate
-// oddities the team has already eye-rolled at and no longer wants in every
-// report. Entries live in a TOML file, gitignored by default because the
-// content is inherently estate-identifying.
+// Operator-maintained "known knowns": estate oddities the team has already
+// eye-rolled at and no longer wants in every report. Entries live in a TOML
+// file, gitignored by default because the content is inherently
+// estate-identifying.
 //
 //	[[known]]
 //	host = "blah"              # glob pattern: "blah", "lab*", or "*"
