@@ -14,6 +14,8 @@ For a high-level tour of the process see
 [HOW_IT_WORKS.md](HOW_IT_WORKS.md); for a deeper dive see
 [TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md).
 
+The binary also supports a historical library of findings and a web UI to browser them and mark them as good or bad solutions (to support later work on letting agents run 'known good' runbooks)
+
 ![The findings library web UI: a filterable table of findings with date, kind, severity, service, hosts and outcome columns](docs/findings-list.png)
 
 ## What it does
