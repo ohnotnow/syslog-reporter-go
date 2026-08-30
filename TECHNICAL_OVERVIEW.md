@@ -129,16 +129,15 @@ signal wins, so a colleague never gets the same host three times.
 
 ## LLM stages and provider routing
 
-Model strings use the litellm format the pipeline has always used
-(`openai/gpt-4o-mini`, `anthropic/claude-haiku-4-5-20251001`): the prefix
+Model strings use the litellm format, eg `openai/gpt-5.6-luna`, `anthropic/claude-sonnet-5`): the prefix
 picks the official SDK, the rest passes through as the provider's model id.
-`internal/llm.Complete` is the whole seam - four structured-output calls
+`internal/llm.Complete` is the core - four structured-output calls
 exist in the entire pipeline (issue detection, dedupe, resolutions, anomaly
-explanations), constrained by hand-written JSON schemas that mirror the data
+explanations), constrained by JSON schemas that mirror the data
 models. OpenAI gets a strict `json_schema` response format; Anthropic gets
 `output_config.format`.
 
-An `azure/` prefix targets OpenAI models hosted on Azure OpenAI: it rides
+An `azure/` prefix targets OpenAI models hosted on Azure OpenAI: it uses
 the same openai-go chat path with the client pointed at the resource's v1
 endpoint, configured by `AZURE_OPENAI_ENDPOINT`
 (`https://<resource>.openai.azure.com/openai/v1/`) and
@@ -442,5 +441,5 @@ SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve           # findings UI
 ## Releases
 
 Pushing a `v*` tag builds linux/darwin/windows on amd64/arm64, generates
-SHA256SUMS, and attaches everything to a GitHub release. The tag is stamped
+SHA256SUMS, and attaches everything to an immutable GitHub release. The tag is stamped
 into the binary (`syslog-reporter --version`).
