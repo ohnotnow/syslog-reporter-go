@@ -16,3 +16,5 @@ email_attachment.md
 /.playwright-cli
 /CODE_REVIEW.md
 /eval_*.md
+/MAKE_FIT_FOR_PRODUCTION.md
+
