@@ -174,6 +174,11 @@ def http_detail(exc):
 
 
 def main():
+    # Before the parser is built: --index bakes ELK_INDEX in as its
+    # argparse default, so a .env-only value must already be in the
+    # environment by then.
+    load_dotenv()
+
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--url", help="Elasticsearch base URL (or ELK_URL in env/.env)")
     parser.add_argument("--index", default=os.environ.get("ELK_INDEX"),
@@ -199,7 +204,6 @@ def main():
     parser.add_argument("--timeout", type=int, default=60, help="per-request timeout, seconds")
     args = parser.parse_args()
 
-    load_dotenv()
     url = args.url or os.environ.get("ELK_URL")
     if not url:
         parser.error("no URL: pass --url or set ELK_URL")
