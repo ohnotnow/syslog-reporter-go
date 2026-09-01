@@ -34,6 +34,10 @@ type ReportAgent struct {
 	Resolutions *ResolutionList
 	Anomalies   []*ExplainedAnomaly
 	LLMSkipped  bool
+	// LogDate is the day the log slice covers; both report titles carry it
+	// so a backfilled or re-run day is titled with its own date, not the
+	// day the run happened. Zero means "unknown", which falls back to now.
+	LogDate time.Time
 	// Model is the litellm-style model string that did the analysis, shown
 	// as a footer so teams comparing models can tell reports apart (owner
 	// decision 2026-08-28). Empty or --no-llm means no footer.
@@ -52,8 +56,12 @@ func (r *ReportAgent) modelFooter() string {
 	return "_Analysis by " + r.Model + "_\n"
 }
 
-func todaysDate() string {
-	return time.Now().Format("02/01/2006")
+func (r *ReportAgent) reportDate() string {
+	d := r.LogDate
+	if d.IsZero() {
+		d = time.Now()
+	}
+	return d.Format("02/01/2006")
 }
 
 // Run renders the full report: every issue, the resolutions, and every
@@ -67,7 +75,7 @@ func (r *ReportAgent) Run() string {
 	}
 
 	var b strings.Builder
-	b.WriteString("# Syslog Report for " + todaysDate() + "\n\n")
+	b.WriteString("# Syslog Report for " + r.reportDate() + "\n\n")
 	b.WriteString("## Issues\n")
 	b.WriteString(issues + "\n")
 	b.WriteString("\n## Resolutions\n")
@@ -127,7 +135,7 @@ func (r *ReportAgent) emailBodyN(topIssues, topAnomalies int) string {
 	totalAnomalies := len(r.Anomalies)
 
 	var b strings.Builder
-	b.WriteString("# Syslog digest - " + todaysDate() + "\n\n")
+	b.WriteString("# Syslog digest - " + r.reportDate() + "\n\n")
 	// No greeting line (owner decision 2026-08-29: cheery wears thin by the
 	// 50th email). Only the load-bearing fact survives: a truncation notice
 	// when there are more issues than the digest shows.

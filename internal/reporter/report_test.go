@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 func testIssue(title, severity string) *Issue {
@@ -290,5 +291,29 @@ func TestCommandCautionAbsentOnNoLLMRun(t *testing.T) {
 		if strings.Contains(out, "Review before pasting") {
 			t.Errorf("%s layout: caution present on a --no-llm run:\n%s", name, out)
 		}
+	}
+}
+
+// Both titles carry the LOG day, not the run day, so a backfilled or
+// re-run historical day is titled with the date its logs cover.
+
+func TestReportTitlesUseLogDateNotRunDate(t *testing.T) {
+	rep := &ReportAgent{
+		Issues: &IssueList{}, Resolutions: &ResolutionList{},
+		LogDate: time.Date(2026, 8, 31, 0, 0, 0, 0, time.UTC),
+	}
+	if body := rep.EmailBody(); !strings.Contains(body, "# Syslog digest - 31/08/2026") {
+		t.Errorf("digest title missing log date:\n%s", body)
+	}
+	if full := rep.Run(); !strings.Contains(full, "# Syslog Report for 31/08/2026") {
+		t.Errorf("full report title missing log date:\n%s", full)
+	}
+}
+
+func TestReportTitlesFallBackToNowWithoutLogDate(t *testing.T) {
+	rep := &ReportAgent{Issues: &IssueList{}, Resolutions: &ResolutionList{}}
+	want := time.Now().Format("02/01/2006")
+	if body := rep.EmailBody(); !strings.Contains(body, "# Syslog digest - "+want) {
+		t.Errorf("digest title missing fallback date %s:\n%s", want, body)
 	}
 }

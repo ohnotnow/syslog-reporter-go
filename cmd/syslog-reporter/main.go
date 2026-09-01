@@ -812,6 +812,7 @@ func run(cfg runConfig) {
 		LLMSkipped:  !cfg.llmOn,
 		Model:       cfg.model,
 		Knowns:      knowns,
+		LogDate:     logDate,
 	}
 	fullReport := rep.Run()
 	emailBody := rep.EmailBody()
