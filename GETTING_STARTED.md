@@ -160,7 +160,7 @@ sudo install -m 755 syslog-reporter tools/elk_dump.py \
   scripts/backfill.sh scripts/daily-run.sh /usr/local/bin/
 
 # the settings: model + API key, SMTP, ELK credentials
-# (TECHNICAL_OVERVIEW.md is the full reference)
+# (example just below; TECHNICAL_OVERVIEW.md is the full reference)
 sudoedit /var/lib/syslog-reporter/.env
 sudo chown syslog-reporter /var/lib/syslog-reporter/.env
 sudo chmod 600 /var/lib/syslog-reporter/.env
@@ -186,6 +186,51 @@ checkout instead:
 REPORTER=./syslog-reporter ELK_DUMP=./tools/elk_dump.py WORK_DIR=. \
   ./scripts/backfill.sh 3
 ```
+
+### An example .env
+
+Everything the daily run needs, in one file. This one uses an Azure
+OpenAI deployment and an ELK cluster with basic auth; swap the model and
+key lines for `openai/` or `anthropic/` as
+[TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md) describes.
+
+```bash
+# /var/lib/syslog-reporter/.env  (chmod 600, owned by syslog-reporter)
+
+# Where the report goes. Recipients are a comma-separated list and ride
+# the SMTP envelope only (BCC); the sender is what appears in To.
+SYSLOG_SMTP_SERVER=mail-relay.example.ac.uk:25
+SYSLOG_SMTP_SENDER=syslog-reporter@example.ac.uk
+SYSLOG_SMTP_RECIPIENTS=sysadmin-team@example.ac.uk,oncall@example.ac.uk
+# Only if your relay rejects the machine's own hostname in the greeting.
+#SYSLOG_SMTP_HELO=reporter.example.ac.uk
+
+# The model. For azure/ the id is your DEPLOYMENT name, not the model
+# name, and the endpoint is the resource's v1 URL. Reasoning effort
+# "none" is right for a batch run and keeps the token budget down.
+SYSLOG_DEFAULT_MODEL=azure/gpt-5.6-luna
+SYSLOG_REASONING_EFFORT=none
+AZURE_OPENAI_ENDPOINT=https://my-resource.openai.azure.com/openai/v1/
+AZURE_OPENAI_API_KEY=...
+
+# Where elk_dump.py fetches yesterday's logs from. ELK_API_KEY works
+# instead of username/password; ELK_INSECURE=1 skips TLS verification
+# for a self-signed cluster (ELK_CA_CERT=/path/to/ca.pem trusts a local
+# CA instead).
+ELK_URL=https://elk.example.ac.uk:9200
+ELK_USERNAME=syslog-reporter
+ELK_PASSWORD=...
+ELK_INDEX=logs-system.syslog-default
+ELK_INSECURE=1
+
+# Only on a server with no direct internet route - see "Behind a proxy".
+#http_proxy=http://proxy.example.ac.uk:3128
+#https_proxy=http://proxy.example.ac.uk:3128
+#no_proxy=elk.example.ac.uk
+```
+
+Real environment variables win over the file, so a proxy or key
+exported in the cron environment overrides what is here.
 
 ### Behind a proxy
 
