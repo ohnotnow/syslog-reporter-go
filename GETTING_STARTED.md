@@ -57,8 +57,8 @@ _Louder than its peers_ (unknown)
 
 ## Give it a model
 
-Put a model and its key in the environment, or a `.env` next to the
-binary:
+Put a model and its key in the environment, or a `.env` in the
+directory you run it from:
 
 ```bash
 SYSLOG_DEFAULT_MODEL=openai/gpt-5.6-luna
@@ -125,6 +125,52 @@ go out, so let cron's own failure mail do its job:
 # Yesterday's dump, emailed to the team at 07:30.
 30 7 * * * /usr/local/bin/syslog-reporter run /var/dumps/yesterday.ndjson.gz \
   --send-email --out-dir /var/lib/syslog-reporter >> /var/log/syslog-reporter.log 2>&1
+```
+
+### Deploying with the helper scripts
+
+`scripts/daily-run.sh` is that cron job as a ready-made wrapper: it
+fetches yesterday's dump with `elk_dump.py`, runs the pipeline, and
+exits non-zero if anything failed. Its sibling `scripts/backfill.sh`
+bootstraps a fresh install by running the last fortnight through
+`--no-llm` (free) so the history-based detectors have something to
+compare against from day one. A full deployment is:
+
+```bash
+# a system user and its state directory
+sudo useradd -r -s /usr/sbin/nologin syslog-reporter
+sudo install -d -o syslog-reporter -m 750 /var/lib/syslog-reporter
+
+# the binary, the ELK dumper, and the two wrapper scripts
+sudo install -m 755 syslog-reporter tools/elk_dump.py \
+  scripts/backfill.sh scripts/daily-run.sh /usr/local/bin/
+
+# the settings: model + API key, SMTP, ELK credentials
+# (TECHNICAL_OVERVIEW.md is the full reference)
+sudoedit /var/lib/syslog-reporter/.env
+sudo chown syslog-reporter /var/lib/syslog-reporter/.env
+sudo chmod 600 /var/lib/syslog-reporter/.env
+
+# two weeks of free history so the detectors wake up with context
+sudo -u syslog-reporter backfill.sh
+
+# then the daily email each morning
+sudo crontab -u syslog-reporter -e
+#   MAILTO=you@example.ac.uk
+#   30 7 * * * /usr/local/bin/daily-run.sh >> /var/lib/syslog-reporter/daily-run.log 2>&1
+```
+
+Both the binary and `elk_dump.py` read their `.env` from the working
+directory (real environment variables win), so the scripts `cd` into
+`/var/lib/syslog-reporter` before doing anything. That is also where
+the SQLite history lands - the same path the systemd example below
+points `--db` at. Every path is a variable at the top of each script
+(`REPORTER`, `ELK_DUMP`, `WORK_DIR`, `DUMP_DIR`); to try one from a
+checkout instead:
+
+```bash
+REPORTER=./syslog-reporter ELK_DUMP=./tools/elk_dump.py WORK_DIR=. \
+  ./scripts/backfill.sh 3
 ```
 
 The web UI suits a small systemd service. Flags and environment variables

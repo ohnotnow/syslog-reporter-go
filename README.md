@@ -87,7 +87,8 @@ Then point it at a day of syslog:
 ```
 
 The first week or two, run it daily (or backfill historical days with
-`--no-llm --date YYYY-MM-DD`) so the SQLite history builds up. The noise
+`--no-llm --date YYYY-MM-DD` - `scripts/backfill.sh` does the last
+fortnight in one go) so the SQLite history builds up. The noise
 filter and the per-estate ignore lists are meant to be tuned to your
 estate, and `--dump-filtered` shows exactly what they are letting
 through. `./syslog-reporter --help` lists every command and

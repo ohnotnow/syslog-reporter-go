@@ -52,6 +52,13 @@ internal/cli/               findings subcommands + ParseFlagsAnywhere
 internal/llm/               provider seam: litellm-style prefix -> official SDK
 tools/elk_dump.py           ELK NDJSON dumper (stdlib-only python3; runs on
                             whichever box can read the log store)
+scripts/                    end-user bash wrappers: backfill.sh (bootstrap N
+                            days of history, --no-llm) and daily-run.sh (the
+                            cron job); self-contained, production defaults,
+                            both cd into WORK_DIR (/var/lib/syslog-reporter)
+                            so the cwd-relative .env and db resolve - deploy
+                            walkthrough in GETTING_STARTED.md
+
 ```
 
 ## Commands
