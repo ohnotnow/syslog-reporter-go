@@ -400,8 +400,10 @@ Read from the environment or a `.env` beside the working directory
   in serve mode; both or neither (see the TLS section above)
 - `SYSLOG_AUTH_MODE` serve mode's auth driver: `none` (default), `local`,
   or `oidc` (not built yet)
-- `ELK_URL`, `ELK_USERNAME`/`ELK_PASSWORD` or `ELK_API_KEY`, `ELK_INDEX` are
-  read by `tools/elk_dump.py` only
+- `ELK_URL`, `ELK_USERNAME`/`ELK_PASSWORD` or `ELK_API_KEY`, `ELK_INDEX`,
+  `ELK_INSECURE` (`1` skips TLS verification, for self-signed clusters) and
+  `ELK_CA_CERT` (path to a CA certificate to trust instead) are read by
+  `tools/elk_dump.py` only; the matching `--insecure`/`--ca-cert` flags win
 
 The store is keyed by the date the log slice covers: `--date YYYY-MM-DD`,
 defaulting to yesterday or, for NDJSON input, to the date found in the data.

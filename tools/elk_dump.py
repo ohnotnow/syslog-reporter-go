@@ -25,8 +25,8 @@ target pattern; no cluster privileges are used.
 Auth and TLS can be set as ELK_URL,
 ELK_API_KEY or ELK_USERNAME/ELK_PASSWORD from env or a local .env, or
 --key-file / --username (interactive password prompt). Credentials are
-never printed. --insecure skips TLS verification, --ca-cert trusts a
-local CA.
+never printed. --insecure (or ELK_INSECURE=1) skips TLS verification,
+--ca-cert (or ELK_CA_CERT) trusts a local CA.
 
 If --out ends in .gz the file is gzip-compressed.
 
@@ -65,6 +65,11 @@ PIT_KEEP_ALIVE = "5m"
 
 def log(msg):
     print(msg, file=sys.stderr)
+
+
+def env_flag(name):
+    """True when the variable holds a truthy string: 1, true, yes, on."""
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def load_dotenv():
@@ -199,8 +204,12 @@ def main():
     parser.add_argument("--username", help="basic-auth username (or ELK_USERNAME in env/.env; "
                                            "password from ELK_PASSWORD or an interactive prompt)")
     parser.add_argument("--insecure", action="store_true",
-                        help="skip TLS certificate verification")
-    parser.add_argument("--ca-cert", help="path to a CA certificate for a self-signed cluster")
+                        default=env_flag("ELK_INSECURE"),
+                        help="skip TLS certificate verification "
+                             "(or ELK_INSECURE=1 in env/.env)")
+    parser.add_argument("--ca-cert", default=os.environ.get("ELK_CA_CERT"),
+                        help="path to a CA certificate for a self-signed cluster "
+                             "(or ELK_CA_CERT in env/.env)")
     parser.add_argument("--timeout", type=int, default=60, help="per-request timeout, seconds")
     args = parser.parse_args()
 
