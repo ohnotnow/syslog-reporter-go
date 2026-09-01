@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCompleteRejectsUnknownProvider(t *testing.T) {
@@ -112,5 +113,85 @@ func TestCheckCredentials(t *testing.T) {
 	t.Setenv("OPENAI_BASE_URL", "http://localhost:11434/v1")
 	if err := CheckCredentials("openai/local-model"); err != nil {
 		t.Errorf("base URL set: %v", err)
+	}
+}
+
+// A rate-limited provider must be waited out, not died on: the client is
+// configured to retry 429s well past the SDK's 2-retry default, honouring
+// Retry-After. Two throttles then success must complete invisibly.
+func TestCompleteRetriesThroughRateLimit(t *testing.T) {
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests <= 2 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+			w.Write([]byte(`{"error":{"message":"throttled","type":"too_many_requests"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"cmpl-1","object":"chat.completion","choices":[` +
+			`{"index":0,"message":{"role":"assistant","content":"{\"answer\":42}"}}]}`))
+	}))
+	defer server.Close()
+
+	t.Setenv("AZURE_OPENAI_ENDPOINT", server.URL+"/openai/v1")
+	t.Setenv("AZURE_OPENAI_API_KEY", "test-key")
+	t.Setenv("SYSLOG_REASONING_EFFORT", "")
+
+	var out struct {
+		Answer int `json:"answer"`
+	}
+	schema := map[string]any{"type": "object"}
+	if err := Complete(context.Background(), "azure/test-model", "sys", "usr", "answer", schema, &out); err != nil {
+		t.Fatalf("Complete should have retried through the 429s: %v", err)
+	}
+	if requests != 3 {
+		t.Errorf("saw %d requests, want 3 (two 429s then success)", requests)
+	}
+	if out.Answer != 42 {
+		t.Errorf("decoded answer = %d, want 42", out.Answer)
+	}
+}
+
+// Azure 429s carry BOTH "Retry-After: 30" and "Retry-After-Ms: 0"
+// (observed live, 2026-09-01); the SDK prefers the -Ms header, so the
+// zero makes every retry instant and the budget burns in a second. The
+// azure client strips the lying header: with Retry-After: 1 the retry
+// must actually wait about a second.
+func TestAzureIgnoresZeroRetryAfterMs(t *testing.T) {
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests == 1 {
+			w.Header().Set("Retry-After", "1")
+			w.Header().Set("Retry-After-Ms", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+			w.Write([]byte(`{"error":{"message":"throttled","type":"too_many_requests"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"cmpl-1","object":"chat.completion","choices":[` +
+			`{"index":0,"message":{"role":"assistant","content":"{\"answer\":42}"}}]}`))
+	}))
+	defer server.Close()
+
+	t.Setenv("AZURE_OPENAI_ENDPOINT", server.URL+"/openai/v1")
+	t.Setenv("AZURE_OPENAI_API_KEY", "test-key")
+	t.Setenv("SYSLOG_REASONING_EFFORT", "")
+
+	var out struct {
+		Answer int `json:"answer"`
+	}
+	start := time.Now()
+	if err := Complete(context.Background(), "azure/test-model", "sys", "usr", "answer",
+		map[string]any{"type": "object"}, &out); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if requests != 2 {
+		t.Errorf("saw %d requests, want 2", requests)
+	}
+	if elapsed := time.Since(start); elapsed < 700*time.Millisecond {
+		t.Errorf("retried after only %v; the zero Retry-After-Ms should have been ignored in favour of Retry-After: 1", elapsed)
 	}
 }

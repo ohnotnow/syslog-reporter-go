@@ -13,13 +13,30 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	anthropicoption "github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/shared"
+)
+
+// A batch run would rather wait than fail: Azure in particular throttles
+// with Retry-After values far beyond the openai-go default cap (2 retries,
+// server waits clamped to 8s), which turns a passing rate-limit squall
+// into a dead run within seconds. A nightly cron job has nowhere better to
+// be, so both providers get a patient budget: worst case is bounded by
+// retries x delay cap, after which the run still fails loudly for cron.
+// The Anthropic SDK honours Retry-After uncapped, so it only needs the
+// retry count raised.
+const (
+	llmMaxRetries    = 8
+	llmMaxRetryDelay = 2 * time.Minute
 )
 
 // Complete sends a system+user prompt to the provider named by the model
@@ -81,7 +98,10 @@ func reasoningEffort() string {
 }
 
 func completeOpenAI(ctx context.Context, modelID, system, user, schemaName string, schema map[string]any, out any) error {
-	client := openai.NewClient() // OPENAI_API_KEY / OPENAI_BASE_URL from env
+	client := openai.NewClient( // OPENAI_API_KEY / OPENAI_BASE_URL from env
+		option.WithMaxRetries(llmMaxRetries),
+		option.WithMaxRetryDelay(llmMaxRetryDelay),
+	)
 	return completeChat(ctx, client, "openai", modelID, system, user, schemaName, schema, out)
 }
 
@@ -101,8 +121,27 @@ func completeAzure(ctx context.Context, modelID, system, user, schemaName string
 	client := openai.NewClient(
 		option.WithBaseURL(strings.TrimRight(endpoint, "/")+"/"),
 		option.WithAPIKey(apiKey),
+		option.WithMaxRetries(llmMaxRetries),
+		option.WithMaxRetryDelay(llmMaxRetryDelay),
+		option.WithMiddleware(azureRetryAfterFix),
 	)
 	return completeChat(ctx, client, "azure", modelID, system, user, schemaName, schema, out)
+}
+
+// azureRetryAfterFix works around Azure OpenAI 429s carrying BOTH
+// "Retry-After: 30" and "Retry-After-Ms: 0" (observed live, 2026-09-01).
+// The SDK prefers the milliseconds header, so the zero turns every backoff
+// into an instant retry and the whole retry budget burns in about a
+// second. Dropping the lying header lets the honest seconds value (or the
+// SDK's own capped exponential backoff) drive the wait.
+func azureRetryAfterFix(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
+	resp, err := next(req)
+	if resp != nil && resp.StatusCode == http.StatusTooManyRequests {
+		if ms, perr := strconv.ParseFloat(resp.Header.Get("Retry-After-Ms"), 64); perr == nil && ms <= 0 {
+			resp.Header.Del("Retry-After-Ms")
+		}
+	}
+	return resp, err
 }
 
 func completeChat(ctx context.Context, client openai.Client, provider, modelID, system, user, schemaName string, schema map[string]any, out any) error {
@@ -156,7 +195,9 @@ func anthropicEffort(effort string) anthropic.OutputConfigEffort {
 }
 
 func completeAnthropic(ctx context.Context, modelID, system, user string, schema map[string]any, out any) error {
-	client := anthropic.NewClient() // ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL from env
+	client := anthropic.NewClient( // ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL from env
+		anthropicoption.WithMaxRetries(llmMaxRetries),
+	)
 	params := anthropic.MessageNewParams{
 		Model:     anthropic.Model(modelID),
 		MaxTokens: 16000,
