@@ -146,6 +146,18 @@ the model id in the request body like OpenAI proper, so there is no
 per-deployment URL rewriting, no api-version parameter, and no Azure SDK
 dependency; older non-v1 endpoints are not supported.
 
+Azure throttles each deployment on tokens per minute. The detector's
+1000-line chunks run to roughly 35K tokens each, so the deployment needs
+200K TPM or more (`--sku-capacity 200`); at 50K TPM the second chunk is
+refused with `Retry-After: 30` and never clears. All three providers get
+a patient retry budget (eight retries, honouring Retry-After up to two
+minutes on the OpenAI SDK, uncapped on Anthropic's), and every 429 is
+logged as a WARN line with the attempt number and the wait the server
+asked for, so a throttled run shows in the log as it happens rather than
+as one bare error minutes later. Azure's 429s also carry
+`Retry-After-Ms: 0` alongside the honest `Retry-After`; the client drops
+the zero so it cannot turn the backoff into an instant retry.
+
 `SYSLOG_REASONING_EFFORT` passes to OpenAI verbatim (`none` is right for
 batch runs); for Anthropic it maps onto `output_config.effort`, with
 `none`/`minimal` clamped to `low` (Anthropic's floor).

@@ -68,6 +68,20 @@ OPENAI_API_KEY=sk-...
 ([TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md) has the full environment
 reference, including Anthropic and Azure OpenAI.)
 
+**Azure OpenAI: size the deployment before you run.** The issue detector
+sends the filtered log in 1000-line chunks, and a chunk of syslog is
+roughly 35K tokens before the model writes a word. Azure throttles each
+deployment on tokens per minute (TPM), so a 50K TPM deployment holds
+barely one chunk a minute: the second request is refused with "retry in
+30 seconds", the retry lands in the same minute and is refused again,
+and the run waits out its eight retries and then fails. Give the
+deployment 200K TPM or more (`--sku-capacity 200` on
+`az cognitiveservices account deployment create`, which also raises an
+existing deployment in place), and set `SYSLOG_REASONING_EFFORT=none` so
+reasoning tokens don't eat the same budget. A throttled run logs each
+wait as a WARN line, so `daily-run.log` will tell you if it is still
+undersized.
+
 Run the same day again as a full 'agentic' run and feel all superior and futuristic.
 
 ```bash
