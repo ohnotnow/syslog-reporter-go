@@ -173,6 +173,28 @@ REPORTER=./syslog-reporter ELK_DUMP=./tools/elk_dump.py WORK_DIR=. \
   ./scripts/backfill.sh 3
 ```
 
+### Behind a proxy
+
+On a server with no direct internet route, the LLM calls need the
+standard proxy variables - and they need to be where the *binary's*
+process can see them. `sudo -u` resets the environment and cron starts
+with a near-empty one, so a proxy exported in your login shell silently
+never arrives; the reliable place is the same `.env`, which both the
+binary and `elk_dump.py` load before their first request:
+
+```bash
+https_proxy=http://proxy.example.ac.uk:3128
+# keep internal traffic direct - without this, elk_dump.py would try
+# to reach your ELK cluster THROUGH the proxy too
+no_proxy=elk.example.ac.uk
+```
+
+Go and Python both honour upper- or lower-case spellings, real
+environment variables win over the `.env`, and `no_proxy` takes a
+comma-separated list (a bare domain matches its subdomains).
+
+### The web UI
+
 The web UI suits a small systemd service. Flags and environment variables
 are interchangeable (the flag wins), so use whichever reads better in a
 unit file:
