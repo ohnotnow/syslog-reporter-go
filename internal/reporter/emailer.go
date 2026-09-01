@@ -11,11 +11,13 @@ package reporter
 // attachments.
 
 import (
+	"crypto/tls"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"mime/multipart"
 	"mime/quotedprintable"
+	"net"
 	"net/smtp"
 	"net/textproto"
 	"os"
@@ -212,9 +214,64 @@ func (e *EmailAgent) Run() error {
 	// The sender appears in To and gets a copy; the real recipients ride the
 	// envelope only, like smtplib's send_message with a Bcc header.
 	rcpts := append([]string{e.Sender}, e.recipientList()...)
-	if err := smtp.SendMail(addr, nil, e.Sender, rcpts, msg); err != nil {
+	if err := sendMail(addr, heloName(), e.Sender, rcpts, msg); err != nil {
 		return fmt.Errorf("sending email via %s: %w", addr, err)
 	}
 	fmt.Printf("Email sent to %s\n", e.Recipients)
 	return nil
+}
+
+// heloName is what we greet the relay with. net/smtp's SendMail hardcodes
+// "localhost", which strict relays bounce ("550 Bad HELO: localhost",
+// seen live 2026-09-01), so this is the machine's own hostname unless
+// SYSLOG_SMTP_HELO says otherwise - the override is for boxes whose
+// hostname is a short name and a relay that insists on a FQDN.
+func heloName() string {
+	if v := os.Getenv("SYSLOG_SMTP_HELO"); v != "" {
+		return v
+	}
+	if host, err := os.Hostname(); err == nil && host != "" {
+		return host
+	}
+	return "localhost"
+}
+
+// sendMail is net/smtp.SendMail with the greeting name exposed: dial,
+// EHLO as helo, STARTTLS when the relay offers it, then the unauthenticated
+// envelope and body. Relay auth is not supported; the tool is meant to
+// sit behind an institutional relay that trusts its source address.
+func sendMail(addr, helo, from string, to []string, msg []byte) error {
+	c, err := smtp.Dial(addr)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	if err := c.Hello(helo); err != nil {
+		return err
+	}
+	if ok, _ := c.Extension("STARTTLS"); ok {
+		host, _, _ := net.SplitHostPort(addr)
+		if err := c.StartTLS(&tls.Config{ServerName: host}); err != nil {
+			return err
+		}
+	}
+	if err := c.Mail(from); err != nil {
+		return err
+	}
+	for _, r := range to {
+		if err := c.Rcpt(r); err != nil {
+			return err
+		}
+	}
+	w, err := c.Data()
+	if err != nil {
+		return err
+	}
+	if _, err := w.Write(msg); err != nil {
+		return err
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+	return c.Quit()
 }

@@ -9,6 +9,8 @@ import (
 	"mime/quotedprintable"
 	"net"
 	"net/mail"
+	"net/textproto"
+	"os"
 	"strings"
 	"testing"
 )
@@ -239,4 +241,87 @@ func TestRunReturnsErrorWhenServerUnreachable(t *testing.T) {
 	if err := agent.Run(); err == nil {
 		t.Fatal("Run returned nil against an unreachable SMTP server")
 	}
+}
+
+// fakeSMTP is the least SMTP that will accept one message: no STARTTLS,
+// no auth. It records the name the client greeted with.
+func fakeSMTP(t *testing.T) (addr string, greeting *string) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	var seen string
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		tp := textproto.NewConn(conn)
+		tp.PrintfLine("220 fake ESMTP")
+		for {
+			line, err := tp.ReadLine()
+			if err != nil {
+				return
+			}
+			verb, arg, _ := strings.Cut(line, " ")
+			switch strings.ToUpper(verb) {
+			case "EHLO", "HELO":
+				seen = arg
+				tp.PrintfLine("250 fake")
+			case "DATA":
+				tp.PrintfLine("354 go")
+				for {
+					l, err := tp.ReadLine()
+					if err != nil || l == "." {
+						break
+					}
+				}
+				tp.PrintfLine("250 queued")
+			case "QUIT":
+				tp.PrintfLine("221 bye")
+				return
+			default:
+				tp.PrintfLine("250 ok")
+			}
+		}
+	}()
+	return ln.Addr().String(), &seen
+}
+
+// The relay must be greeted with this machine's name, not net/smtp's
+// hardcoded "localhost", which strict relays bounce with "550 Bad HELO"
+// (seen live 2026-09-01). SYSLOG_SMTP_HELO overrides for boxes whose
+// hostname is a short name and a relay that wants a FQDN.
+func TestRunGreetsRelayWithHostname(t *testing.T) {
+	t.Run("hostname by default", func(t *testing.T) {
+		t.Setenv("SYSLOG_SMTP_HELO", "")
+		addr, greeting := fakeSMTP(t)
+		agent := testEmailAgent()
+		agent.SMTPServer = addr
+		if err := agent.Run(); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		host, _ := os.Hostname()
+		if host == "" {
+			t.Skip("no hostname on this machine")
+		}
+		if *greeting != host {
+			t.Errorf("greeted with %q, want this machine's hostname %q", *greeting, host)
+		}
+	})
+	t.Run("SYSLOG_SMTP_HELO override", func(t *testing.T) {
+		t.Setenv("SYSLOG_SMTP_HELO", "reporter.example.test")
+		addr, greeting := fakeSMTP(t)
+		agent := testEmailAgent()
+		agent.SMTPServer = addr
+		if err := agent.Run(); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if *greeting != "reporter.example.test" {
+			t.Errorf("greeted with %q, want the SYSLOG_SMTP_HELO value", *greeting)
+		}
+	})
 }

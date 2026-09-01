@@ -860,7 +860,6 @@ func run(cfg runConfig) {
 	fmt.Print(emailBody)
 
 	if cfg.sendEmail {
-		log.Info("Sending email to %s", cfg.recipients)
 		// The HTML alternative is a nicety: if rendering ever fails, send
 		// the markdown-only email rather than losing the morning report.
 		htmlBody, err := reporter.RenderDigestHTML(emailBody, version)
@@ -872,6 +871,9 @@ func run(cfg runConfig) {
 		if err != nil {
 			fatal("%v", err)
 		}
+		// The agent resolves the SYSLOG_SMTP_RECIPIENTS fallback, so log
+		// its list rather than the (often empty) --recipients flag.
+		log.Info("Sending email to %s", agent.Recipients)
 		// email_body.md and email_attachment.md are already on disk; a
 		// failed send must still fail the process so cron notices.
 		if err := agent.Run(); err != nil {

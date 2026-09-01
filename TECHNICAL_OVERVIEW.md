@@ -388,7 +388,11 @@ Read from the environment or a `.env` beside the working directory
   email is a text+HTML alternative pair - the plain part is the digest
   markdown verbatim, the HTML part its on-brand rendering - with both
   markdown files attached (`email_body.md`, `email_attachment.md`) for
-  copy/paste or feeding to an agent
+  copy/paste or feeding to an agent. The relay is greeted with the
+  machine's hostname (never `localhost`, which strict relays bounce);
+  `SYSLOG_SMTP_HELO` overrides that for a box whose hostname is a short
+  name and a relay that insists on a FQDN. STARTTLS is used when the
+  relay offers it; there is no relay authentication
 - `SYSLOG_MGMT_RECIPIENTS` recipients for `mgmt-report --send-email`;
   separate audience from the daily digest, so no fallback to
   `SYSLOG_SMTP_RECIPIENTS` in either direction
