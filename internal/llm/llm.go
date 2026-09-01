@@ -39,6 +39,20 @@ const (
 	llmMaxRetryDelay = 2 * time.Minute
 )
 
+// logf is where rate-limit waits are reported. A run that silently sits
+// through eight 30s retries and then prints the last 429 as if it were
+// the first cannot be diagnosed from its log, so each throttle is logged
+// as it happens. Defaults to a no-op; main wires it to its WARN logger.
+var logf = func(format string, args ...any) {}
+
+// SetLogger routes the package's warnings (rate-limit waits) to fn.
+func SetLogger(fn func(format string, args ...any)) {
+	if fn == nil {
+		fn = func(string, ...any) {}
+	}
+	logf = fn
+}
+
 // Complete sends a system+user prompt to the provider named by the model
 // prefix and decodes the JSON structured output (constrained by schema)
 // into out. schemaName labels the schema for providers that want a name.
@@ -101,6 +115,7 @@ func completeOpenAI(ctx context.Context, modelID, system, user, schemaName strin
 	client := openai.NewClient( // OPENAI_API_KEY / OPENAI_BASE_URL from env
 		option.WithMaxRetries(llmMaxRetries),
 		option.WithMaxRetryDelay(llmMaxRetryDelay),
+		option.WithMiddleware(rateLimitMiddleware("openai/"+modelID)),
 	)
 	return completeChat(ctx, client, "openai", modelID, system, user, schemaName, schema, out)
 }
@@ -123,25 +138,58 @@ func completeAzure(ctx context.Context, modelID, system, user, schemaName string
 		option.WithAPIKey(apiKey),
 		option.WithMaxRetries(llmMaxRetries),
 		option.WithMaxRetryDelay(llmMaxRetryDelay),
-		option.WithMiddleware(azureRetryAfterFix),
+		option.WithMiddleware(rateLimitMiddleware("azure/"+modelID)),
 	)
 	return completeChat(ctx, client, "azure", modelID, system, user, schemaName, schema, out)
 }
 
-// azureRetryAfterFix works around Azure OpenAI 429s carrying BOTH
-// "Retry-After: 30" and "Retry-After-Ms: 0" (observed live, 2026-09-01).
-// The SDK prefers the milliseconds header, so the zero turns every backoff
-// into an instant retry and the whole retry budget burns in about a
-// second. Dropping the lying header lets the honest seconds value (or the
-// SDK's own capped exponential backoff) drive the wait.
-func azureRetryAfterFix(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
-	resp, err := next(req)
-	if resp != nil && resp.StatusCode == http.StatusTooManyRequests {
+// rateLimitMiddleware sits inside both SDKs' retry loops (their Middleware
+// types are aliases of the same function shape) and does two things to
+// every 429 on its way back:
+//
+//   - Logs it, with the attempt number the SDK stamps on the request and
+//     what the server asked us to wait, so the run's log shows the
+//     throttling as it happens rather than one bare error minutes later.
+//   - Drops a zero "Retry-After-Ms". Azure OpenAI 429s carry BOTH
+//     "Retry-After: 30" and "Retry-After-Ms: 0" (observed live,
+//     2026-09-01); the SDK prefers the milliseconds header, so the zero
+//     turned every backoff into an instant retry and the whole budget
+//     burned in about a second. Without it the honest seconds value (or
+//     the SDK's own capped exponential backoff) drives the wait.
+func rateLimitMiddleware(model string) func(*http.Request, func(*http.Request) (*http.Response, error)) (*http.Response, error) {
+	return func(req *http.Request, next func(*http.Request) (*http.Response, error)) (*http.Response, error) {
+		resp, err := next(req)
+		if resp == nil || resp.StatusCode != http.StatusTooManyRequests {
+			return resp, err
+		}
 		if ms, perr := strconv.ParseFloat(resp.Header.Get("Retry-After-Ms"), 64); perr == nil && ms <= 0 {
 			resp.Header.Del("Retry-After-Ms")
 		}
+		attempt, _ := strconv.Atoi(req.Header.Get("X-Stainless-Retry-Count"))
+		if attempt >= llmMaxRetries {
+			logf("rate limited by %s: %s, retries exhausted (%d/%d)", model, retryAfterHint(resp), attempt, llmMaxRetries)
+		} else {
+			logf("rate limited by %s: %s, retry %d/%d", model, retryAfterHint(resp), attempt+1, llmMaxRetries)
+		}
+		return resp, err
 	}
-	return resp, err
+}
+
+// retryAfterHint words what a 429 asked for. It reports the header, not
+// the wait the SDK will actually take: openai-go caps it at
+// llmMaxRetryDelay and falls back to exponential backoff when the header
+// is absent, while the Anthropic SDK honours it uncapped.
+func retryAfterHint(resp *http.Response) string {
+	if v := resp.Header.Get("Retry-After-Ms"); v != "" {
+		return "server asks for " + v + "ms"
+	}
+	if v := resp.Header.Get("Retry-After"); v != "" {
+		if _, err := strconv.ParseFloat(v, 64); err == nil {
+			v += "s"
+		}
+		return "server asks for " + v
+	}
+	return "no Retry-After header, backing off"
 }
 
 func completeChat(ctx context.Context, client openai.Client, provider, modelID, system, user, schemaName string, schema map[string]any, out any) error {
@@ -197,6 +245,7 @@ func anthropicEffort(effort string) anthropic.OutputConfigEffort {
 func completeAnthropic(ctx context.Context, modelID, system, user string, schema map[string]any, out any) error {
 	client := anthropic.NewClient( // ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL from env
 		anthropicoption.WithMaxRetries(llmMaxRetries),
+		anthropicoption.WithMiddleware(rateLimitMiddleware("anthropic/"+modelID)),
 	)
 	params := anthropic.MessageNewParams{
 		Model:     anthropic.Model(modelID),

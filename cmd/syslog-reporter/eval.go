@@ -62,6 +62,7 @@ func runEval(args []string) {
 		fatal("%v", err)
 	}
 	log := &logger{}
+	llm.SetLogger(log.Warn)
 
 	lines := strings.Split(strings.TrimRight(evalFixture, "\n"), "\n")
 	source := "bundled fixture"

@@ -648,6 +648,7 @@ type runConfig struct {
 
 func run(cfg runConfig) {
 	log := &logger{debugEnabled: cfg.debug}
+	llm.SetLogger(log.Warn)
 
 	// The slice we're processing is yesterday's by default; the date keys
 	// the persisted aggregates (NDJSON input overrides this from the data).

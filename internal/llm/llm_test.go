@@ -3,8 +3,10 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -116,10 +118,24 @@ func TestCheckCredentials(t *testing.T) {
 	}
 }
 
+// captureLog routes the package's warnings into a slice for the test's
+// lifetime, restoring the silent default afterwards.
+func captureLog(t *testing.T) *[]string {
+	t.Helper()
+	var lines []string
+	SetLogger(func(format string, args ...any) {
+		lines = append(lines, fmt.Sprintf(format, args...))
+	})
+	t.Cleanup(func() { SetLogger(nil) })
+	return &lines
+}
+
 // A rate-limited provider must be waited out, not died on: the client is
 // configured to retry 429s well past the SDK's 2-retry default, honouring
-// Retry-After. Two throttles then success must complete invisibly.
+// Retry-After. Two throttles then success must complete, and each
+// throttle must be logged as it happens with the attempt number.
 func TestCompleteRetriesThroughRateLimit(t *testing.T) {
+	logged := captureLog(t)
 	var requests int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
@@ -152,6 +168,49 @@ func TestCompleteRetriesThroughRateLimit(t *testing.T) {
 	if out.Answer != 42 {
 		t.Errorf("decoded answer = %d, want 42", out.Answer)
 	}
+	want := []string{
+		"rate limited by azure/test-model: server asks for 0s, retry 1/8",
+		"rate limited by azure/test-model: server asks for 0s, retry 2/8",
+	}
+	if got := *logged; !slices.Equal(got, want) {
+		t.Errorf("logged %q, want %q", got, want)
+	}
+}
+
+// When the budget runs out the run must still fail loudly (cron's failure
+// mail depends on it) and the log must say the retries were exhausted,
+// not just print the final 429 as if it were the first.
+func TestRateLimitExhaustionFailsAndIsLogged(t *testing.T) {
+	logged := captureLog(t)
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Retry-After", "0")
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{"error":{"message":"throttled","type":"too_many_requests"}}`))
+	}))
+	defer server.Close()
+
+	t.Setenv("AZURE_OPENAI_ENDPOINT", server.URL+"/openai/v1")
+	t.Setenv("AZURE_OPENAI_API_KEY", "test-key")
+	t.Setenv("SYSLOG_REASONING_EFFORT", "")
+
+	var out struct{}
+	err := Complete(context.Background(), "azure/test-model", "sys", "usr", "answer",
+		map[string]any{"type": "object"}, &out)
+	if err == nil || !strings.Contains(err.Error(), "429") {
+		t.Fatalf("Complete error = %v, want the 429 surfaced", err)
+	}
+	if requests != llmMaxRetries+1 {
+		t.Errorf("saw %d requests, want %d (first try plus %d retries)", requests, llmMaxRetries+1, llmMaxRetries)
+	}
+	got := *logged
+	if len(got) != llmMaxRetries+1 {
+		t.Fatalf("logged %d lines, want %d: %q", len(got), llmMaxRetries+1, got)
+	}
+	if last, want := got[len(got)-1], "rate limited by azure/test-model: server asks for 0s, retries exhausted (8/8)"; last != want {
+		t.Errorf("last log line %q, want %q", last, want)
+	}
 }
 
 // Azure 429s carry BOTH "Retry-After: 30" and "Retry-After-Ms: 0"
@@ -160,6 +219,7 @@ func TestCompleteRetriesThroughRateLimit(t *testing.T) {
 // azure client strips the lying header: with Retry-After: 1 the retry
 // must actually wait about a second.
 func TestAzureIgnoresZeroRetryAfterMs(t *testing.T) {
+	logged := captureLog(t)
 	var requests int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
@@ -193,5 +253,8 @@ func TestAzureIgnoresZeroRetryAfterMs(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed < 700*time.Millisecond {
 		t.Errorf("retried after only %v; the zero Retry-After-Ms should have been ignored in favour of Retry-After: 1", elapsed)
+	}
+	if want := []string{"rate limited by azure/test-model: server asks for 1s, retry 1/8"}; !slices.Equal(*logged, want) {
+		t.Errorf("logged %q, want %q", *logged, want)
 	}
 }
