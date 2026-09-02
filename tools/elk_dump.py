@@ -93,6 +93,9 @@ def load_dotenv():
                         continue
                     if line.startswith("export "):
                         line = line[len("export "):]
+                    if line.startswith("http"):
+                        # our ELK doesn't work with our proxy - so don't use it
+                        continue
                     key, _, value = line.partition("=")
                     key = key.strip()
                     value = value.strip().strip("'\"")
