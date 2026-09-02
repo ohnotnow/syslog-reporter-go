@@ -145,7 +145,10 @@ go out, so let cron's own failure mail do its job:
 
 `scripts/daily-run.sh` is that cron job as a ready-made wrapper: it
 fetches yesterday's dump with `elk_dump.py`, runs the pipeline, and
-exits non-zero if anything failed. Its sibling `scripts/backfill.sh`
+exits non-zero if anything failed. Schedule it hourly: once a day's
+report has gone out it leaves a `syslog-<day>.sent` marker in the dumps
+directory and every later attempt that day exits quietly, so a flaky
+ELK proxy just costs a retry an hour later. Its sibling `scripts/backfill.sh`
 bootstraps a fresh install by running the last fortnight through
 `--no-llm` (free) so the history-based detectors have something to
 compare against from day one. A full deployment is:
@@ -168,10 +171,10 @@ sudo chmod 600 /var/lib/syslog-reporter/.env
 # two weeks of free history so the detectors wake up with context
 sudo -u syslog-reporter backfill.sh
 
-# then the daily email each morning
+# then the daily email: first try at 07:30, retried hourly until it goes out
 sudo crontab -u syslog-reporter -e
 #   MAILTO=you@example.ac.uk
-#   30 7 * * * /usr/local/bin/daily-run.sh >> /var/lib/syslog-reporter/daily-run.log 2>&1
+#   30 7-17 * * * /usr/local/bin/daily-run.sh >> /var/lib/syslog-reporter/daily-run.log 2>&1
 ```
 
 Both the binary and `elk_dump.py` read their `.env` from the working
