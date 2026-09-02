@@ -20,8 +20,8 @@ import (
 	"github.com/ohnotnow/syslog-reporter-go/internal/llm"
 )
 
-// Jinja strips a template file's trailing newline on render
-// (keep_trailing_newline=False); go:embed keeps it, so trim to match.
+// go:embed keeps each prompt file's trailing newline; the agents trim it
+// so a system prompt never ends in a blank line.
 
 //go:embed prompts/issue_detection.txt
 var issueDetectionPromptRaw string

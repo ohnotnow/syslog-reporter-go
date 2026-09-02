@@ -9,10 +9,11 @@ run's findings captured to SQLite) served as a stdlib+htmx web UI (`serve`),
 a findings CLI, and a management summary (`mgmt-report`).
 
 The project grew out of an archived Python prototype; that history binds
-NOTHING (ant ADR srg-7qsQV, owner decision 2026-08-29) - no schema, flag,
-or report-byte parity obligation survives, and no doc or comment should
-present one. Not yet deployed to production; no real data exists beyond
-local development stores.
+NOTHING (ant ADR srg-7qsQV, owner decision 2026-08-29): no schema, flag,
+report-byte or idiom parity survives, and no comment should justify Go
+behaviour by what the prototype did. The first production try-out began
+2026-09-01; until the owner confirms it stuck, treat what real data exists
+as unknown.
 
 ## Start here, in this order
 
@@ -67,7 +68,7 @@ scripts/                    end-user bash wrappers: backfill.sh (bootstrap N
 go build -o syslog-reporter ./cmd/syslog-reporter   # single static-ish binary
 go test ./...                        # stdlib testing only
 ./syslog-reporter run <dump.ndjson.gz> --no-llm --db /tmp/scratch.db   # free run
-./syslog-reporter eval --model openai/gpt-4o-mini    # model comparison (bundled fixture)
+./syslog-reporter eval --model openai/gpt-5.6-luna    # model comparison (bundled fixture)
 SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.0.0.1:7373
 ./syslog-reporter findings list --db /tmp/scratch.db     # findings CLI (list/show/feedback)
 ./syslog-reporter user add <username> <email>            # local-auth account (--password-stdin)
@@ -122,8 +123,7 @@ SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.
   2026-08-28) - there is no comment-clearing path.
 - serve mode takes flags (--listen, --db, --auth, --tls-cert/--tls-key,
   --secure-cookies), each defaulting from its SYSLOG_WEB_*/SYSLOG_DB_PATH
-  variable; the flag wins. (It was briefly env-only; the owner never
-  agreed to that - srg-NJzXv.) Read-only commands (serve, findings,
+  variable; the flag wins. Read-only commands (serve, findings,
   mgmt-report, user) refuse a missing db file via
   reporter.RequireDatabase; only a run creates the store.
   Default port 7373 is a Blake's 7 joke
@@ -138,3 +138,6 @@ SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.
   committed, quoted in tests, or pasted into notes. Test fixtures use
   fictional hostnames only.
 - British English throughout, including report output.
+- The default model is `openai/gpt-5.6-luna` (owner decision 2026-09-02).
+  gpt-4o-mini was never the owner's choice; do not reintroduce it in code,
+  docs, or examples.

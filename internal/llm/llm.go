@@ -1,7 +1,7 @@
 // Package llm is the one seam between the pipeline and LLM providers.
 //
 // Model strings use litellm-style prefixes
-// ("openai/gpt-4o-mini", "anthropic/claude-sonnet-4-6"):
+// ("openai/gpt-5.6-luna", "anthropic/claude-sonnet-5"):
 // the prefix picks the official SDK, the rest
 // is passed through as the provider's model id. azure/ rides the OpenAI
 // backend against an Azure OpenAI resource's v1 endpoint. Only
@@ -209,8 +209,8 @@ func completeChat(ctx context.Context, client openai.Client, provider, modelID, 
 			},
 		},
 	}
-	// litellm passes reasoning_effort through verbatim; so do we ("none" is
-	// valid for gpt-5-class models and right for batch runs).
+	// reasoning_effort passes through verbatim ("none" is valid for
+	// gpt-5-class models and right for batch runs).
 	if effort := reasoningEffort(); effort != "" {
 		params.ReasoningEffort = shared.ReasoningEffort(effort)
 	}

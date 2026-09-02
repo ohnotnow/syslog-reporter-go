@@ -104,7 +104,7 @@ func TestResolutionPromptWithHostOS(t *testing.T) {
 	if !strings.Contains(prompt, "Known host operating systems") {
 		t.Error("inventory heading missing")
 	}
-	// jinja's dictsort is case-insensitive by key, so DB2 sorts before web1.
+	// The inventory sorts case-insensitively by host, so DB2 sorts before web1.
 	db2 := strings.Index(prompt, "- DB2: CentOS Linux 7")
 	web1 := strings.Index(prompt, "- web1: Ubuntu 22.04.5")
 	if db2 == -1 || web1 == -1 || db2 > web1 {
