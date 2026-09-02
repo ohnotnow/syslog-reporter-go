@@ -487,7 +487,7 @@ func userAdd(dbPath, username, email, password string) error {
 }
 
 func runBatch(cliArgs []string) {
-	defaultModel := getenvDefault("SYSLOG_DEFAULT_MODEL", "openai/gpt-4o-mini")
+	defaultModel := getenvDefault("SYSLOG_DEFAULT_MODEL", "openai/gpt-5.6-luna")
 	defaultDBPath := getenvDefault("SYSLOG_DB_PATH", "syslog_aggregates.db")
 	defaultKnownsPath := getenvDefault("SYSLOG_KNOWN_KNOWNS", "known_knowns.toml")
 	keepDays, err := strconv.Atoi(getenvDefault("SYSLOG_DB_KEEP_DAYS", "90"))
@@ -801,6 +801,11 @@ func run(cfg runConfig) {
 	} else {
 		log.Info("--no-llm: rendering anomalies without explanations")
 		explained = reporter.FactsOnly(anomalies)
+	}
+
+	if cfg.llmOn {
+		usage := llm.TotalUsage()
+		log.Info("LLM usage: %d prompt tokens, %d completion tokens", usage.PromptTokens, usage.CompletionTokens)
 	}
 
 	// Generate the report: a short digest for the email body, and the full

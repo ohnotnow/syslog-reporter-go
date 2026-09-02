@@ -14,8 +14,8 @@ import (
 
 func TestEvalOutputNameSanitisesTheModelString(t *testing.T) {
 	when := time.Date(2026, 8, 29, 15, 12, 3, 0, time.UTC)
-	got := evalOutputName("azure/gpt-4o:live", when)
-	want := "eval_azure_gpt-4o_live_2026-08-29_151203.md"
+	got := evalOutputName("azure/gpt-5.6-luna:live", when)
+	want := "eval_azure_gpt-5.6-luna_live_2026-08-29_151203.md"
 	if got != want {
 		t.Errorf("evalOutputName = %q, want %q", got, want)
 	}
@@ -26,7 +26,7 @@ func TestEvalOutputNameSanitisesTheModelString(t *testing.T) {
 
 func TestEvalFrontMatterRendersEveryField(t *testing.T) {
 	meta := evalMeta{
-		Model:         "openai/gpt-4o-mini",
+		Model:         "openai/gpt-5.6-luna",
 		Generated:     time.Date(2026, 8, 29, 15, 12, 3, 0, time.UTC),
 		InputLines:    5000,
 		FilteredLines: 480,
@@ -41,7 +41,7 @@ func TestEvalFrontMatterRendersEveryField(t *testing.T) {
 		t.Errorf("front-matter not fenced with ---: %q", got)
 	}
 	for _, want := range []string{
-		"model: openai/gpt-4o-mini",
+		"model: openai/gpt-5.6-luna",
 		"generated: 2026-08-29T15:12:03Z",
 		"input_lines: 5000",
 		"filtered_lines: 480",

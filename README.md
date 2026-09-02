@@ -102,8 +102,8 @@ timings and token counts in its front-matter, so you can judge the
 speed/quality/price trade-off on your own terms:
 
 ```bash
-./syslog-reporter eval --model openai/gpt-4o-mini
-./syslog-reporter eval --model anthropic/claude-sonnet-4-6
+./syslog-reporter eval --model openai/gpt-5.6-luna
+./syslog-reporter eval --model anthropic/claude-sonnet-5
 # or point it at a day of your own logs (the noise filter runs first)
 ./syslog-reporter eval --model azure/your-deployment --input yesterday.log
 ```

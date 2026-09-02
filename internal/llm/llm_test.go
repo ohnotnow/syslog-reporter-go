@@ -20,7 +20,7 @@ func TestCompleteRejectsUnknownProvider(t *testing.T) {
 }
 
 func TestCompleteRejectsMissingPrefix(t *testing.T) {
-	err := Complete(context.Background(), "gpt-4o-mini", "sys", "usr", "s", nil, &struct{}{})
+	err := Complete(context.Background(), "gpt-5.6-luna", "sys", "usr", "s", nil, &struct{}{})
 	if err == nil || !strings.Contains(err.Error(), "no provider prefix") {
 		t.Fatalf("want missing-prefix error, got %v", err)
 	}
@@ -94,11 +94,11 @@ func TestCheckCredentials(t *testing.T) {
 	}
 	// Missing keys fail fast and name the variable.
 	for model, want := range map[string]string{
-		"openai/gpt-4o-mini": "OPENAI_API_KEY",
-		"anthropic/claude-x": "ANTHROPIC_API_KEY",
-		"azure/gpt-4o":       "AZURE_OPENAI_ENDPOINT",
-		"no-prefix":          "provider prefix",
-		"mystery/model":      "unsupported provider",
+		"openai/gpt-5.6-luna": "OPENAI_API_KEY",
+		"anthropic/claude-x":  "ANTHROPIC_API_KEY",
+		"azure/gpt-5.6-luna":  "AZURE_OPENAI_ENDPOINT",
+		"no-prefix":           "provider prefix",
+		"mystery/model":       "unsupported provider",
 	} {
 		err := CheckCredentials(model)
 		if err == nil || !strings.Contains(err.Error(), want) {
@@ -108,7 +108,7 @@ func TestCheckCredentials(t *testing.T) {
 	// A key satisfies its provider; a base URL waives the key for the
 	// SDK-from-env providers.
 	t.Setenv("OPENAI_API_KEY", "test-key")
-	if err := CheckCredentials("openai/gpt-4o-mini"); err != nil {
+	if err := CheckCredentials("openai/gpt-5.6-luna"); err != nil {
 		t.Errorf("key set: %v", err)
 	}
 	t.Setenv("OPENAI_API_KEY", "")

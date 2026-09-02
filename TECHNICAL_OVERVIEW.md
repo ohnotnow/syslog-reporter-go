@@ -162,6 +162,10 @@ the zero so it cannot turn the backoff into an instant retry.
 batch runs); for Anthropic it maps onto `output_config.effort`, with
 `none`/`minimal` clamped to `low` (Anthropic's floor).
 
+After its LLM stages a run logs the total prompt and completion tokens the
+providers reported (INFO), so a prompt change can be costed from the cron
+log; `eval` puts the same counts in its front matter.
+
 System prompts are embedded in the binary (`internal/reporter/prompts/`,
 via `go:embed`), so there is nothing to ship but the one file. Report
 prompts require a one-line `#` comment above every suggested command;
@@ -451,7 +455,7 @@ script.
 go build -o syslog-reporter ./cmd/syslog-reporter
 go test ./...
 ./syslog-reporter run dump.ndjson.gz --no-llm --db /tmp/scratch.db   # free run
-./syslog-reporter run dump.ndjson.gz --model openai/gpt-4o-mini      # full run
+./syslog-reporter run dump.ndjson.gz --model openai/gpt-5.6-luna      # full run
 ./syslog-reporter run --dump-filtered dump.ndjson.gz                 # filter debug
 SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve           # findings UI
 ```

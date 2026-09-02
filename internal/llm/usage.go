@@ -1,8 +1,8 @@
 package llm
 
-// Token accounting for the eval command (ait srg-5CQZn): every Complete
-// call adds the SDK-reported usage to a process-wide total. The batch
-// pipeline never reads it; eval snapshots the total between stages.
+// Token accounting: every Complete call adds the SDK-reported usage to a
+// process-wide total. A run logs the total after its LLM stages; eval
+// snapshots it between stages.
 
 import "sync"
 

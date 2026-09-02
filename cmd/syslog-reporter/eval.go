@@ -48,7 +48,7 @@ and SYSLOG_KNOWN_KNOWNS.
 func runEval(args []string) {
 	fs := flag.NewFlagSet("eval", flag.ExitOnError)
 	setUsage(fs, evalHelpIntro, evalHelpEnv)
-	model := fs.String("model", "", "Model to evaluate (litellm format, e.g. openai/gpt-4o-mini). Required.")
+	model := fs.String("model", "", "Model to evaluate (litellm format, e.g. openai/gpt-5.6-luna). Required.")
 	input := fs.String("input", "", "File of log lines to analyse, raw or filtered (default: the bundled sample).")
 	outPath := fs.String("out", "", "Output path (default eval_<model>_<timestamp>.md).")
 	fs.Parse(args)
@@ -56,7 +56,7 @@ func runEval(args []string) {
 		fatal("unrecognised extra arguments: %s", strings.Join(fs.Args(), " "))
 	}
 	if *model == "" {
-		fatal("eval needs --model (litellm format, e.g. openai/gpt-4o-mini)")
+		fatal("eval needs --model (litellm format, e.g. openai/gpt-5.6-luna)")
 	}
 	if err := llm.CheckCredentials(*model); err != nil {
 		fatal("%v", err)

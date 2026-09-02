@@ -297,4 +297,3 @@ through eval costs about the same as a full day's real run, per model.
 Each run writes its result to its own `eval_<model>_<timestamp>.md`, with
 the model name, time taken, line and token counts up top (you'll have to
 check your provider to work out how that maps to the cost).
-
