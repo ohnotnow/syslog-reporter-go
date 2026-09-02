@@ -156,7 +156,11 @@ func (r *ReportAgent) emailBodyN(topIssues, topAnomalies int) string {
 	}
 	for n, i := range issues {
 		fmt.Fprintf(&b, "## %d. %s\n\n", n+1, i.Issue)
-		fmt.Fprintf(&b, "**Severity:** %s · **Affected:** %s\n\n", i.Severity, i.HostsSummary())
+		fmt.Fprintf(&b, "**Severity:** %s · **Affected:** %s", i.Severity, i.HostsSummary())
+		if i.OS != "" {
+			fmt.Fprintf(&b, " · **OS:** %s", i.OS)
+		}
+		b.WriteString("\n\n")
 		b.WriteString(i.Description + "\n\n")
 		if res, ok := resolutions[i.Issue]; ok {
 			b.WriteString("**Likely cause:** " + res.RootCause + "\n\n")

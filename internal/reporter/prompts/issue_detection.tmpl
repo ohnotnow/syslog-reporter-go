@@ -17,7 +17,12 @@ Issues such as:
 This is not a security tool: the organisation has a security team with its own tooling. Report an apparent intrusion or brute-force attempt as one issue in a line or two, with handing it to the security team as the recommended action, rather than investigating it in depth.
 
 If a chunk of log has nothing worth an admin's time, return an empty issues list.
+{{if .HostOS}}
+## Known host operating systems
 
+From the log source, per host:
+{{range .HostOS}}- {{.Host}}: {{.OS}}
+{{end}}{{end}}
 ## Fields
 
 For each issue:
@@ -25,6 +30,7 @@ For each issue:
 - description: a concise explanation of the problem itself.
 - example_log_entry: an exact copy of one log entry that exemplifies the issue. When several hosts are affected, use an example from one specific host.
 - affected_host: every affected hostname, one per array element. The report shortens long lists itself.
+- os: the operating system of the affected hosts, taken from the known host operating systems list. One OS as itself ("Rocky Linux 9"); several as each OS with its host count ("Rocky Linux 9 x3, Ubuntu 22.04 x1"). Write "unknown" when a host is not in the list or no list was given - do not guess from the log text.
 - affected_service: the service name.
 - timestamp_frequency: when or how often the issue occurs.
 - potential_impact: possible consequences for operations.

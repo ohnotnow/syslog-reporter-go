@@ -23,8 +23,8 @@ import (
 // go:embed keeps each prompt file's trailing newline; the agents trim it
 // so a system prompt never ends in a blank line.
 
-//go:embed prompts/issue_detection.txt
-var issueDetectionPromptRaw string
+//go:embed prompts/issue_detection.tmpl
+var issueDetectionTemplateRaw string
 
 //go:embed prompts/issue_dedupe.txt
 var issueDedupePromptRaw string
@@ -35,7 +35,10 @@ var anomalyExplanationPromptRaw string
 //go:embed prompts/resolution.tmpl
 var resolutionTemplateRaw string
 
-var resolutionTmpl = template.Must(template.New("resolution").Parse(resolutionTemplateRaw))
+var (
+	issueDetectionTmpl = template.Must(template.New("issue_detection").Parse(issueDetectionTemplateRaw))
+	resolutionTmpl     = template.Must(template.New("resolution").Parse(resolutionTemplateRaw))
+)
 
 // issueItemSchema mirrors the Issue model; used by both the detector and
 // the deduplicator (they share the IssueList response model).
@@ -49,13 +52,14 @@ func issueItemSchema() map[string]any {
 			"description":         str(),
 			"example_log_entry":   str(),
 			"affected_host":       map[string]any{"type": "array", "items": str()},
+			"os":                  str(),
 			"affected_service":    str(),
 			"timestamp_frequency": str(),
 			"potential_impact":    str(),
 			"recommended_action":  str(),
 		},
 		"required": []string{"issue", "severity", "description", "example_log_entry",
-			"affected_host", "affected_service", "timestamp_frequency",
+			"affected_host", "os", "affected_service", "timestamp_frequency",
 			"potential_impact", "recommended_action"},
 		"additionalProperties": false,
 	}
@@ -139,17 +143,20 @@ func chunkLines(lines []string, size int) [][]string {
 }
 
 // IssueDetectorAgent finds issues in the filtered log, 1000 lines at a time.
+// HostOS is the per-host OS inventory when the log source knows it (nil
+// otherwise); the model copies each issue's OS from it.
 type IssueDetectorAgent struct {
-	Lines []string
-	Model string
+	Lines  []string
+	Model  string
+	HostOS map[string]string
 }
 
-func NewIssueDetector(lines []string, model string) *IssueDetectorAgent {
-	return &IssueDetectorAgent{Lines: lines, Model: model}
+func NewIssueDetector(lines []string, model string, hostOS map[string]string) *IssueDetectorAgent {
+	return &IssueDetectorAgent{Lines: lines, Model: model, HostOS: hostOS}
 }
 
 func (a *IssueDetectorAgent) Run(ctx context.Context) (*IssueList, error) {
-	system := strings.TrimSuffix(issueDetectionPromptRaw, "\n")
+	system := issueDetectionPrompt(a.HostOS)
 	var all []*Issue
 	for _, chunk := range chunkLines(a.Lines, 1000) {
 		var got IssueList
@@ -219,11 +226,19 @@ func NewResolutionAgent(issues *IssueList, model string, hostOS map[string]strin
 
 type hostOSEntry struct{ Host, OS string }
 
-// resolutionPrompt renders the system prompt, embedding the per-host OS
+func issueDetectionPrompt(hostOS map[string]string) string {
+	return hostOSPrompt(issueDetectionTmpl, hostOS)
+}
+
+func resolutionPrompt(hostOS map[string]string) string {
+	return hostOSPrompt(resolutionTmpl, hostOS)
+}
+
+// hostOSPrompt renders a system prompt template, embedding the per-host OS
 // inventory when the log source knows it, sorted case-insensitively by
 // host (exact host as the tie-break, so the order never depends on map
 // iteration).
-func resolutionPrompt(hostOS map[string]string) string {
+func hostOSPrompt(tmpl *template.Template, hostOS map[string]string) string {
 	entries := make([]hostOSEntry, 0, len(hostOS))
 	for host, osName := range hostOS {
 		entries = append(entries, hostOSEntry{Host: host, OS: osName})
@@ -236,7 +251,7 @@ func resolutionPrompt(hostOS map[string]string) string {
 		return entries[i].Host < entries[j].Host
 	})
 	var buf strings.Builder
-	_ = resolutionTmpl.Execute(&buf, struct{ HostOS []hostOSEntry }{entries})
+	_ = tmpl.Execute(&buf, struct{ HostOS []hostOSEntry }{entries})
 	return strings.TrimSuffix(buf.String(), "\n")
 }
 

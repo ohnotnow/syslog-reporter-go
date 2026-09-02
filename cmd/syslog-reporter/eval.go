@@ -104,7 +104,8 @@ func runEval(args []string) {
 	ctx := context.Background()
 
 	t := time.Now()
-	issues, err := reporter.NewIssueDetector(lines, *model).Run(ctx)
+	// eval reads plain text, so there is no per-host OS inventory to pass.
+	issues, err := reporter.NewIssueDetector(lines, *model, nil).Run(ctx)
 	if err != nil {
 		fatal("detecting issues: %v", err)
 	}

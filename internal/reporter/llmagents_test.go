@@ -50,6 +50,7 @@ func TestDedupePayload(t *testing.T) {
 		Description:        "desc",
 		ExampleLogEntry:    "entry",
 		AffectedHost:       []string{"h1", "h2"},
+		OS:                 "Rocky Linux 9 x2",
 		AffectedService:    "svc",
 		TimestampFrequency: "often",
 		PotentialImpact:    "impact",
@@ -69,6 +70,7 @@ func TestDedupePayload(t *testing.T) {
       "h1",
       "h2"
     ],
+    "os": "Rocky Linux 9 x2",
     "affected_service": "svc",
     "timestamp_frequency": "often",
     "potential_impact": "impact",
@@ -93,6 +95,37 @@ func TestResolutionPromptWithoutHostOS(t *testing.T) {
 	}
 	if strings.HasSuffix(prompt, "\n") {
 		t.Error("rendered prompt should not keep the template's trailing newline")
+	}
+}
+
+func TestIssueDetectionPromptWithoutHostOS(t *testing.T) {
+	prompt := issueDetectionPrompt(nil)
+	if strings.Contains(prompt, "Known host operating systems") {
+		t.Error("default prompt should not mention a host OS inventory")
+	}
+	if !strings.Contains(prompt, "- os: ") {
+		t.Error("os field description missing")
+	}
+	if !strings.Contains(prompt, `Write "unknown"`) {
+		t.Error("prompt should tell the model to write unknown rather than guess")
+	}
+	if strings.HasSuffix(prompt, "\n") {
+		t.Error("rendered prompt should not keep the template's trailing newline")
+	}
+}
+
+func TestIssueDetectionPromptWithHostOS(t *testing.T) {
+	prompt := issueDetectionPrompt(map[string]string{
+		"web1": "Ubuntu 22.04.5",
+		"DB2":  "CentOS Linux 7",
+	})
+	if !strings.Contains(prompt, "Known host operating systems") {
+		t.Error("inventory heading missing")
+	}
+	db2 := strings.Index(prompt, "- DB2: CentOS Linux 7")
+	web1 := strings.Index(prompt, "- web1: Ubuntu 22.04.5")
+	if db2 == -1 || web1 == -1 || db2 > web1 {
+		t.Errorf("inventory wrong or out of order (DB2 at %d, web1 at %d)", db2, web1)
 	}
 }
 
@@ -201,7 +234,7 @@ func TestExplainerPayload(t *testing.T) {
 // actually there and non-trivial.
 func TestPromptsEmbedded(t *testing.T) {
 	prompts := map[string]string{
-		"issue_detection":     issueDetectionPromptRaw,
+		"issue_detection":     issueDetectionTemplateRaw,
 		"issue_dedupe":        issueDedupePromptRaw,
 		"anomaly_explanation": anomalyExplanationPromptRaw,
 		"resolution":          resolutionTemplateRaw,

@@ -156,7 +156,7 @@ SYSLOG_MGMT_RECIPIENTS=manager@example.ac.uk ./syslog-reporter mgmt-report --day
 ```markdown
 ## 1. Sustained CPU overheating and saturation
 
-**Severity:** critical · **Affected:** example-host
+**Severity:** critical · **Affected:** example-host · **OS:** Rocky Linux 9
 
 example-host repeatedly reaches near-total CPU utilization while package and core temperatures exceed thresholds and clock throttling occurs, indicating a persistent thermal and workload problem.
 

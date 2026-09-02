@@ -12,7 +12,7 @@ import (
 
 func TestPromptsCarryTrustBoundary(t *testing.T) {
 	prompts := map[string]string{
-		"issue_detection.txt":     issueDetectionPromptRaw,
+		"issue_detection.tmpl":    issueDetectionTemplateRaw,
 		"issue_dedupe.txt":        issueDedupePromptRaw,
 		"anomaly_explanation.txt": anomalyExplanationPromptRaw,
 		"resolution.tmpl":         resolutionTemplateRaw,

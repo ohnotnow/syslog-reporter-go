@@ -21,6 +21,7 @@ type Issue struct {
 	Description        string   `json:"description"`
 	ExampleLogEntry    string   `json:"example_log_entry"`
 	AffectedHost       []string `json:"affected_host"`
+	OS                 string   `json:"os"` // e.g. "Rocky Linux 9 x3, Ubuntu 22.04 x1"; "" on library rows captured before it existed
 	AffectedService    string   `json:"affected_service"`
 	TimestampFrequency string   `json:"timestamp_frequency"`
 	PotentialImpact    string   `json:"potential_impact"`
@@ -43,17 +44,22 @@ func (i *Issue) HostsSummary() string {
 }
 
 func (i *Issue) ToMarkdown() string {
+	osLine := ""
+	if i.OS != "" {
+		osLine = "- **OS:** " + i.OS + "\n"
+	}
 	return fmt.Sprintf(
 		"## %s\n\n"+
 			"**Severity:** %s · **Service:** %s · **When:** %s\n\n"+
 			"%s\n\n"+
 			"- **Affected:** %s\n"+
+			"%s"+
 			"- **Impact:** %s\n"+
 			"- **Recommended action:** %s\n\n"+
 			"**Example log entry:**\n\n"+
 			"```\n%s\n```\n",
 		i.Issue, i.Severity, i.AffectedService, i.TimestampFrequency,
-		i.Description, i.HostsSummary(), i.PotentialImpact,
+		i.Description, i.HostsSummary(), osLine, i.PotentialImpact,
 		i.RecommendedAction, i.ExampleLogEntry)
 }
 

@@ -187,6 +187,9 @@ func writeDetail(out io.Writer, d *reporter.FindingDetail) {
 			i.Severity, i.AffectedService, i.TimestampFrequency)
 		fmt.Fprintf(out, "%s\n\n", i.Description)
 		fmt.Fprintf(out, "Affected: %s\n", strings.Join(d.Hosts, ", "))
+		if i.OS != "" {
+			fmt.Fprintf(out, "OS: %s\n", i.OS)
+		}
 		fmt.Fprintf(out, "Impact: %s\n", i.PotentialImpact)
 		fmt.Fprintf(out, "Recommended action: %s\n\n", i.RecommendedAction)
 		fmt.Fprintf(out, "Example log entry:\n  %s\n", i.ExampleLogEntry)

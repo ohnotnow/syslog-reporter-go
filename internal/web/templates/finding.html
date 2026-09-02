@@ -13,6 +13,7 @@
     <p>{{.Description}}</p>
     <ul class="fact-list">
       <li><strong>Affected:</strong> {{range $i, $h := $.Data.Finding.Hosts}}{{if $i}}, {{end}}{{$h}}{{end}}</li>
+      {{if .OS}}<li><strong>OS:</strong> {{.OS}}</li>{{end}}
       <li><strong>Impact:</strong> {{.PotentialImpact}}</li>
       <li><strong>Recommended action:</strong> {{.RecommendedAction}}</li>
     </ul>

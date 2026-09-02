@@ -696,7 +696,7 @@ func run(cfg runConfig) {
 	if cfg.llmOn {
 		log.Info("Detecting issues")
 		var err error
-		issues, err = reporter.NewIssueDetector(filteredLines, cfg.model).Run(ctx)
+		issues, err = reporter.NewIssueDetector(filteredLines, cfg.model, cfg.hostOS).Run(ctx)
 		if err != nil {
 			fatal("detecting issues: %v", err)
 		}

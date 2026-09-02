@@ -159,6 +159,29 @@ func TestHostListTruncated(t *testing.T) {
 	}
 }
 
+func TestIssueOSRendersOnlyWhenKnown(t *testing.T) {
+	withOS := testIssue("os-known", "high")
+	withOS.OS = "Rocky Linux 9 x3, Ubuntu 22.04 x1"
+	withoutOS := testIssue("os-absent", "high") // a library row captured before the field existed
+
+	if md := withOS.ToMarkdown(); !strings.Contains(md, "- **OS:** Rocky Linux 9 x3, Ubuntu 22.04 x1\n") {
+		t.Errorf("full report missing the OS line:\n%s", md)
+	}
+	if md := withoutOS.ToMarkdown(); strings.Contains(md, "OS:") {
+		t.Errorf("full report should omit the OS line when empty:\n%s", md)
+	}
+
+	r := &ReportAgent{Issues: &IssueList{Issues: []*Issue{withOS, withoutOS}},
+		Resolutions: &ResolutionList{}}
+	body := r.EmailBody()
+	if !strings.Contains(body, "**Affected:** h1 · **OS:** Rocky Linux 9 x3, Ubuntu 22.04 x1\n") {
+		t.Errorf("digest missing the OS on the affected line:\n%s", body)
+	}
+	if strings.Count(body, "**OS:**") != 1 {
+		t.Errorf("digest should show OS only for the issue that has one:\n%s", body)
+	}
+}
+
 func TestIssueMarkdownHasBlankLineSeparation(t *testing.T) {
 	// The blob bug: fields must be paragraph-separated, not glued together.
 	md := testIssue("x", "high").ToMarkdown()

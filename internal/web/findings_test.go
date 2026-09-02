@@ -136,6 +136,7 @@ func seedDetailFindings(t *testing.T, lib *reporter.LibraryStore) (issueID, anom
 			Description:     "Log partition at 92% and climbing.",
 			ExampleLogEntry: "hostA kernel: VFS: file-max limit reached",
 			AffectedHost:    []string{"hostA", "hostB"}, AffectedService: "kernel",
+			OS:                 "Rocky Linux 9 x2",
 			TimestampFrequency: "hourly since 03:00",
 			PotentialImpact:    "Service outage when the partition fills.",
 			RecommendedAction:  "Rotate and compress old logs.",
@@ -175,7 +176,7 @@ func TestFindingDetailRendersBothKinds(t *testing.T) {
 	body := get(t, s, fmt.Sprintf("/findings/%d", issueID)).Body.String()
 	for _, want := range []string{
 		"Disk filling on /var", "hourly since 03:00",
-		"Log partition at 92%", "hostA, hostB",
+		"Log partition at 92%", "hostA, hostB", "<strong>OS:</strong> Rocky Linux 9 x2",
 		"Service outage when the partition fills.", "Rotate and compress old logs.",
 		"VFS: file-max limit reached",
 		"logrotate unit disabled", "df -h /var",

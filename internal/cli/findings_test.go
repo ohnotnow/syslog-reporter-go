@@ -44,6 +44,7 @@ func seedLibrary(t *testing.T) (dbPath string, issueID, anomID int64) {
 			Description:     "Log partition at 92% and climbing.",
 			ExampleLogEntry: "hostA kernel: VFS: file-max limit reached",
 			AffectedHost:    []string{"hostA", "hostB"}, AffectedService: "kernel",
+			OS:                 "Rocky Linux 9 x2",
 			TimestampFrequency: "hourly since 03:00",
 			PotentialImpact:    "Service outage when the partition fills.",
 			RecommendedAction:  "Rotate and compress old logs.",
@@ -144,7 +145,7 @@ func TestShowRendersBothKindsAsPlainText(t *testing.T) {
 	out := mustRun(t, dbPath, "show", intArg(issueID))
 	for _, want := range []string{
 		"Disk filling on /var", "Severity: high", "hourly since 03:00",
-		"Affected: hostA, hostB", "Impact: Service outage",
+		"Affected: hostA, hostB", "OS: Rocky Linux 9 x2", "Impact: Service outage",
 		"Recommended action: Rotate and compress old logs.",
 		"VFS: file-max limit reached", "Root cause: logrotate unit disabled",
 		"df -h /var", "systemctl enable --now logrotate.timer",
@@ -266,5 +267,16 @@ func TestFindingsRefusesAMissingDatabase(t *testing.T) {
 	}
 	if _, statErr := os.Stat(missing); statErr == nil {
 		t.Error("the missing db was created as a side effect")
+	}
+}
+
+// Library rows captured before the os field existed decode with it empty;
+// show must simply leave the line out rather than print "OS: ".
+func TestShowOmitsOSForRowsCapturedBeforeTheField(t *testing.T) {
+	var out strings.Builder
+	writeDetail(&out, &reporter.FindingDetail{Kind: "issue", Hosts: []string{"hostA"},
+		Issue: &reporter.IssuePayload{Issue: reporter.Issue{Issue: "old row"}}})
+	if strings.Contains(out.String(), "OS:") {
+		t.Errorf("show should omit the OS line when the stored issue has none:\n%s", out.String())
 	}
 }
