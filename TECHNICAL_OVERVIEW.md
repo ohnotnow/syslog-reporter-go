@@ -337,7 +337,9 @@ The `run` flags:
 ```
 logfile          positional: path to the syslog file; omit (or pass --) to
                  read raw text from stdin
---model          model to use, litellm format (default SYSLOG_DEFAULT_MODEL)
+--model          model to use, litellm format (default SYSLOG_DEFAULT_MODEL);
+                 SYSLOG_LOGSCAN_MODEL and SYSLOG_ISSUE_MODEL override it per
+                 stage, see the environment section
 --format         auto | raw | ndjson. auto picks ndjson for *.ndjson(.gz)
                  paths, raw otherwise (stdin is always raw)
 --date           ISO date (YYYY-MM-DD) the log slice covers, keying the
@@ -375,7 +377,16 @@ invocations.
 Read from the environment or a `.env` beside the working directory
 (never commit one):
 
-- `SYSLOG_DEFAULT_MODEL` default model, litellm format
+- `SYSLOG_DEFAULT_MODEL` default model, litellm format; used for every
+  LLM stage unless one of the next two is set
+- `SYSLOG_LOGSCAN_MODEL` model for the bulk stages, issue detection and
+  deduplication, which read the token-heavy log lines and return
+  schema-enforced JSON: a cheap, fast model does fine here
+- `SYSLOG_ISSUE_MODEL` model for the resolution writer and the anomaly
+  explainer, the stages whose prose people read: worth a stronger model
+  that follows the output format and keeps the tone professional. When the
+  two stages use different models the report footer and the findings
+  library record both, as `<issue model> (scan: <scan model>)`
 - `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` for whichever provider is used
 - `AZURE_OPENAI_ENDPOINT` + `AZURE_OPENAI_API_KEY` for `azure/` models
   (the resource's v1 endpoint; see the provider routing section)

@@ -47,6 +47,18 @@ type ReportAgent struct {
 	Knowns *KnownKnowns
 }
 
+// ModelLabel is the attribution string for a run that may have split the
+// pipeline across two models: the scan model reads the log lines and merges
+// duplicates, the issue model writes the resolutions and anomaly
+// explanations. When both are the same model the label is just that model,
+// so a single-model run's footer and library entry look as they always did.
+func ModelLabel(scanModel, issueModel string) string {
+	if scanModel == issueModel {
+		return issueModel
+	}
+	return issueModel + " (scan: " + scanModel + ")"
+}
+
 // modelFooter is the attribution line appended to both layouts, or "" when
 // no model did any analysis.
 func (r *ReportAgent) modelFooter() string {

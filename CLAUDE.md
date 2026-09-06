@@ -140,4 +140,9 @@ SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.
 - British English throughout, including report output.
 - The default model is `openai/gpt-5.6-luna` (owner decision 2026-09-02).
   gpt-4o-mini was never the owner's choice; do not reintroduce it in code,
-  docs, or examples.
+  docs, or examples. The pipeline can split across two models (owner
+  decision 2026-09-06): `SYSLOG_LOGSCAN_MODEL` drives the issue detector
+  and deduplicator (bulk, schema-enforced JSON), `SYSLOG_ISSUE_MODEL` the
+  resolution writer and anomaly explainer (prose people read); each falls
+  back to `--model`. When they differ, the footer and the library's run
+  model read `<issue model> (scan: <scan model>)` via reporter.ModelLabel.

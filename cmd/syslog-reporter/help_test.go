@@ -21,7 +21,8 @@ func TestServeHelpNamesItsEnvironmentInterface(t *testing.T) {
 
 func TestRunHelpNamesModelAndSMTPVars(t *testing.T) {
 	for _, name := range []string{
-		"SYSLOG_DEFAULT_MODEL", "SYSLOG_SMTP_SERVER", "SYSLOG_SMTP_RECIPIENTS", "SYSLOG_DB_PATH",
+		"SYSLOG_DEFAULT_MODEL", "SYSLOG_LOGSCAN_MODEL", "SYSLOG_ISSUE_MODEL",
+		"SYSLOG_SMTP_SERVER", "SYSLOG_SMTP_RECIPIENTS", "SYSLOG_DB_PATH",
 	} {
 		if !strings.Contains(runHelpEnv, name) {
 			t.Errorf("run help missing %s", name)

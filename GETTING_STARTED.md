@@ -215,6 +215,11 @@ SYSLOG_DEFAULT_MODEL=azure/gpt-5.6-luna
 SYSLOG_REASONING_EFFORT=none
 AZURE_OPENAI_ENDPOINT=https://my-resource.openai.azure.com/openai/v1/
 AZURE_OPENAI_API_KEY=...
+# Optional: keep the cheap model for the bulk log scanning but hand the
+# final resolutions and explanations to a stronger one. Each stage falls
+# back to SYSLOG_DEFAULT_MODEL when its variable is unset.
+#SYSLOG_LOGSCAN_MODEL=azure/gpt-5.6-luna
+#SYSLOG_ISSUE_MODEL=azure/gpt-6-astra
 
 # Where elk_dump.py fetches yesterday's logs from. ELK_API_KEY works
 # instead of username/password; ELK_INSECURE=1 skips TLS verification

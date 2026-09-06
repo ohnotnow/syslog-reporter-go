@@ -262,6 +262,20 @@ func TestModelFooterOnBothLayouts(t *testing.T) {
 	}
 }
 
+// A run split across a scan model and an issue model is attributed to both,
+// issue model first because that is the one whose prose the reader is
+// looking at; a single-model run keeps the plain label so nothing changes
+// for the default setup.
+func TestModelLabelNamesBothModelsOnlyWhenTheyDiffer(t *testing.T) {
+	if got := ModelLabel("openai/gpt-5.6-luna", "openai/gpt-5.6-luna"); got != "openai/gpt-5.6-luna" {
+		t.Errorf("same model both stages: got %q", got)
+	}
+	got := ModelLabel("openai/gpt-5.6-luna", "anthropic/claude-fable-5-1")
+	if want := "anthropic/claude-fable-5-1 (scan: openai/gpt-5.6-luna)"; got != want {
+		t.Errorf("split models: got %q, want %q", got, want)
+	}
+}
+
 func TestModelFooterOmittedWhenNoAnalysisRan(t *testing.T) {
 	skipped := &ReportAgent{
 		Issues: &IssueList{}, Resolutions: &ResolutionList{},

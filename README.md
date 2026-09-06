@@ -55,6 +55,10 @@ where you run it:
 ```bash
 SYSLOG_DEFAULT_MODEL=openai/gpt-5.6-luna # litellm-style provider/model
 OPENAI_API_KEY=sk-...                     # or ANTHROPIC_API_KEY for anthropic/ models
+# optional split: a cheap model for the bulk log scanning, a stronger one
+# for the resolutions and explanations people actually read
+# SYSLOG_LOGSCAN_MODEL=openai/gpt-5.6-luna
+# SYSLOG_ISSUE_MODEL=anthropic/claude-fable-5-1
 # for azure/ models on Azure OpenAI, set:
 # SYSLOG_DEFAULT_MODEL=azure/your-deployment-name
 # AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/openai/v1/

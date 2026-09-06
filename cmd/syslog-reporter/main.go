@@ -497,7 +497,9 @@ func runBatch(cliArgs []string) {
 
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	setUsage(fs, runHelpIntro, runHelpEnv)
-	model := fs.String("model", defaultModel, "Model to use (litellm format)")
+	model := fs.String("model", defaultModel,
+		"Model to use (litellm format); SYSLOG_LOGSCAN_MODEL and SYSLOG_ISSUE_MODEL "+
+			"override it for the log-scanning and issue-writing stages respectively")
 	format := fs.String("format", "auto",
 		"Input format: 'raw' is rsyslog text, 'ndjson' is an elk_dump.py dump "+
 			"(.gz handled). 'auto' picks ndjson for *.ndjson / *.ndjson.gz paths, "+
@@ -552,9 +554,17 @@ func runBatch(cliArgs []string) {
 			fatal("--send-email needs SYSLOG_SMTP_SENDER to be set")
 		}
 	}
+	// The pipeline can split across two models: a cheap one for the bulk
+	// log scanning and duplicate merging, a stronger one for the resolutions
+	// and anomaly explanations that people actually read. Either variable
+	// unset means that stage uses --model.
+	scanModel := getenvDefault("SYSLOG_LOGSCAN_MODEL", *model)
+	issueModel := getenvDefault("SYSLOG_ISSUE_MODEL", *model)
 	if !*noLLM && !*dumpFiltered {
-		if err := llm.CheckCredentials(*model); err != nil {
-			fatal("%v", err)
+		for _, m := range []string{scanModel, issueModel} {
+			if err := llm.CheckCredentials(m); err != nil {
+				fatal("%v", err)
+			}
 		}
 	}
 	isNDJSON := *format == "ndjson" ||
@@ -613,7 +623,8 @@ func runBatch(cliArgs []string) {
 
 	run(runConfig{
 		lines:      lines,
-		model:      *model,
+		scanModel:  scanModel,
+		issueModel: issueModel,
 		debug:      *debug,
 		recipients: *recipients,
 		sendEmail:  *sendEmail,
@@ -631,7 +642,8 @@ func runBatch(cliArgs []string) {
 
 type runConfig struct {
 	lines      []string
-	model      string
+	scanModel  string // issue detection and deduplication
+	issueModel string // resolutions and anomaly explanations
 	debug      bool
 	recipients string
 	sendEmail  bool
@@ -657,7 +669,8 @@ func run(cfg runConfig) {
 		now := time.Now()
 		logDate = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, -1)
 	}
-	log.Debug("Using model: %s", cfg.model)
+	modelLabel := reporter.ModelLabel(cfg.scanModel, cfg.issueModel)
+	log.Debug("Using model: %s", modelLabel)
 	log.Debug("Original log file length: %d", len(cfg.lines))
 
 	// Operator-acknowledged estate oddities ("that host always does that,
@@ -696,21 +709,21 @@ func run(cfg runConfig) {
 	if cfg.llmOn {
 		log.Info("Detecting issues")
 		var err error
-		issues, err = reporter.NewIssueDetector(filteredLines, cfg.model, cfg.hostOS).Run(ctx)
+		issues, err = reporter.NewIssueDetector(filteredLines, cfg.scanModel, cfg.hostOS).Run(ctx)
 		if err != nil {
 			fatal("detecting issues: %v", err)
 		}
 		log.Debug("Detected %d issues", len(issues.Issues))
 
 		log.Info("Consolidating duplicate issues")
-		issues, err = reporter.NewIssueDeduplicator(issues, cfg.model).Run(ctx)
+		issues, err = reporter.NewIssueDeduplicator(issues, cfg.scanModel).Run(ctx)
 		if err != nil {
 			fatal("consolidating issues: %v", err)
 		}
 		log.Debug("Consolidated to %d issues", len(issues.Issues))
 
 		log.Info("Resolving %d issues", len(issues.Issues))
-		resolutions, err = reporter.NewResolutionAgent(issues, cfg.model, cfg.hostOS).Run(ctx)
+		resolutions, err = reporter.NewResolutionAgent(issues, cfg.issueModel, cfg.hostOS).Run(ctx)
 		if err != nil {
 			fatal("resolving issues: %v", err)
 		}
@@ -793,7 +806,7 @@ func run(cfg runConfig) {
 	if cfg.llmOn {
 		log.Info("Explaining anomalies")
 		var err error
-		explained, err = reporter.NewAnomalyExplainer(anomalies, cfg.model).Run(ctx)
+		explained, err = reporter.NewAnomalyExplainer(anomalies, cfg.issueModel).Run(ctx)
 		if err != nil {
 			fatal("explaining anomalies: %v", err)
 		}
@@ -816,7 +829,7 @@ func run(cfg runConfig) {
 		Resolutions: resolutions,
 		Anomalies:   explained,
 		LLMSkipped:  !cfg.llmOn,
-		Model:       cfg.model,
+		Model:       modelLabel,
 		Knowns:      knowns,
 		LogDate:     logDate,
 	}
@@ -828,7 +841,7 @@ func run(cfg runConfig) {
 	// aggregates) so history accumulates before any UI exists. A capture
 	// failure costs the library one day, not the report or the email.
 	if cfg.storeOn {
-		captureModel := cfg.model
+		captureModel := modelLabel
 		if !cfg.llmOn {
 			captureModel = ""
 		}
