@@ -258,3 +258,112 @@ func TestAzureIgnoresZeroRetryAfterMs(t *testing.T) {
 		t.Errorf("logged %q, want %q", *logged, want)
 	}
 }
+
+func TestCheckReasoningEffort(t *testing.T) {
+	// Unset means the "low" default, which is valid.
+	t.Setenv("SYSLOG_REASONING_EFFORT", "")
+	if err := CheckReasoningEffort(); err != nil {
+		t.Errorf("unset: %v", err)
+	}
+	for _, effort := range []string{"low", "medium", "high", "xhigh", "max"} {
+		t.Setenv("SYSLOG_REASONING_EFFORT", effort)
+		if err := CheckReasoningEffort(); err != nil {
+			t.Errorf("%s: %v", effort, err)
+		}
+	}
+	// The dropped OpenAI-only levels and typos fail fast, naming the
+	// variable and the valid set so a stale env file is a one-line fix.
+	for _, effort := range []string{"none", "minimal", "LOW", "lots"} {
+		t.Setenv("SYSLOG_REASONING_EFFORT", effort)
+		err := CheckReasoningEffort()
+		if err == nil {
+			t.Errorf("%s: expected an error", effort)
+			continue
+		}
+		for _, want := range []string{"SYSLOG_REASONING_EFFORT", effort, "low, medium, high, xhigh, max"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%s: error %q should mention %q", effort, err, want)
+			}
+		}
+	}
+}
+
+// openAIEffortServer is a fake chat-completions endpoint that records the
+// reasoning_effort each request carried.
+func openAIEffortServer(t *testing.T, got *[]string) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			ReasoningEffort string `json:"reasoning_effort"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decoding request body: %v", err)
+		}
+		*got = append(*got, body.ReasoningEffort)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"cmpl-1","object":"chat.completion","choices":[` +
+			`{"index":0,"message":{"role":"assistant","content":"{\"answer\":42}"}}]}`))
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+func TestReasoningEffortSentToOpenAI(t *testing.T) {
+	var got []string
+	server := openAIEffortServer(t, &got)
+	t.Setenv("AZURE_OPENAI_ENDPOINT", server.URL+"/openai/v1/")
+	t.Setenv("AZURE_OPENAI_API_KEY", "test-key")
+
+	var out struct{ Answer int }
+	schema := map[string]any{"type": "object"}
+	t.Setenv("SYSLOG_REASONING_EFFORT", "")
+	if err := Complete(context.Background(), "azure/test-model", "sys", "usr", "answer", schema, &out); err != nil {
+		t.Fatalf("Complete (unset): %v", err)
+	}
+	t.Setenv("SYSLOG_REASONING_EFFORT", "xhigh")
+	if err := Complete(context.Background(), "azure/test-model", "sys", "usr", "answer", schema, &out); err != nil {
+		t.Fatalf("Complete (xhigh): %v", err)
+	}
+	// Unset sends the "low" default rather than omitting the field; a set
+	// value passes through verbatim.
+	if want := []string{"low", "xhigh"}; !slices.Equal(got, want) {
+		t.Errorf("reasoning_effort sent = %v, want %v", got, want)
+	}
+}
+
+func TestReasoningEffortSentToAnthropic(t *testing.T) {
+	var got []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			OutputConfig struct {
+				Effort string `json:"effort"`
+			} `json:"output_config"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decoding request body: %v", err)
+		}
+		got = append(got, body.OutputConfig.Effort)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"msg-1","type":"message","role":"assistant","model":"test-model",` +
+			`"content":[{"type":"text","text":"{\"answer\":42}"}],"stop_reason":"end_turn",` +
+			`"usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer server.Close()
+	t.Setenv("ANTHROPIC_BASE_URL", server.URL)
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+
+	var out struct{ Answer int }
+	schema := map[string]any{"type": "object"}
+	t.Setenv("SYSLOG_REASONING_EFFORT", "")
+	if err := Complete(context.Background(), "anthropic/test-model", "sys", "usr", "answer", schema, &out); err != nil {
+		t.Fatalf("Complete (unset): %v", err)
+	}
+	t.Setenv("SYSLOG_REASONING_EFFORT", "max")
+	if err := Complete(context.Background(), "anthropic/test-model", "sys", "usr", "answer", schema, &out); err != nil {
+		t.Fatalf("Complete (max): %v", err)
+	}
+	// No clamping any more: the same vocabulary goes to Anthropic verbatim.
+	if want := []string{"low", "max"}; !slices.Equal(got, want) {
+		t.Errorf("output_config.effort sent = %v, want %v", got, want)
+	}
+}

@@ -61,6 +61,9 @@ func runEval(args []string) {
 	if err := llm.CheckCredentials(*model); err != nil {
 		fatal("%v", err)
 	}
+	if err := llm.CheckReasoningEffort(); err != nil {
+		fatal("%v", err)
+	}
 	log := &logger{}
 	llm.SetLogger(log.Warn)
 

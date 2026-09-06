@@ -90,8 +90,10 @@ SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.
   routes `openai/` and `anthropic/` model prefixes to the official SDKs;
   `azure/` rides the openai-go client against an Azure OpenAI v1 endpoint
   (AZURE_OPENAI_ENDPOINT + AZURE_OPENAI_API_KEY, no Azure SDK dependency).
-  `SYSLOG_REASONING_EFFORT` passes to OpenAI verbatim; for Anthropic it
-  maps onto `output_config.effort` (`none`/`minimal` clamp to `low`).
+  `SYSLOG_REASONING_EFFORT` takes `low`/`medium`/`high`/`xhigh`/`max`
+  (unset = `low`) and goes to both providers verbatim; `none` and
+  `minimal` were dropped (owner decision 2026-09-06, ant ADR srg-heCEJ)
+  and are refused at startup by llm.CheckReasoningEffort.
   `SYSLOG_REDACT` strips operator-listed literals from every
   provider-bound user message (llm.Complete is the choke point) - an
   estate-identity courtesy, deliberately NOT PII scrubbing (ant ADR

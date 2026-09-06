@@ -77,8 +77,8 @@ barely one chunk a minute: the second request is refused with "retry in
 and the run waits out its eight retries and then fails. Give the
 deployment 200K TPM or more (`--sku-capacity 200` on
 `az cognitiveservices account deployment create`, which also raises an
-existing deployment in place), and set `SYSLOG_REASONING_EFFORT=none` so
-reasoning tokens don't eat the same budget. A throttled run logs each
+existing deployment in place), and leave `SYSLOG_REASONING_EFFORT` at its
+default of `low` so reasoning tokens don't eat into the same budget. A throttled run logs each
 wait as a WARN line, so `daily-run.log` will tell you if it is still
 undersized.
 
@@ -209,10 +209,11 @@ SYSLOG_SMTP_RECIPIENTS=sysadmin-team@example.ac.uk,oncall@example.ac.uk
 #SYSLOG_SMTP_HELO=reporter.example.ac.uk
 
 # The model. For azure/ the id is your DEPLOYMENT name, not the model
-# name, and the endpoint is the resource's v1 URL. Reasoning effort
-# "none" is right for a batch run and keeps the token budget down.
+# name, and the endpoint is the resource's v1 URL. Reasoning effort is
+# low unless you say otherwise (low, medium, high, xhigh, max); low is
+# right for a batch run and keeps the token budget down.
 SYSLOG_DEFAULT_MODEL=azure/gpt-5.6-luna
-SYSLOG_REASONING_EFFORT=none
+#SYSLOG_REASONING_EFFORT=low
 AZURE_OPENAI_ENDPOINT=https://my-resource.openai.azure.com/openai/v1/
 AZURE_OPENAI_API_KEY=...
 # Optional: keep the cheap model for the bulk log scanning but hand the

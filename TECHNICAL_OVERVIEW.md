@@ -158,9 +158,13 @@ as one bare error minutes later. Azure's 429s also carry
 `Retry-After-Ms: 0` alongside the honest `Retry-After`; the client drops
 the zero so it cannot turn the backoff into an instant retry.
 
-`SYSLOG_REASONING_EFFORT` passes to OpenAI verbatim (`none` is right for
-batch runs); for Anthropic it maps onto `output_config.effort`, with
-`none`/`minimal` clamped to `low` (Anthropic's floor).
+`SYSLOG_REASONING_EFFORT` takes one of `low`, `medium`, `high`, `xhigh`,
+`max` and goes to both providers verbatim (OpenAI's `reasoning_effort`,
+Anthropic's `output_config.effort`). Unset means `low`: nobody waits on a
+batch run, and on the gpt-5 models `low` costs about what the old `none`
+did. `none` and `minimal` were dropped (ant ADR srg-heCEJ) and are refused
+at startup, before any LLM call, so a stale value in an env file is a
+one-line fix rather than a mid-run failure.
 
 After its LLM stages a run logs the total prompt and completion tokens the
 providers reported (INFO), so a prompt change can be costed from the cron
@@ -390,7 +394,7 @@ Read from the environment or a `.env` beside the working directory
 - `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` for whichever provider is used
 - `AZURE_OPENAI_ENDPOINT` + `AZURE_OPENAI_API_KEY` for `azure/` models
   (the resource's v1 endpoint; see the provider routing section)
-- `SYSLOG_REASONING_EFFORT` reasoning effort, see above; unset = provider default
+- `SYSLOG_REASONING_EFFORT` reasoning effort, see above; unset = `low`
 - `SYSLOG_REDACT` comma-separated literal strings stripped
   (case-insensitively, replaced with `[redacted]`) from every
   provider-bound message, e.g. `SYSLOG_REDACT=example.ac.uk,10.20.` to

@@ -566,6 +566,9 @@ func runBatch(cliArgs []string) {
 				fatal("%v", err)
 			}
 		}
+		if err := llm.CheckReasoningEffort(); err != nil {
+			fatal("%v", err)
+		}
 	}
 	isNDJSON := *format == "ndjson" ||
 		(*format == "auto" && (strings.HasSuffix(path, ".ndjson") || strings.HasSuffix(path, ".ndjson.gz")))

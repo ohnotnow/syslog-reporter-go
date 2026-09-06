@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -105,10 +106,35 @@ func CheckCredentials(model string) error {
 	return nil
 }
 
-// reasoningEffort reads SYSLOG_REASONING_EFFORT at call time. Unset means
-// provider default.
+// Reasoning effort is one knob for every call, whichever model made it.
+// OpenAI's gpt-6 line dropped "none" and Anthropic never had it, so both
+// providers now share the same five-value vocabulary and the value passes
+// through verbatim. Unset means "low": nobody is waiting on a batch run, so
+// the cheapest level is the right default, and OpenAI's own docs put
+// "none" and "low" at about the same token cost on the gpt-5 models (owner
+// decision 2026-09-06, ant ADR srg-heCEJ).
+const defaultReasoningEffort = "low"
+
+var reasoningEfforts = []string{"low", "medium", "high", "xhigh", "max"}
+
+// reasoningEffort reads SYSLOG_REASONING_EFFORT at call time.
 func reasoningEffort() string {
-	return os.Getenv("SYSLOG_REASONING_EFFORT")
+	if v := os.Getenv("SYSLOG_REASONING_EFFORT"); v != "" {
+		return v
+	}
+	return defaultReasoningEffort
+}
+
+// CheckReasoningEffort fails fast on a SYSLOG_REASONING_EFFORT value the
+// providers would reject, so a stale "none" left in a deployment's env
+// dies at startup naming the variable rather than on the first LLM call.
+func CheckReasoningEffort() error {
+	effort := reasoningEffort()
+	if slices.Contains(reasoningEfforts, effort) {
+		return nil
+	}
+	return fmt.Errorf("SYSLOG_REASONING_EFFORT=%q is not supported; use one of %s",
+		effort, strings.Join(reasoningEfforts, ", "))
 }
 
 func completeOpenAI(ctx context.Context, modelID, system, user, schemaName string, schema map[string]any, out any) error {
@@ -209,11 +235,7 @@ func completeChat(ctx context.Context, client openai.Client, provider, modelID, 
 			},
 		},
 	}
-	// reasoning_effort passes through verbatim ("none" is valid for
-	// gpt-5-class models and right for batch runs).
-	if effort := reasoningEffort(); effort != "" {
-		params.ReasoningEffort = shared.ReasoningEffort(effort)
-	}
+	params.ReasoningEffort = shared.ReasoningEffort(reasoningEffort())
 	resp, err := client.Chat.Completions.New(ctx, params)
 	if err != nil {
 		return fmt.Errorf("%s/%s: %w", provider, modelID, err)
@@ -227,19 +249,6 @@ func completeChat(ctx context.Context, client openai.Client, provider, modelID, 
 		return fmt.Errorf("%s/%s: decoding structured output: %w", provider, modelID, err)
 	}
 	return nil
-}
-
-// anthropicEffort maps the OpenAI-vocabulary SYSLOG_REASONING_EFFORT values
-// onto Anthropic's output_config.effort. "none" and "minimal" have no
-// Anthropic equivalent, so they clamp to the floor; everything else passes
-// through and the API rejects anything it doesn't know.
-func anthropicEffort(effort string) anthropic.OutputConfigEffort {
-	switch effort {
-	case "none", "minimal":
-		return anthropic.OutputConfigEffortLow
-	default:
-		return anthropic.OutputConfigEffort(effort)
-	}
 }
 
 func completeAnthropic(ctx context.Context, modelID, system, user string, schema map[string]any, out any) error {
@@ -256,10 +265,8 @@ func completeAnthropic(ctx context.Context, modelID, system, user string, schema
 		},
 		OutputConfig: anthropic.OutputConfigParam{
 			Format: anthropic.JSONOutputFormatParam{Schema: schema},
+			Effort: anthropic.OutputConfigEffort(reasoningEffort()),
 		},
-	}
-	if effort := reasoningEffort(); effort != "" {
-		params.OutputConfig.Effort = anthropicEffort(effort)
 	}
 	resp, err := client.Messages.New(ctx, params)
 	if err != nil {
