@@ -365,16 +365,31 @@ logfile          positional: path to the syslog file; omit (or pass --) to
 --debug          extra progress detail on stderr
 ```
 
-`eval --model <provider/model>` compares provider/model combinations
-cheaply: it runs the noise filter and then the real detection -> dedupe ->
-resolution stages through the production provider seam, over a bundled
-fictional-hostname sample (`--input <file>` overrides it, raw or filtered
-lines), and writes `eval_<sanitised-model>_<timestamp>.md` (`--out`
-overrides): front-matter with input/filtered line counts, per-stage
-durations and the SDK-reported prompt/completion token counts, then the
-report fragment. No cost is computed - multiply the tokens by your own
-price sheet. Compare several models with a shell loop over `--model`
-invocations.
+`eval` evaluates the configured model combination through the real noise
+filter and detection -> dedupe -> resolution stages. It uses a bundled
+fictional-hostname sample; `--input <file>` accepts raw or filtered plain-text
+lines. It does not evaluate anomaly explanations or use the history database.
+
+Model precedence, independently for each stage:
+`--scan-model` / `--issue-model` > `SYSLOG_LOGSCAN_MODEL` /
+`SYSLOG_ISSUE_MODEL` > `--model` > `SYSLOG_DEFAULT_MODEL` > built-in default.
+Detection and deduplication use the scan model; resolutions use the issue
+model. Both providers' credentials and the shared `SYSLOG_REASONING_EFFORT`
+are checked before any calls. Stage environment variables override `--model`;
+set both stage flags to the same model to force a single-model evaluation.
+
+Output defaults to `eval_<sanitised-model>_<timestamp>.md` for one model or
+`eval_<issue-model>_scan_<scan-model>_<timestamp>.md` for a split (`--out`
+overrides). Front-matter records the combined model label, `scan_model`,
+`issue_model`, `reasoning_effort`, input/filtered line counts, per-stage
+and total durations, and SDK-reported prompt/completion token counts both
+per stage and in total. Skipped stages have zero tokens. The report footer
+uses the same combined model label as production. No monetary cost is
+computed; apply each model's prices to its stages' token counts.
+
+Compare configurations with separate invocations. Each reruns detection,
+so this compares pipeline combinations rather than resolution writers
+receiving an identical saved set of findings.
 
 ### Environment variables
 

@@ -100,17 +100,35 @@ through. `./syslog-reporter --help` lists every command and
 [TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md) has the full flag and
 environment-variable reference and the known-knowns suppression file.
 
-Not sure which model to use? `eval` runs just the LLM stages over a small
-bundled log sample and writes the resulting report fragment with per-stage
-timings and token counts in its front-matter, so you can judge the
-speed/quality/price trade-off on your own terms:
+Not sure which model combination to use? `eval` runs the detection,
+deduplication and resolution stages over a small bundled log sample, using
+the same model environment variables and defaults as `run`. It writes a
+report fragment with both models, the shared reasoning effort, per-stage
+timings and token counts, and total token counts. Anomaly explanations are
+not evaluated.
 
 ```bash
-./syslog-reporter eval --model openai/gpt-5.6-luna
-./syslog-reporter eval --model anthropic/claude-sonnet-5
-# or point it at a day of your own logs (the noise filter runs first)
-./syslog-reporter eval --model azure/your-deployment --input yesterday.log
+# evaluate your daily configuration
+./syslog-reporter eval
+
+# keep the configured scanner and try a different resolution model
+./syslog-reporter eval --issue-model openai/gpt-6-astra
+
+# explicitly choose both models
+./syslog-reporter eval --scan-model openai/gpt-5.6-luna --issue-model openai/gpt-6-astra
+
+# force a single model, even when .env configures a split
+./syslog-reporter eval --scan-model openai/gpt-5.6-luna --issue-model openai/gpt-5.6-luna
+
+# or use your own plain-text logs (the noise filter runs first)
+./syslog-reporter eval --input yesterday.log --out comparison.md
 ```
+
+Precedence for each stage is: stage flag > stage environment variable >
+`--model` > `SYSLOG_DEFAULT_MODEL` > built-in default. In particular,
+`SYSLOG_LOGSCAN_MODEL` and `SYSLOG_ISSUE_MODEL` override `--model`.
+Compare combinations with separate invocations. Each invocation reruns
+scanning, so even the same scanner can produce different findings.
 
 ## The findings library
 

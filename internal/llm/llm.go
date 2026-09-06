@@ -117,8 +117,8 @@ const defaultReasoningEffort = "low"
 
 var reasoningEfforts = []string{"low", "medium", "high", "xhigh", "max"}
 
-// reasoningEffort reads SYSLOG_REASONING_EFFORT at call time.
-func reasoningEffort() string {
+// ReasoningEffort reads SYSLOG_REASONING_EFFORT at call time.
+func ReasoningEffort() string {
 	if v := os.Getenv("SYSLOG_REASONING_EFFORT"); v != "" {
 		return v
 	}
@@ -129,7 +129,7 @@ func reasoningEffort() string {
 // providers would reject, so a stale "none" left in a deployment's env
 // dies at startup naming the variable rather than on the first LLM call.
 func CheckReasoningEffort() error {
-	effort := reasoningEffort()
+	effort := ReasoningEffort()
 	if slices.Contains(reasoningEfforts, effort) {
 		return nil
 	}
@@ -235,7 +235,7 @@ func completeChat(ctx context.Context, client openai.Client, provider, modelID, 
 			},
 		},
 	}
-	params.ReasoningEffort = shared.ReasoningEffort(reasoningEffort())
+	params.ReasoningEffort = shared.ReasoningEffort(ReasoningEffort())
 	resp, err := client.Chat.Completions.New(ctx, params)
 	if err != nil {
 		return fmt.Errorf("%s/%s: %w", provider, modelID, err)
@@ -265,7 +265,7 @@ func completeAnthropic(ctx context.Context, modelID, system, user string, schema
 		},
 		OutputConfig: anthropic.OutputConfigParam{
 			Format: anthropic.JSONOutputFormatParam{Schema: schema},
-			Effort: anthropic.OutputConfigEffort(reasoningEffort()),
+			Effort: anthropic.OutputConfigEffort(ReasoningEffort()),
 		},
 	}
 	resp, err := client.Messages.New(ctx, params)

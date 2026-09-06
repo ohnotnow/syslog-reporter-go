@@ -1,10 +1,17 @@
 package main
 
-// Eval command tests (ait srg-5CQZn): filename sanitising and front-matter
-// rendering are unit-tested; the LLM round-trip is validated live, not
-// mocked (repo convention).
+// Eval tests cover configuration and accounting; the local endpoint tests
+// request routing, not model quality.
 
 import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -41,7 +48,7 @@ func TestEvalFrontMatterRendersEveryField(t *testing.T) {
 		t.Errorf("front-matter not fenced with ---: %q", got)
 	}
 	for _, want := range []string{
-		"model: openai/gpt-5.6-luna",
+		`model: "openai/gpt-5.6-luna"`,
 		"generated: 2026-08-29T15:12:03Z",
 		"input_lines: 5000",
 		"filtered_lines: 480",
@@ -72,5 +79,96 @@ func TestEvalFixtureUsesFictionalHostnamesOnly(t *testing.T) {
 		if !strings.HasSuffix(fields[3], ".example.test") {
 			t.Errorf("fixture line %d hostname %q is not *.example.test", i+1, fields[3])
 		}
+	}
+}
+
+func TestEvalModelPrecedence(t *testing.T) {
+	for _, tc := range []struct {
+		name, base, scan, issue string
+		args                    []string
+		wantScan, wantIssue     string
+	}{
+		{name: "built-in", wantScan: "openai/gpt-5.6-luna", wantIssue: "openai/gpt-5.6-luna"},
+		{name: "default env", base: "openai/default", wantScan: "openai/default", wantIssue: "openai/default"},
+		{name: "model flag", base: "openai/default", args: []string{"--model", "openai/flag"}, wantScan: "openai/flag", wantIssue: "openai/flag"},
+		{name: "stage env beats model", scan: "openai/scan", issue: "openai/issue", args: []string{"--model", "openai/flag"}, wantScan: "openai/scan", wantIssue: "openai/issue"},
+		{name: "partial split", scan: "openai/scan", args: []string{"--model", "openai/flag"}, wantScan: "openai/scan", wantIssue: "openai/flag"},
+		{name: "override issue only", scan: "openai/scan", issue: "openai/issue", args: []string{"--issue-model", "openai/other"}, wantScan: "openai/scan", wantIssue: "openai/other"},
+		{name: "force single", scan: "openai/scan", issue: "openai/issue", args: []string{"--scan-model", "openai/single", "--issue-model", "openai/single"}, wantScan: "openai/single", wantIssue: "openai/single"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("SYSLOG_DEFAULT_MODEL", tc.base)
+			t.Setenv("SYSLOG_LOGSCAN_MODEL", tc.scan)
+			t.Setenv("SYSLOG_ISSUE_MODEL", tc.issue)
+			cfg, err := parseEvalFlags(tc.args, io.Discard)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.scanModel != tc.wantScan || cfg.issueModel != tc.wantIssue {
+				t.Fatalf("models = %q, %q; want %q, %q", cfg.scanModel, cfg.issueModel, tc.wantScan, tc.wantIssue)
+			}
+		})
+	}
+}
+
+func TestEvalRoutesModelsAndAccountsForStages(t *testing.T) {
+	for _, empty := range []bool{false, true} {
+		t.Run(fmt.Sprintf("empty=%v", empty), func(t *testing.T) {
+			var models []string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body struct {
+					Model  string `json:"model"`
+					Effort string `json:"reasoning_effort"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+				}
+				models = append(models, body.Model)
+				if body.Effort != "high" {
+					t.Errorf("effort = %q", body.Effort)
+				}
+				content := `{"issues":[{"issue":"Disk full","severity":"high"},{"issue":"Disk full again","severity":"high"}]}`
+				if len(models) == 2 {
+					content = `{"issues":[{"issue":"Disk full","severity":"high"}]}`
+				}
+				if len(models) == 3 {
+					content = `{"resolutions":[{"issue":"Disk full","root_cause":"No space"}]}`
+				}
+				if empty {
+					content = `{"issues":[]}`
+				}
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprintf(w, `{"id":"eval-test","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":%q}}],"usage":{"prompt_tokens":%d,"completion_tokens":%d}}`, content, len(models)*100, len(models)*10)
+			}))
+			t.Cleanup(server.Close)
+			t.Cleanup(llm.ResetUsage)
+			t.Cleanup(func() { llm.SetLogger(nil) })
+			t.Setenv("OPENAI_BASE_URL", server.URL+"/v1/")
+			t.Setenv("OPENAI_API_KEY", "test-key")
+			t.Setenv("SYSLOG_REASONING_EFFORT", "high")
+			t.Setenv("SYSLOG_BLANKET_IGNORE", "")
+			t.Setenv("SYSLOG_KNOWN_KNOWNS", filepath.Join(t.TempDir(), "absent.toml"))
+			out := filepath.Join(t.TempDir(), "eval.md")
+			runEval([]string{"--scan-model", "openai/scan-test", "--issue-model", "openai/issue-test", "--out", out})
+			wantModels := []string{"scan-test", "scan-test", "issue-test"}
+			totals := []string{"dedupe_prompt_tokens: 200", "dedupe_completion_tokens: 20", "resolution_prompt_tokens: 300", "resolution_completion_tokens: 30", "prompt_tokens: 600", "completion_tokens: 60"}
+			if empty {
+				wantModels = []string{"scan-test"}
+				totals = []string{"dedupe_prompt_tokens: 0", "dedupe_completion_tokens: 0", "resolution_prompt_tokens: 0", "resolution_completion_tokens: 0", "prompt_tokens: 100", "completion_tokens: 10"}
+			}
+			if !slices.Equal(models, wantModels) {
+				t.Fatalf("requests = %v; want %v", models, wantModels)
+			}
+			report, err := os.ReadFile(out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wants := append(totals, `model: "openai/issue-test (scan: openai/scan-test)"`, `scan_model: "openai/scan-test"`, `issue_model: "openai/issue-test"`, `reasoning_effort: "high"`, "detection_prompt_tokens: 100", "detection_completion_tokens: 10", "_Analysis by openai/issue-test (scan: openai/scan-test)_")
+			for _, want := range wants {
+				if !strings.Contains("\n"+string(report), "\n"+want+"\n") {
+					t.Errorf("report missing %q: %s", want, report)
+				}
+			}
+		})
 	}
 }

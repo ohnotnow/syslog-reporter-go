@@ -148,3 +148,10 @@ SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.
   resolution writer and anomaly explainer (prose people read); each falls
   back to `--model`. When they differ, the footer and the library's run
   model read `<issue model> (scan: <scan model>)` via reporter.ModelLabel.
+
+- `eval` follows the same model env defaults as `run`, with additional
+  `--scan-model` / `--issue-model` flags that win over their stage env vars.
+  Stage env vars still win over `--model`. It evaluates detection, dedupe
+  and resolutions only, not anomalies. Output records both models, shared
+  reasoning effort and per-stage plus total token usage. Use both stage
+  flags to force a single model when a split is configured in `.env`.
