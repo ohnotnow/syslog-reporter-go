@@ -45,15 +45,16 @@ SYSLOG_ISSUE_MODEL > --model > SYSLOG_DEFAULT_MODEL > built-in default.
 Stage environment variables override --model; set both stage flags to the
 same model to force a single-model comparison. Anomaly explanations are
 not evaluated. No cost is computed: multiply the token counts by your
-own price sheet. Environment: the provider keys, SYSLOG_REASONING_EFFORT and
-SYSLOG_REDACT apply exactly as in 'run' (OPENAI_API_KEY, ANTHROPIC_API_KEY,
-AZURE_OPENAI_ENDPOINT + _API_KEY), as do the filter's SYSLOG_BLANKET_IGNORE
-and SYSLOG_KNOWN_KNOWNS.
+own price sheet. Environment: the provider keys, SYSLOG_REASONING_EFFORT,
+SYSLOG_REDACT and SYSLOG_CONTEXT_LINES apply exactly as in 'run'
+(OPENAI_API_KEY, ANTHROPIC_API_KEY, AZURE_OPENAI_ENDPOINT + _API_KEY), as do
+the filter's SYSLOG_BLANKET_IGNORE and SYSLOG_KNOWN_KNOWNS.
 `
 
 type evalConfig struct {
 	scanModel, issueModel string
 	input, outPath        string
+	contextLines          int
 }
 
 func parseEvalFlags(args []string, output io.Writer) (evalConfig, error) {
@@ -65,8 +66,16 @@ func parseEvalFlags(args []string, output io.Writer) (evalConfig, error) {
 	issue := fs.String("issue-model", os.Getenv("SYSLOG_ISSUE_MODEL"), "Resolution model (default: SYSLOG_ISSUE_MODEL, then --model).")
 	input := fs.String("input", "", "File of log lines to analyse, raw or filtered (default: the bundled sample).")
 	out := fs.String("out", "", "Output path (default: eval_<models>_<timestamp>.md).")
+	defaultContextLines, err := contextLinesFromEnv()
+	if err != nil {
+		return evalConfig{}, err
+	}
+	contextLines := fs.Int("context-lines", defaultContextLines, "Same-host log lines either side of each issue's example for the resolution writer (0 disables; default: SYSLOG_CONTEXT_LINES).")
 	if err := fs.Parse(args); err != nil {
 		return evalConfig{}, err
+	}
+	if *contextLines < 0 {
+		return evalConfig{}, fmt.Errorf("--context-lines must be 0 or more, got %d", *contextLines)
 	}
 	if fs.NArg() > 0 {
 		return evalConfig{}, fmt.Errorf("unrecognised extra arguments: %s", strings.Join(fs.Args(), " "))
@@ -77,7 +86,8 @@ func parseEvalFlags(args []string, output io.Writer) (evalConfig, error) {
 	if *issue == "" {
 		*issue = *model
 	}
-	return evalConfig{scanModel: *scan, issueModel: *issue, input: *input, outPath: *out}, nil
+	return evalConfig{scanModel: *scan, issueModel: *issue, input: *input, outPath: *out,
+		contextLines: *contextLines}, nil
 }
 
 func runEval(args []string) {
@@ -136,7 +146,10 @@ func runEval(args []string) {
 		fatal("%v", err)
 	}
 	rawCount := len(lines)
-	logIndex := reporter.NewLogIndex(lines) // raw lines, for context windows
+	var logIndex *reporter.LogIndex // raw lines, for context windows; nil when disabled
+	if cfg.contextLines > 0 {
+		logIndex = reporter.NewLogIndex(lines, cfg.contextLines)
+	}
 	lines = reporter.NewLogFilter(lines, knowns).Run()
 
 	log.Info("Evaluating %s over %d filtered lines (%s, %d before filtering)",
@@ -165,7 +178,10 @@ func runEval(args []string) {
 	log.Info("Dedupe: %d issues in %s", len(issues.Issues), dedupeDur.Round(time.Millisecond))
 
 	t = time.Now()
-	contexts := logIndex.ContextsFor(issues)
+	var contexts []reporter.LogContext
+	if logIndex != nil {
+		contexts = logIndex.ContextsFor(issues)
+	}
 	resolutions, err := reporter.NewResolutionAgent(issues, contexts, cfg.issueModel, nil).Run(ctx)
 	if err != nil {
 		fatal("resolving issues: %v", err)

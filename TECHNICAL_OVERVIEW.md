@@ -149,12 +149,14 @@ RAW lines by host (raw, not filtered, because the routine chatter the
 filter drops - a restart, a cron kick - is often the explanation), finds
 each issue's example line (exact match first, else the same host and
 program's line sharing the most message words, so a lightly reworded or
-decorated example still anchors), and appends up to `ContextRadius` (5)
-same-host lines either side as a "Surrounding log lines" block on that
-issue only. A miss appends nothing. The window goes to the resolution
-payload only, never into the report or the findings library, and a
-`--debug` run logs exact/fuzzy/miss per issue so the hit rate can be
-checked against a real day. First measured 2026-09-07 on a production
+decorated example still anchors), and appends the same-host lines either
+side as a "Surrounding log lines" block on that issue only. The radius is
+`SYSLOG_CONTEXT_LINES` / `--context-lines` (flag wins; default 5, the
+`reporter.DefaultContextRadius`); 0 disables the windows and drops the
+prompt paragraph that describes them. A miss appends nothing. The window
+goes to the resolution payload only, never into the report or the
+findings library, and a `--debug` run logs exact/fuzzy/miss per issue so
+the hit rate can be checked against a real day. First measured 2026-09-07 on a production
 day: 37 issues, 28 exact, 8 fuzzy, 1 miss (the model had paraphrased the
 program name, so the same-program rule rejected it).
 
@@ -427,6 +429,9 @@ Read from the environment or a `.env` beside the working directory
   that follows the output format and keeps the tone professional. When the
   two stages use different models the report footer and the findings
   library record both, as `<issue model> (scan: <scan model>)`
+- `SYSLOG_CONTEXT_LINES` same-host log lines shown to the resolution
+  writer either side of each issue's example entry (default 5; 0 turns
+  the context windows off); `--context-lines` overrides it per run
 - `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` for whichever provider is used
 - `AZURE_OPENAI_ENDPOINT` + `AZURE_OPENAI_API_KEY` for `azure/` models
   (the resource's v1 endpoint; see the provider routing section)

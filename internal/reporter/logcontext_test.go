@@ -21,7 +21,7 @@ var contextLog = []string{
 }
 
 func TestLogIndexExactMatchWindowFollowsOneHost(t *testing.T) {
-	ix := NewLogIndex(contextLog)
+	ix := NewLogIndex(contextLog, DefaultContextRadius)
 	c := ix.ContextFor(&Issue{ExampleLogEntry: contextLog[5]})
 	if c.Match != MatchExact || c.Host != "alpha" {
 		t.Fatalf("want exact match on alpha, got %+v", c)
@@ -39,14 +39,14 @@ func TestLogIndexExactMatchWindowFollowsOneHost(t *testing.T) {
 
 func TestLogIndexExactMatchTrimsTrailingNewline(t *testing.T) {
 	lines := []string{contextLog[0] + "\n", contextLog[5] + "\n"}
-	c := NewLogIndex(lines).ContextFor(&Issue{ExampleLogEntry: contextLog[5] + "\n"})
+	c := NewLogIndex(lines, DefaultContextRadius).ContextFor(&Issue{ExampleLogEntry: contextLog[5] + "\n"})
 	if c.Match != MatchExact || len(c.Lines) != 2 {
 		t.Fatalf("want exact match with 2 lines, got %+v", c)
 	}
 }
 
 func TestLogIndexFuzzyMatchSurvivesDecoration(t *testing.T) {
-	ix := NewLogIndex(contextLog)
+	ix := NewLogIndex(contextLog, DefaultContextRadius)
 	// The detector reshaped the line and added an emoji (seen from a small
 	// model): same host and program, most message words shared.
 	c := ix.ContextFor(&Issue{ExampleLogEntry: "Sep  1 03:00:06 alpha backup[300]: 🔥 ERROR: connection refused by store.example.test:873"})
@@ -59,7 +59,7 @@ func TestLogIndexFuzzyMatchSurvivesDecoration(t *testing.T) {
 }
 
 func TestLogIndexFuzzyPicksBestOverlapNotFirstLine(t *testing.T) {
-	ix := NewLogIndex(contextLog)
+	ix := NewLogIndex(contextLog, DefaultContextRadius)
 	// Both backup lines share host and program; the example's words match
 	// the second one better.
 	c := ix.ContextFor(&Issue{ExampleLogEntry: "Sep  1 03:00:06 alpha backup[300]: connection refused by store.example.test:873 (retrying)"})
@@ -76,14 +76,14 @@ func TestLogIndexFuzzyPicksBestOverlapNotFirstLine(t *testing.T) {
 		"Sep  1 03:00:14 alpha systemd[1]: backup.service: Consumed 1s CPU",
 		"Sep  1 03:00:15 alpha systemd[1]: backup.service: idle",
 	}
-	c = NewLogIndex(short).ContextFor(&Issue{ExampleLogEntry: "Sep  1 03:00:06 alpha backup[300]: connection refused by store.example.test:873 (retrying)"})
+	c = NewLogIndex(short, DefaultContextRadius).ContextFor(&Issue{ExampleLogEntry: "Sep  1 03:00:06 alpha backup[300]: connection refused by store.example.test:873 (retrying)"})
 	if c.Lines[0] != contextLog[4] || c.Lines[len(c.Lines)-1] != short[6] {
 		t.Errorf("window not centred on the refused line: %v", c.Lines)
 	}
 }
 
 func TestLogIndexMisses(t *testing.T) {
-	ix := NewLogIndex(contextLog)
+	ix := NewLogIndex(contextLog, DefaultContextRadius)
 	cases := map[string]string{
 		"empty example":   "",
 		"unparseable":     "something the model made up",
@@ -100,7 +100,7 @@ func TestLogIndexMisses(t *testing.T) {
 }
 
 func TestLogIndexWindowAtLogEdges(t *testing.T) {
-	ix := NewLogIndex(contextLog)
+	ix := NewLogIndex(contextLog, DefaultContextRadius)
 	c := ix.ContextFor(&Issue{ExampleLogEntry: contextLog[0]})
 	if len(c.Lines) != 6 || c.Lines[0] != contextLog[0] {
 		t.Errorf("window at start of log should begin at the anchor: %v", c.Lines)
@@ -131,7 +131,7 @@ func TestResolutionPayloadAppendsContextPerIssue(t *testing.T) {
 		{Issue: "Backup refused", ExampleLogEntry: contextLog[5]},
 		{Issue: "Made up", ExampleLogEntry: "no such line"},
 	}}
-	contexts := NewLogIndex(contextLog).ContextsFor(issues)
+	contexts := NewLogIndex(contextLog, DefaultContextRadius).ContextsFor(issues)
 	got := NewResolutionAgent(issues, contexts, "test/model", nil).payload()
 	first := strings.Index(got, "## Backup refused")
 	ctx := strings.Index(got, "**Surrounding log lines** (host alpha")
@@ -146,5 +146,33 @@ func TestResolutionPayloadAppendsContextPerIssue(t *testing.T) {
 	plain := NewResolutionAgent(issues, nil, "test/model", nil).payload()
 	if !strings.Contains(plain, "## Made up") || strings.Contains(plain, "Surrounding") {
 		t.Errorf("payload without contexts is just the issues:\n%s", plain)
+	}
+}
+
+func TestLogIndexRadiusIsConfigurable(t *testing.T) {
+	c := NewLogIndex(contextLog, 1).ContextFor(&Issue{ExampleLogEntry: contextLog[5]})
+	want := []string{contextLog[4], contextLog[5], contextLog[7]}
+	if strings.Join(c.Lines, "\n") != strings.Join(want, "\n") {
+		t.Errorf("radius 1 window:\n%s\nwant:\n%s", strings.Join(c.Lines, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestResolutionPromptMentionsContextOnlyWhenSent(t *testing.T) {
+	with := resolutionPrompt(nil, true)
+	without := resolutionPrompt(nil, false)
+	if !strings.Contains(with, "Surrounding log lines") {
+		t.Error("prompt with context should explain the block")
+	}
+	if strings.Contains(without, "Surrounding log lines") {
+		t.Error("prompt without context must not promise a block that never comes")
+	}
+	for _, p := range []string{with, without} {
+		if !strings.Contains(p, "Simple beats clever") {
+			t.Error("simplicity rule missing")
+		}
+	}
+	// The agent derives the flag from whether any contexts were given.
+	if got := (&ResolutionAgent{Issues: &IssueList{}}).Contexts; len(got) != 0 {
+		t.Errorf("no contexts by default, got %v", got)
 	}
 }

@@ -83,7 +83,7 @@ func TestDedupePayload(t *testing.T) {
 }
 
 func TestResolutionPromptWithoutHostOS(t *testing.T) {
-	prompt := resolutionPrompt(nil)
+	prompt := resolutionPrompt(nil, false)
 	if !strings.Contains(prompt, "The primary platform is CentOS / Rocky Linux") {
 		t.Error("default prompt should carry the RHEL-family assumption")
 	}
@@ -133,7 +133,7 @@ func TestResolutionPromptWithHostOS(t *testing.T) {
 	prompt := resolutionPrompt(map[string]string{
 		"web1": "Ubuntu 22.04.5",
 		"DB2":  "CentOS Linux 7",
-	})
+	}, false)
 	if !strings.Contains(prompt, "Known host operating systems") {
 		t.Error("inventory heading missing")
 	}

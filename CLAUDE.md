@@ -44,7 +44,8 @@ internal/reporter/
   elksource.go              ELK NDJSON dump renderer
   models.go report.go       report data models + both report layouts
   logcontext.go             LogIndex: per-host surrounding-line windows fed
-                            to the resolution writer (raw lines, radius 5)
+                            to the resolution writer (raw lines; radius from
+                            SYSLOG_CONTEXT_LINES / --context-lines, 0 = off)
   llmagents.go prompts/     the four LLM agents + embedded system prompts
   emailer.go                SMTP digest + markdown-attachment sender
   capture.go                files one run's findings into the library

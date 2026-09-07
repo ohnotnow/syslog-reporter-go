@@ -14,9 +14,10 @@ import (
 	"strings"
 )
 
-// ContextRadius is how many same-host lines to take either side of the
-// example log entry.
-const ContextRadius = 5
+// DefaultContextRadius is how many same-host lines to take either side of
+// the example log entry unless SYSLOG_CONTEXT_LINES / --context-lines says
+// otherwise. 0 disables context entirely.
+const DefaultContextRadius = 5
 
 // Context match outcomes, reported so a run can log its own score card.
 const (
@@ -35,6 +36,7 @@ type LogContext struct {
 // LogIndex indexes the raw log by host for context lookups. Build it once
 // per run; lookups are then cheap.
 type LogIndex struct {
+	radius int
 	lines  []string
 	parsed []*ParsedLine // parallel to lines; nil where ParseLine failed
 	byHost map[string][]int
@@ -42,9 +44,11 @@ type LogIndex struct {
 }
 
 // NewLogIndex indexes lines in the order given, which must be log order
-// (the ELK dumper sorts by timestamp).
-func NewLogIndex(lines []string) *LogIndex {
+// (the ELK dumper sorts by timestamp). radius is the number of same-host
+// lines taken either side of the anchor.
+func NewLogIndex(lines []string, radius int) *LogIndex {
 	ix := &LogIndex{
+		radius: radius,
 		lines:  make([]string, len(lines)),
 		parsed: make([]*ParsedLine, len(lines)),
 		byHost: map[string][]int{},
@@ -125,7 +129,7 @@ func (ix *LogIndex) window(idx int, match string) LogContext {
 	}
 	hostIdx := ix.byHost[p.Host]
 	pos := sort.SearchInts(hostIdx, idx)
-	lo, hi := pos-ContextRadius, pos+ContextRadius+1
+	lo, hi := pos-ix.radius, pos+ix.radius+1
 	if lo < 0 {
 		lo = 0
 	}
@@ -159,7 +163,7 @@ func (c LogContext) ToMarkdown() string {
 	if len(c.Lines) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("**Surrounding log lines** (host %s, up to %d before and after "+
+	return fmt.Sprintf("**Surrounding log lines** (host %s, immediately before and after "+
 		"the example, may include unrelated activity):\n\n```\n%s\n```\n",
-		c.Host, ContextRadius, strings.Join(c.Lines, "\n"))
+		c.Host, strings.Join(c.Lines, "\n"))
 }

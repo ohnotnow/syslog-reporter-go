@@ -221,6 +221,9 @@ AZURE_OPENAI_API_KEY=...
 # back to SYSLOG_DEFAULT_MODEL when its variable is unset.
 #SYSLOG_LOGSCAN_MODEL=azure/gpt-5.6-luna
 #SYSLOG_ISSUE_MODEL=azure/gpt-6-astra
+# Optional: how many same-host log lines either side of each issue's example
+# the resolution writer sees (default 5; 0 sends the issues alone).
+#SYSLOG_CONTEXT_LINES=5
 
 # Where elk_dump.py fetches yesterday's logs from. ELK_API_KEY works
 # instead of username/password; ELK_INSECURE=1 skips TLS verification

@@ -59,6 +59,9 @@ OPENAI_API_KEY=sk-...                     # or ANTHROPIC_API_KEY for anthropic/ 
 # for the resolutions and explanations people actually read
 # SYSLOG_LOGSCAN_MODEL=openai/gpt-5.6-luna
 # SYSLOG_ISSUE_MODEL=anthropic/claude-fable-5-1
+# same-host log lines either side of each issue's example that the
+# resolution writer sees (default 5; 0 disables)
+# SYSLOG_CONTEXT_LINES=5
 # for azure/ models on Azure OpenAI, set:
 # SYSLOG_DEFAULT_MODEL=azure/your-deployment-name
 # AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/openai/v1/

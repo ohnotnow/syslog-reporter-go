@@ -245,18 +245,21 @@ func (a *ResolutionAgent) payload() string {
 type hostOSEntry struct{ Host, OS string }
 
 func issueDetectionPrompt(hostOS map[string]string) string {
-	return hostOSPrompt(issueDetectionTmpl, hostOS)
+	return hostOSPrompt(issueDetectionTmpl, hostOS, false)
 }
 
-func resolutionPrompt(hostOS map[string]string) string {
-	return hostOSPrompt(resolutionTmpl, hostOS)
+// resolutionPrompt renders the resolution system prompt; withContext adds
+// the paragraph explaining the "Surrounding log lines" blocks, so a run
+// with context disabled never tells the model to expect them.
+func resolutionPrompt(hostOS map[string]string, withContext bool) string {
+	return hostOSPrompt(resolutionTmpl, hostOS, withContext)
 }
 
 // hostOSPrompt renders a system prompt template, embedding the per-host OS
 // inventory when the log source knows it, sorted case-insensitively by
 // host (exact host as the tie-break, so the order never depends on map
 // iteration).
-func hostOSPrompt(tmpl *template.Template, hostOS map[string]string) string {
+func hostOSPrompt(tmpl *template.Template, hostOS map[string]string, withContext bool) string {
 	entries := make([]hostOSEntry, 0, len(hostOS))
 	for host, osName := range hostOS {
 		entries = append(entries, hostOSEntry{Host: host, OS: osName})
@@ -269,7 +272,10 @@ func hostOSPrompt(tmpl *template.Template, hostOS map[string]string) string {
 		return entries[i].Host < entries[j].Host
 	})
 	var buf strings.Builder
-	_ = tmpl.Execute(&buf, struct{ HostOS []hostOSEntry }{entries})
+	_ = tmpl.Execute(&buf, struct {
+		HostOS      []hostOSEntry
+		WithContext bool
+	}{entries, withContext})
 	return strings.TrimSuffix(buf.String(), "\n")
 }
 
@@ -278,7 +284,7 @@ func (a *ResolutionAgent) Run(ctx context.Context) (*ResolutionList, error) {
 		return &ResolutionList{}, nil
 	}
 	var got ResolutionList
-	err := llm.Complete(ctx, a.Model, resolutionPrompt(a.HostOS), a.payload(),
+	err := llm.Complete(ctx, a.Model, resolutionPrompt(a.HostOS, len(a.Contexts) > 0), a.payload(),
 		"ResolutionList", resolutionListSchema(), &got)
 	if err != nil {
 		return nil, err

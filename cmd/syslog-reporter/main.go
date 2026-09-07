@@ -494,6 +494,10 @@ func runBatch(cliArgs []string) {
 	if err != nil {
 		fatal("SYSLOG_DB_KEEP_DAYS must be an integer: %v", err)
 	}
+	defaultContextLines, err := contextLinesFromEnv()
+	if err != nil {
+		fatal("%v", err)
+	}
 
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	setUsage(fs, runHelpIntro, runHelpEnv)
@@ -520,6 +524,8 @@ func runBatch(cliArgs []string) {
 	noLLM := fs.Bool("no-llm", false,
 		"Skip every LLM stage (issue detection, dedupe, resolutions, anomaly "+
 			"explanations) so the run costs nothing")
+	contextLines := fs.Int("context-lines", defaultContextLines,
+		"Same-host log lines to show the resolution writer either side of each issue's example (0 disables; default: SYSLOG_CONTEXT_LINES)")
 	dumpFiltered := fs.Bool("dump-filtered", false,
 		"Print the filtered log lines and exit (the filter-tuning aid)")
 
@@ -625,40 +631,53 @@ func runBatch(cliArgs []string) {
 	}
 
 	run(runConfig{
-		lines:      lines,
-		scanModel:  scanModel,
-		issueModel: issueModel,
-		debug:      *debug,
-		recipients: *recipients,
-		sendEmail:  *sendEmail,
-		outDir:     *outDir,
-		logDate:    logDate,
-		dbPath:     *dbPath,
-		storeOn:    !*noStore,
-		keepDays:   keepDays,
-		llmOn:      !*noLLM,
-		hostOS:     hostOS,
-		knownsPath: *knownsPath,
-		dumpOnly:   *dumpFiltered,
+		lines:        lines,
+		scanModel:    scanModel,
+		issueModel:   issueModel,
+		debug:        *debug,
+		recipients:   *recipients,
+		sendEmail:    *sendEmail,
+		outDir:       *outDir,
+		logDate:      logDate,
+		dbPath:       *dbPath,
+		storeOn:      !*noStore,
+		keepDays:     keepDays,
+		llmOn:        !*noLLM,
+		hostOS:       hostOS,
+		knownsPath:   *knownsPath,
+		dumpOnly:     *dumpFiltered,
+		contextLines: *contextLines,
 	})
 }
 
+// contextLinesFromEnv reads SYSLOG_CONTEXT_LINES (default
+// reporter.DefaultContextRadius); 0 disables the context windows.
+func contextLinesFromEnv() (int, error) {
+	raw := getenvDefault("SYSLOG_CONTEXT_LINES", strconv.Itoa(reporter.DefaultContextRadius))
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("SYSLOG_CONTEXT_LINES must be a whole number of lines (0 disables), got %q", raw)
+	}
+	return n, nil
+}
+
 type runConfig struct {
-	lines      []string
-	scanModel  string // issue detection and deduplication
-	issueModel string // resolutions and anomaly explanations
-	debug      bool
-	recipients string
-	sendEmail  bool
-	outDir     string
-	logDate    time.Time
-	dbPath     string
-	storeOn    bool
-	keepDays   int
-	llmOn      bool
-	hostOS     map[string]string
-	knownsPath string
-	dumpOnly   bool
+	lines        []string
+	scanModel    string // issue detection and deduplication
+	issueModel   string // resolutions and anomaly explanations
+	debug        bool
+	recipients   string
+	sendEmail    bool
+	outDir       string
+	logDate      time.Time
+	dbPath       string
+	storeOn      bool
+	keepDays     int
+	llmOn        bool
+	hostOS       map[string]string
+	knownsPath   string
+	dumpOnly     bool
+	contextLines int // same-host lines either side of each issue's example; 0 = none
 }
 
 func run(cfg runConfig) {
@@ -727,11 +746,16 @@ func run(cfg runConfig) {
 
 		// Context windows come from the RAW lines: the routine chatter the
 		// filter drops (a restart, a cron kick) is often what explains the
-		// odd line.
-		contexts := reporter.NewLogIndex(cfg.lines).ContextsFor(issues)
-		for i, c := range contexts {
-			log.Debug("Context for %q: %s (host %q, %d lines)",
-				issues.Issues[i].Issue, c.Match, c.Host, len(c.Lines))
+		// odd line. --context-lines 0 sends the issues alone.
+		var contexts []reporter.LogContext
+		if cfg.contextLines > 0 {
+			contexts = reporter.NewLogIndex(cfg.lines, cfg.contextLines).ContextsFor(issues)
+			for i, c := range contexts {
+				log.Debug("Context for %q: %s (host %q, %d lines)",
+					issues.Issues[i].Issue, c.Match, c.Host, len(c.Lines))
+			}
+		} else {
+			log.Debug("Context windows disabled (--context-lines 0)")
 		}
 		log.Info("Resolving %d issues", len(issues.Issues))
 		resolutions, err = reporter.NewResolutionAgent(issues, contexts, cfg.issueModel, cfg.hostOS).Run(ctx)
