@@ -214,14 +214,32 @@ func (a *IssueDeduplicatorAgent) Run(ctx context.Context) (*IssueList, error) {
 }
 
 // ResolutionAgent turns each issue into paste-ready investigate/fix commands.
+// Contexts, when given, is one LogContext per issue (see LogIndex) and is
+// appended to that issue's markdown so the model reasons from the
+// surrounding lines rather than a single example.
 type ResolutionAgent struct {
-	Issues *IssueList
-	Model  string
-	HostOS map[string]string
+	Issues   *IssueList
+	Contexts []LogContext
+	Model    string
+	HostOS   map[string]string
 }
 
-func NewResolutionAgent(issues *IssueList, model string, hostOS map[string]string) *ResolutionAgent {
-	return &ResolutionAgent{Issues: issues, Model: model, HostOS: hostOS}
+func NewResolutionAgent(issues *IssueList, contexts []LogContext, model string, hostOS map[string]string) *ResolutionAgent {
+	return &ResolutionAgent{Issues: issues, Contexts: contexts, Model: model, HostOS: hostOS}
+}
+
+// payload is the issues as markdown, each followed by its context window
+// when one was found.
+func (a *ResolutionAgent) payload() string {
+	var b strings.Builder
+	for i, issue := range a.Issues.Issues {
+		b.WriteString(issue.ToMarkdown())
+		if i < len(a.Contexts) {
+			b.WriteString(a.Contexts[i].ToMarkdown())
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
 }
 
 type hostOSEntry struct{ Host, OS string }
@@ -260,7 +278,7 @@ func (a *ResolutionAgent) Run(ctx context.Context) (*ResolutionList, error) {
 		return &ResolutionList{}, nil
 	}
 	var got ResolutionList
-	err := llm.Complete(ctx, a.Model, resolutionPrompt(a.HostOS), a.Issues.ToMarkdown(),
+	err := llm.Complete(ctx, a.Model, resolutionPrompt(a.HostOS), a.payload(),
 		"ResolutionList", resolutionListSchema(), &got)
 	if err != nil {
 		return nil, err

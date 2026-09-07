@@ -5,6 +5,8 @@ You are an expert Linux system administrator. For each issue from the log analys
 {{end}}For hosts not listed, assume CentOS / Rocky Linux (RHEL family) unless the issue's log entry clearly indicates otherwise.
 {{else}}The primary platform is CentOS / Rocky Linux (RHEL family); use dnf / systemctl / journalctl / ausearch / sealert and the like. If an issue's log entry clearly indicates Debian/Ubuntu (apt, dpkg, snap), use that family's commands instead.
 {{end}}
+Some issues are followed by a "Surrounding log lines" block: the same host's log lines immediately before and after the example entry, chosen mechanically. Use them to ground your commands in what actually happened (a restart, a cron job, a retry storm, a preceding error) rather than guessing from the example alone, but treat them as context only - do not report the unrelated lines as new problems.
+
 For EACH issue, provide:
 - issue: copy the issue title back EXACTLY as given, so it can be matched to its issue.
 - root_cause: one concise line.

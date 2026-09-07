@@ -136,6 +136,7 @@ func runEval(args []string) {
 		fatal("%v", err)
 	}
 	rawCount := len(lines)
+	logIndex := reporter.NewLogIndex(lines) // raw lines, for context windows
 	lines = reporter.NewLogFilter(lines, knowns).Run()
 
 	log.Info("Evaluating %s over %d filtered lines (%s, %d before filtering)",
@@ -164,7 +165,8 @@ func runEval(args []string) {
 	log.Info("Dedupe: %d issues in %s", len(issues.Issues), dedupeDur.Round(time.Millisecond))
 
 	t = time.Now()
-	resolutions, err := reporter.NewResolutionAgent(issues, cfg.issueModel, nil).Run(ctx)
+	contexts := logIndex.ContextsFor(issues)
+	resolutions, err := reporter.NewResolutionAgent(issues, contexts, cfg.issueModel, nil).Run(ctx)
 	if err != nil {
 		fatal("resolving issues: %v", err)
 	}

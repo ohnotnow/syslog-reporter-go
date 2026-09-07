@@ -725,8 +725,16 @@ func run(cfg runConfig) {
 		}
 		log.Debug("Consolidated to %d issues", len(issues.Issues))
 
+		// Context windows come from the RAW lines: the routine chatter the
+		// filter drops (a restart, a cron kick) is often what explains the
+		// odd line.
+		contexts := reporter.NewLogIndex(cfg.lines).ContextsFor(issues)
+		for i, c := range contexts {
+			log.Debug("Context for %q: %s (host %q, %d lines)",
+				issues.Issues[i].Issue, c.Match, c.Host, len(c.Lines))
+		}
 		log.Info("Resolving %d issues", len(issues.Issues))
-		resolutions, err = reporter.NewResolutionAgent(issues, cfg.issueModel, cfg.hostOS).Run(ctx)
+		resolutions, err = reporter.NewResolutionAgent(issues, contexts, cfg.issueModel, cfg.hostOS).Run(ctx)
 		if err != nil {
 			fatal("resolving issues: %v", err)
 		}

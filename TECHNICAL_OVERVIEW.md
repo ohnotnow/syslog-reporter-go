@@ -48,6 +48,8 @@ internal/reporter/
   temporal.go               time-of-day burst detector
   elksource.go              ELK NDJSON dump renderer (dump -> rsyslog lines)
   models.go                 issue / resolution / explained-anomaly models
+  logcontext.go             LogIndex: per-host surrounding-line windows for
+                            the resolution writer (the grep -C analogue)
   llmagents.go prompts/     the four LLM agents + embedded system prompts
   report.go                 both report layouts (digest + full attachment)
   emailer.go                SMTP send: digest body + markdown attachment
@@ -79,6 +81,8 @@ raw log lines
    |                                  IssueDeduplicator (merges cross-chunk dupes)
    |                                        |
    |                                  ResolutionAgent --> ResolutionList
+   |                                        ^                 |
+   +-- LogIndex (RAW lines) -- per-issue context windows      |
    |                                                          |
    +-- PeerDetector.Aggregate() (RAW lines, no LLM)           |
              |                                                |
@@ -136,6 +140,23 @@ exist in the entire pipeline (issue detection, dedupe, resolutions, anomaly
 explanations), constrained by JSON schemas that mirror the data
 models. OpenAI gets a strict `json_schema` response format; Anthropic gets
 `output_config.format`.
+
+The resolution writer does not see the log. Each issue reaches it as
+markdown carrying the one example log entry the detector copied out, and
+on that alone the model has to guess what was going on around the line.
+`logcontext.go` fills the gap deterministically: `LogIndex` indexes the
+RAW lines by host (raw, not filtered, because the routine chatter the
+filter drops - a restart, a cron kick - is often the explanation), finds
+each issue's example line (exact match first, else the same host and
+program's line sharing the most message words, so a lightly reworded or
+decorated example still anchors), and appends up to `ContextRadius` (5)
+same-host lines either side as a "Surrounding log lines" block on that
+issue only. A miss appends nothing. The window goes to the resolution
+payload only, never into the report or the findings library, and a
+`--debug` run logs exact/fuzzy/miss per issue so the hit rate can be
+checked against a real day. First measured 2026-09-07 on a production
+day: 37 issues, 28 exact, 8 fuzzy, 1 miss (the model had paraphrased the
+program name, so the same-program rule rejected it).
 
 An `azure/` prefix targets OpenAI models hosted on Azure OpenAI: it uses
 the same openai-go chat path with the client pointed at the resource's v1
