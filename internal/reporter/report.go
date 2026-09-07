@@ -174,6 +174,13 @@ func (r *ReportAgent) emailBodyN(topIssues, topAnomalies int) string {
 		}
 		b.WriteString("\n\n")
 		b.WriteString(i.Description + "\n\n")
+		// The verbatim log line goes before the resolution: the resolution
+		// writer refers back to "the supplied example", so the reader must
+		// have seen it by then. Outside the resolution branch so a --no-llm
+		// run gets it too.
+		if i.ExampleLogEntry != "" {
+			b.WriteString("**Example:**\n\n```\n" + i.ExampleLogEntry + "\n```\n\n")
+		}
 		if res, ok := resolutions[i.Issue]; ok {
 			b.WriteString("**Likely cause:** " + res.RootCause + "\n\n")
 			b.WriteString("**Have a look:**\n\n")

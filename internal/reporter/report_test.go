@@ -93,6 +93,33 @@ func TestEmailBodyShowsTopIssuesWithCommandsAndHidesTheRest(t *testing.T) {
 	}
 }
 
+// The digest shows each issue's verbatim example log line, placed after the
+// description and before the resolution (which refers back to it), whether
+// or not a resolution exists. An empty example writes nothing.
+func TestEmailBodyShowsExampleLogEntry(t *testing.T) {
+	withRes := testIssue("dnssec", "high")
+	withRes.ExampleLogEntry = "Sep  6 16:58:17 barbados journal: Suppressed 9668 messages"
+	noRes := testIssue("orphan", "medium")
+	noRes.ExampleLogEntry = "Sep  6 17:00:01 tobago cron: orphan job"
+	blank := testIssue("blank", "low")
+	blank.ExampleLogEntry = ""
+	rep := &ReportAgent{
+		Issues:      &IssueList{Issues: []*Issue{withRes, noRes, blank}},
+		Resolutions: &ResolutionList{Resolutions: []*Resolution{testResolution("dnssec")}},
+	}
+	body := rep.EmailBody()
+
+	for _, want := range []string{
+		"dnssec desc\n\n**Example:**\n\n```\n" + withRes.ExampleLogEntry + "\n```\n\n**Likely cause:**",
+		"orphan desc\n\n**Example:**\n\n```\n" + noRes.ExampleLogEntry + "\n```\n\n👉 fix orphan",
+		"blank desc\n\n👉 fix blank",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q\n%s", want, body)
+		}
+	}
+}
+
 func TestEmailBodyFallsBackToRecommendedActionWithoutResolution(t *testing.T) {
 	rep := &ReportAgent{
 		Issues:      &IssueList{Issues: []*Issue{testIssue("orphan", "high")}},
