@@ -32,7 +32,7 @@ type localAuth struct {
 	cfg      Config
 	users    UserStore
 	sessions *scs.SessionManager
-	throttle *loginThrottle
+	throttle *windowCounter
 }
 
 func newLocalAuth(cfg Config, users UserStore) *localAuth {
@@ -100,7 +100,7 @@ func (a *localAuth) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// The lockout check comes before any parsing or bcrypt work: its whole
 	// job is to stop an unauthenticated client burning CPU (srg-so8ja.8).
 	ip := clientIP(r.RemoteAddr)
-	if a.throttle.blocked(ip) {
+	if blocked, _ := a.throttle.blocked(ip); blocked {
 		http.Error(w, "too many failed login attempts; try again shortly",
 			http.StatusTooManyRequests)
 		return
@@ -118,7 +118,7 @@ func (a *localAuth) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// operator's own audit trail, syslog-style), never the password.
 	fail := func() {
 		a.cfg.logWarn("failed login for %q from %s", username, ip)
-		a.throttle.fail(ip)
+		a.throttle.record(ip)
 		a.renderLogin(w, loginData{
 			Error:    "That username and password combination was not recognised.",
 			Next:     next,
@@ -142,7 +142,7 @@ func (a *localAuth) handleLogin(w http.ResponseWriter, r *http.Request) {
 		fail()
 		return
 	}
-	a.throttle.success(ip)
+	a.throttle.reset(ip)
 	// Fresh session token on privilege change, then remember only the id;
 	// the middleware loads the row on each request.
 	if err := a.sessions.RenewToken(r.Context()); err != nil {

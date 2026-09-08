@@ -243,16 +243,29 @@ func New(cfg Config, auth Authenticator, lib *reporter.LibraryStore) (*Server, e
 	s.mux.HandleFunc("GET /findings/{id}", s.handleFindingDetail)
 	s.mux.HandleFunc("POST /findings/{id}/feedback", s.handleFeedback)
 	s.mux.Handle("GET /static/", http.FileServerFS(staticFS))
+	s.mux.HandleFunc("GET /api/me", s.handleMe)
 	auth.Routes(s.mux)
 	return s, nil
 }
 
-// Handler exposes the full stack (request log, CSRF, auth middleware,
-// routes) without the listener, for tests.
+// Handler exposes the full stack without the listener, for tests. Two
+// stacks share one mux: /api/ paths get bearer auth (apiauth.go) and
+// nothing else; every other path gets the request log, CSRF guard and
+// the cookie-session Authenticator. The split happens before either
+// middleware runs, so a session cookie never reaches an API route and a
+// curl never meets the CSRF check.
 func (s *Server) Handler() http.Handler {
-	h := s.csrf.Handler(s.auth.Middleware(s.mux))
+	web := s.csrf.Handler(s.auth.Middleware(s.mux))
+	api := s.bearerAuth(s.mux)
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			api.ServeHTTP(w, r)
+			return
+		}
+		web.ServeHTTP(w, r)
+	})
 	if s.cfg.Debug {
-		h = s.requestLog(h)
+		return s.requestLog(h)
 	}
 	return h
 }

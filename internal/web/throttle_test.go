@@ -17,32 +17,56 @@ func TestLoginThrottleWindowAndReset(t *testing.T) {
 	now := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
 	th := newLoginThrottle()
 	th.now = func() time.Time { return now }
+	isBlocked := func(ip string) bool { b, _ := th.blocked(ip); return b }
 
 	for i := 0; i < maxLoginFailures; i++ {
-		if th.blocked("192.0.2.10") {
+		if isBlocked("192.0.2.10") {
 			t.Fatalf("blocked after %d failures, limit is %d", i, maxLoginFailures)
 		}
-		th.fail("192.0.2.10")
+		th.record("192.0.2.10")
 	}
-	if !th.blocked("192.0.2.10") {
+	if !isBlocked("192.0.2.10") {
 		t.Fatal("not blocked after reaching the failure limit")
 	}
-	if th.blocked("192.0.2.99") {
+	if isBlocked("192.0.2.99") {
 		t.Fatal("a different IP must not share the lockout")
 	}
 	now = now.Add(loginLockout + time.Second)
-	if th.blocked("192.0.2.10") {
+	if isBlocked("192.0.2.10") {
 		t.Fatal("still blocked after the lockout window passed")
 	}
 
 	// A success wipes the slate mid-count.
-	th.fail("192.0.2.20")
-	th.success("192.0.2.20")
+	th.record("192.0.2.20")
+	th.reset("192.0.2.20")
 	for i := 0; i < maxLoginFailures-1; i++ {
-		th.fail("192.0.2.20")
+		th.record("192.0.2.20")
 	}
-	if th.blocked("192.0.2.20") {
+	if isBlocked("192.0.2.20") {
 		t.Fatal("success did not reset the failure count")
+	}
+}
+
+func TestWindowCounterAllowReportsRetryAfter(t *testing.T) {
+	now := time.Date(2026, 9, 8, 9, 0, 0, 0, time.UTC)
+	c := newWindowCounter(2, time.Hour)
+	c.now = func() time.Time { return now }
+	for i := 0; i < 2; i++ {
+		if ok, _ := c.allow("tok"); !ok {
+			t.Fatalf("event %d refused under the limit", i+1)
+		}
+	}
+	now = now.Add(20 * time.Minute)
+	ok, wait := c.allow("tok")
+	if ok || wait != 40*time.Minute {
+		t.Errorf("over limit: ok=%v wait=%v, want refused with 40m", ok, wait)
+	}
+	if ok, _ := c.allow("other"); !ok {
+		t.Error("a different key must have its own window")
+	}
+	now = now.Add(41 * time.Minute)
+	if ok, _ := c.allow("tok"); !ok {
+		t.Error("window should have reset")
 	}
 }
 
