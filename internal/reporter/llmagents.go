@@ -89,10 +89,11 @@ func resolutionListSchema() map[string]any {
 						"issue":        str(),
 						"root_cause":   str(),
 						"investigate":  str(),
+						"look_for":     str(),
 						"fix_commands": map[string]any{"type": "array", "items": str()},
 						"notes":        str(),
 					},
-					"required":             []string{"issue", "root_cause", "investigate", "fix_commands", "notes"},
+					"required":             []string{"issue", "root_cause", "investigate", "look_for", "fix_commands", "notes"},
 					"additionalProperties": false,
 				},
 			},
@@ -295,6 +296,7 @@ func (a *ResolutionAgent) Run(ctx context.Context) (*ResolutionList, error) {
 	// email, findings library - agrees.
 	for _, r := range got.Resolutions {
 		r.Investigate = strings.TrimSpace(r.Investigate)
+		r.LookFor = strings.TrimSpace(r.LookFor)
 		trimEach(r.FixCommands)
 	}
 	return &got, nil

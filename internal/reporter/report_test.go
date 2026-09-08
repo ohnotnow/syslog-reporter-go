@@ -23,6 +23,7 @@ func testResolution(title string) *Resolution {
 	return &Resolution{
 		Issue: title, RootCause: title + " cause",
 		Investigate: "systemctl status " + title,
+		LookFor:     "healthy is active (running); failed means " + title + " is down",
 		FixCommands: []string{"systemctl restart " + title}, Notes: "might just be off",
 	}
 }
@@ -74,9 +75,10 @@ func TestEmailBodyShowsTopIssuesWithCommandsAndHidesTheRest(t *testing.T) {
 	body := rep.emailBodyN(2, 1)
 
 	for _, want := range []string{
-		"disk-full",                   // critical: in body
-		"clock-skew",                  // high: in body
-		"systemctl status disk-full",  // investigate command shown
+		"disk-full",                  // critical: in body
+		"clock-skew",                 // high: in body
+		"systemctl status disk-full", // investigate command shown
+		"**What to look for:** healthy is active (running); failed means disk-full is down",
 		"systemctl restart disk-full", // fix command shown
 		"```",                         // commands are in a code fence
 		"of 3 issues",                 // signals there is more
@@ -379,5 +381,31 @@ func TestReportTitlesFallBackToNowWithoutLogDate(t *testing.T) {
 	want := time.Now().Format("02/01/2006")
 	if body := rep.EmailBody(); !strings.Contains(body, "# Syslog digest - "+want) {
 		t.Errorf("digest title missing fallback date %s:\n%s", want, body)
+	}
+}
+
+// The resolution's look_for line sits between the investigate command and
+// the fix in both layouts, and an empty one writes nothing (older library
+// rows and runs from before the field existed have none).
+func TestLookForRendersBetweenInvestigateAndFix(t *testing.T) {
+	res := testResolution("clock-skew")
+	md := res.ToMarkdown()
+	inv := strings.Index(md, "systemctl status clock-skew")
+	look := strings.Index(md, "**What to look for:** healthy is active (running)")
+	fix := strings.Index(md, "**Fix:**")
+	if inv < 0 || look < 0 || fix < 0 || !(inv < look && look < fix) {
+		t.Errorf("attachment order wrong (investigate=%d lookfor=%d fix=%d):\n%s", inv, look, fix, md)
+	}
+
+	res.LookFor = ""
+	if strings.Contains(res.ToMarkdown(), "What to look for") {
+		t.Error("empty look_for should render nothing in the attachment")
+	}
+	rep := &ReportAgent{
+		Issues:      &IssueList{Issues: []*Issue{testIssue("clock-skew", "high")}},
+		Resolutions: &ResolutionList{Resolutions: []*Resolution{res}},
+	}
+	if strings.Contains(rep.EmailBody(), "What to look for") {
+		t.Error("empty look_for should render nothing in the digest")
 	}
 }

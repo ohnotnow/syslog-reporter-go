@@ -144,6 +144,7 @@ func seedDetailFindings(t *testing.T, lib *reporter.LibraryStore) (issueID, anom
 		Resolution: &reporter.Resolution{
 			Issue: "Disk filling on /var", RootCause: "logrotate unit disabled",
 			Investigate: "df -h /var",
+			LookFor:     "Use% above 90 on /var confirms it.",
 			FixCommands: []string{"systemctl enable --now logrotate.timer"},
 			Notes:       "Check retention policy first.",
 		},
@@ -180,6 +181,7 @@ func TestFindingDetailRendersBothKinds(t *testing.T) {
 		"Service outage when the partition fills.", "Rotate and compress old logs.",
 		"VFS: file-max limit reached",
 		"logrotate unit disabled", "df -h /var",
+		"<strong>What to look for:</strong> Use% above 90 on /var confirms it.",
 		"systemctl enable --now logrotate.timer", "Check retention policy first.",
 		"Review before pasting", // the paste caution (srg-so8ja.5)
 		"Did this fix it?", "Fixed it", "Did not fix it",

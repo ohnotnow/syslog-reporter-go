@@ -79,6 +79,7 @@ type Resolution struct {
 	Issue       string   `json:"issue"` // echoed back verbatim, so it pairs to its Issue
 	RootCause   string   `json:"root_cause"`
 	Investigate string   `json:"investigate"`  // one paste-ready diagnostic command
+	LookFor     string   `json:"look_for"`     // what the investigate output means: healthy vs the problem
 	FixCommands []string `json:"fix_commands"` // ordered, paste-ready shell commands
 	Notes       string   `json:"notes"`        // optional one-line caveat
 }
@@ -91,9 +92,12 @@ func (r *Resolution) ToMarkdown() string {
 	md := fmt.Sprintf(
 		"### %s\n\n"+
 			"**Root cause:** %s\n\n"+
-			"**Investigate:**\n\n```\n%s\n```\n\n"+
-			"**Fix:**\n\n```\n%s\n```\n",
-		r.Issue, r.RootCause, r.Investigate, fixes)
+			"**Investigate:**\n\n```\n%s\n```\n\n",
+		r.Issue, r.RootCause, r.Investigate)
+	if r.LookFor != "" {
+		md += fmt.Sprintf("**What to look for:** %s\n\n", r.LookFor)
+	}
+	md += fmt.Sprintf("**Fix:**\n\n```\n%s\n```\n", fixes)
 	if r.Notes != "" {
 		md += fmt.Sprintf("\n**Note:** %s\n", r.Notes)
 	}

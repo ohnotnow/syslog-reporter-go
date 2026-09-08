@@ -93,6 +93,9 @@ func TestResolutionPromptWithoutHostOS(t *testing.T) {
 	if !strings.Contains(prompt, "For EACH issue, provide:") {
 		t.Error("prompt body missing")
 	}
+	if !strings.Contains(prompt, "- look_for:") {
+		t.Error("prompt should ask for the look_for field (sysadmin feedback 2026-09-08)")
+	}
 	if strings.HasSuffix(prompt, "\n") {
 		t.Error("rendered prompt should not keep the template's trailing newline")
 	}

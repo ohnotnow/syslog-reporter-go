@@ -196,6 +196,9 @@ func writeDetail(out io.Writer, d *reporter.FindingDetail) {
 		if r := i.Resolution; r != nil {
 			fmt.Fprintf(out, "\nRoot cause: %s\n\n", r.RootCause)
 			fmt.Fprintf(out, "Investigate:\n  %s\n\n", r.Investigate)
+			if r.LookFor != "" {
+				fmt.Fprintf(out, "What to look for: %s\n\n", r.LookFor)
+			}
 			if len(r.FixCommands) > 0 {
 				fmt.Fprintln(out, "Fix:")
 				for _, c := range r.FixCommands {

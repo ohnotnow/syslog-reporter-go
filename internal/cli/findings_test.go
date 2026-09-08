@@ -52,6 +52,7 @@ func seedLibrary(t *testing.T) (dbPath string, issueID, anomID int64) {
 		Resolution: &reporter.Resolution{
 			Issue: "Disk filling on /var", RootCause: "logrotate unit disabled",
 			Investigate: "df -h /var",
+			LookFor:     "Use% above 90 on /var confirms it.",
 			FixCommands: []string{"systemctl enable --now logrotate.timer"},
 		},
 	}
@@ -148,7 +149,8 @@ func TestShowRendersBothKindsAsPlainText(t *testing.T) {
 		"Affected: hostA, hostB", "OS: Rocky Linux 9 x2", "Impact: Service outage",
 		"Recommended action: Rotate and compress old logs.",
 		"VFS: file-max limit reached", "Root cause: logrotate unit disabled",
-		"df -h /var", "systemctl enable --now logrotate.timer",
+		"df -h /var", "What to look for: Use% above 90 on /var confirms it.",
+		"systemctl enable --now logrotate.timer",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("issue show missing %q", want)

@@ -25,6 +25,7 @@
     <p><strong>Root cause:</strong> {{.RootCause}}</p>
     <h3>Investigate</h3>
     <pre><code>{{.Investigate}}</code></pre>
+    {{if .LookFor}}<p><strong>What to look for:</strong> {{.LookFor}}</p>{{end}}
     <h3>Fix</h3>
     {{if .FixCommands}}
     <pre><code>{{range $i, $c := .FixCommands}}{{if $i}}

@@ -185,6 +185,9 @@ func (r *ReportAgent) emailBodyN(topIssues, topAnomalies int) string {
 			b.WriteString("**Likely cause:** " + res.RootCause + "\n\n")
 			b.WriteString("**Have a look:**\n\n")
 			b.WriteString("```\n" + res.Investigate + "\n```\n\n")
+			if res.LookFor != "" {
+				b.WriteString("**What to look for:** " + res.LookFor + "\n\n")
+			}
 			b.WriteString("**Try:**\n\n```\n")
 			for _, c := range res.FixCommands {
 				b.WriteString(c + "\n")
