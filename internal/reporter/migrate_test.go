@@ -50,7 +50,7 @@ func TestMigrateFreshInMemory(t *testing.T) {
 		t.Errorf("schema version = %d, want %d", v, want)
 	}
 	names := tableNames(t, db)
-	for _, tbl := range []string{"aggregates", "runs", "findings", "finding_hosts", "feedback", "users"} {
+	for _, tbl := range []string{"aggregates", "runs", "findings", "finding_hosts", "feedback", "users", "api_tokens"} {
 		if !names[tbl] {
 			t.Errorf("table %s missing after fresh migration", tbl)
 		}

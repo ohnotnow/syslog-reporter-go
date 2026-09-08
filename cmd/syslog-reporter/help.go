@@ -62,6 +62,19 @@ The store must already exist (a report run creates it); --db and
 SYSLOG_DB_PATH name it exactly as in the other commands.
 `
 
+const tokenHelp = `Manage bearer tokens for the sysadmin API served by serve mode.
+usage: syslog-reporter token create <username> [--expires YYYY-MM-DD] [--db <path>]
+       syslog-reporter token list [--db <path>]
+       syslog-reporter token revoke <prefix> [--db <path>]
+create prints the new token once, alone on stdout, and never again; the
+store keeps only a hash. The user must already exist ('user add').
+list shows each token's 8-character prefix, owner, last use and expiry.
+revoke takes that prefix. Several live tokens per user are fine: one per
+machine means a leak costs one token, not the person.
+The store must already exist (a report run creates it); --db and
+SYSLOG_DB_PATH name it exactly as in the other commands.
+`
+
 // setUsage wires a FlagSet's --help output: intro, the flag list, then the
 // env block for commands whose real interface is environment variables.
 func setUsage(fs *flag.FlagSet, intro, env string) {

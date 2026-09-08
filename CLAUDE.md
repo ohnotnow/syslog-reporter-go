@@ -28,8 +28,9 @@ as unknown.
 
 ```
 cmd/syslog-reporter/        CLI entry point; explicit command dispatch (run,
-                            eval, serve, user, findings, mgmt-report,
-                            self-update) from one registry - no default mode
+                            eval, serve, user, token, findings,
+                            mgmt-report, self-update) from one registry -
+                            no default mode
 internal/selfupdate/        Version/RepoURL, --version latest-release check,
                             and the self-update command
 internal/reporter/
@@ -50,6 +51,7 @@ internal/reporter/
   emailer.go                SMTP digest + markdown-attachment sender
   capture.go                files one run's findings into the library
   librarystore.go           findings library store (runs/findings/feedback/users)
+  apitokens.go              sysadmin API bearer tokens (sha256 + 8-char prefix)
   mgmtreport.go             management summary (HTML + plain text)
 internal/web/               serve mode: findings UI, auth seam, hot-reload TLS
 internal/cli/               findings subcommands + ParseFlagsAnywhere

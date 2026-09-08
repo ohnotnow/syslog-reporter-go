@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -58,5 +59,57 @@ func TestUserAddDuplicatesNameTheField(t *testing.T) {
 	err = userAdd(db, "different", "opsuser@example.test", "pw")
 	if err == nil || !strings.Contains(err.Error(), "email") {
 		t.Errorf("duplicate email: got %v", err)
+	}
+}
+
+func TestTokenCreateMintsForAnExistingUserOnly(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "tokens.db")
+	if err := userAdd(db, "opsuser", "opsuser@example.test", "correct horse"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := tokenCreate(db, "nobody", nil); err == nil || !strings.Contains(err.Error(), `no user "nobody"`) {
+		t.Errorf("unknown user err = %v", err)
+	}
+	raw, tok, err := tokenCreate(db, "opsuser", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) != 64 || tok.Username != "opsuser" || tok.Prefix != raw[:8] {
+		t.Errorf("raw = %q, token = %+v", raw, tok)
+	}
+	lib, err := reporter.OpenLibraryStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { lib.Close() })
+	if _, err := lib.APITokenByHash(reporter.HashAPIToken(raw)); err != nil {
+		t.Errorf("token not stored: %v", err)
+	}
+}
+
+func TestTokenCreateRefusesAMissingStore(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "absent.db")
+	if _, _, err := tokenCreate(db, "opsuser", nil); err == nil {
+		t.Error("expected the missing-database refusal")
+	}
+}
+
+func TestParseExpiryIsEndOfDayAndRefusesThePast(t *testing.T) {
+	if got, err := parseExpiry(""); err != nil || got != nil {
+		t.Errorf("empty = %v, %v", got, err)
+	}
+	future := time.Now().AddDate(1, 0, 0).Format("2006-01-02")
+	got, err := parseExpiry(future)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Format("2006-01-02 15:04:05") != future+" 23:59:59" {
+		t.Errorf("expiry = %v, want end of %s", got, future)
+	}
+	if _, err := parseExpiry("2020-01-01"); err == nil {
+		t.Error("past date accepted")
+	}
+	if _, err := parseExpiry("next tuesday"); err == nil {
+		t.Error("garbage date accepted")
 	}
 }

@@ -31,8 +31,9 @@ implementation replaced it outright and maintains no compatibility with it.
 
 ```
 cmd/syslog-reporter/        CLI entry point; explicit command dispatch (run,
-                            eval, serve, user, findings, mgmt-report,
-                            self-update) from one registry - no default mode
+                            eval, serve, user, token, findings,
+                            mgmt-report, self-update) from one registry -
+                            no default mode
 internal/selfupdate/        Version/RepoURL (ldflags-stamped), the --version
                             latest-release check, and the self-update command
 internal/reporter/
@@ -347,7 +348,8 @@ between them.
 
 The first argument is always a command: `run` (the daily batch report),
 `eval` (model comparison), `serve` (web UI), `user` (local accounts:
-add/list/passwd/remove), `findings` (list/show/feedback), `mgmt-report`
+add/list/passwd/remove), `token` (sysadmin API bearer tokens:
+create/list/revoke), `findings` (list/show/feedback), `mgmt-report`
 (management summary) and `self-update`. A bare invocation or an unknown
 command prints the command list and exits non-zero; there is no default
 mode. `--help`, `--version`, the bare words `help <command>` and

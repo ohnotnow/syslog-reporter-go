@@ -25,6 +25,7 @@ var commands = []command{
 	{"eval", "Compare provider/model combinations over a small log sample", cmdEval},
 	{"serve", "Serve the findings library web UI (default 127.0.0.1:7373)", cmdServe},
 	{"user", "Manage local-auth accounts (add, list, passwd, remove)", cmdUser},
+	{"token", "Manage sysadmin API bearer tokens (create, list, revoke)", cmdToken},
 	{"findings", "List, show and record feedback on findings from the terminal", cmdFindings},
 	{"mgmt-report", "Render the management summary (HTML file plus plain text)", cmdMgmtReport},
 	{"self-update", "Replace this binary with the latest GitHub release", cmdSelfUpdate},
@@ -47,6 +48,11 @@ func cmdServe(args []string) int {
 
 func cmdUser(args []string) int {
 	runUser(args)
+	return 0
+}
+
+func cmdToken(args []string) int {
+	runToken(args)
 	return 0
 }
 

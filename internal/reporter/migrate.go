@@ -90,6 +90,7 @@ type migration struct {
 // or the full schema.
 var migrations = []migration{
 	{1, "baseline schema", applyBaselineSchema},
+	{2, "api tokens", applyAPITokens},
 }
 
 const baselineSchema = `
@@ -224,4 +225,26 @@ INSERT OR IGNORE INTO schema_version (id, version) VALUES (1, 0);`); err != nil 
 		}
 	}
 	return nil
+}
+
+// Migration 2 (ait srg-Kj5Q8.3): bearer tokens for the sysadmin API. The
+// raw token is never stored, only its sha256; the prefix is the handle a
+// human uses in 'token list' and 'token revoke'.
+const apiTokensSchema = `
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id           INTEGER PRIMARY KEY,
+    user_id      INTEGER NOT NULL REFERENCES users(id),
+    token_hash   TEXT NOT NULL UNIQUE,   -- sha256 hex of the raw token
+    token_prefix TEXT NOT NULL,          -- first 8 chars of the raw token
+    created_at   TEXT NOT NULL,          -- RFC3339 UTC
+    last_used_at TEXT,                   -- NULL until the first API call
+    expires_at   TEXT,                   -- NULL = never; RFC3339 UTC
+    revoked      INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_api_tokens_prefix ON api_tokens (token_prefix);
+`
+
+func applyAPITokens(tx *sql.Tx) error {
+	_, err := tx.Exec(apiTokensSchema)
+	return err
 }
