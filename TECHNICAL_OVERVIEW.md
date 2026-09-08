@@ -58,12 +58,15 @@ internal/reporter/
   librarystore.go           the findings library: runs/findings/feedback/users
                             tables, search, feedback upserts (same SQLite file
                             as the aggregates)
-internal/web/               serve mode: stdlib+htmx findings UI, auth seam
+internal/web/               serve mode: stdlib+htmx findings UI, auth seam,
+                            and the bearer-token sysadmin API under /api/
                             (none/local drivers), hot-reloading TLS; templates
                             and static assets embedded via go:embed
 internal/cli/               the findings subcommands (list/show/feedback) and
                             the argparse-style flag helper
 internal/llm/               provider seam: model-string prefix -> official SDK
+skills/syslog-reporter/     Claude Code skill: the sysadmin API's endpoints,
+                            JSON shapes and etiquette (the laptop "client")
 tools/elk_dump.py           day-bounded NDJSON dumper for an ELK cluster
                             (stdlib-only python3; runs on any box with read
                             access to the log store)
@@ -214,8 +217,8 @@ stored whole. The library lives in the SAME SQLite file as the aggregates
 standard pragmas (WAL journal, enforced foreign keys, 5s busy timeout) and
 runs a numbered `schema_version` migration ladder shared by the whole
 file; schema changes are new migrations there, never inline DDL. The
-library tables are `runs`, `findings`, `finding_hosts`, `feedback`, and
-`users`.
+library tables are `runs`, `findings`, `finding_hosts`, `feedback`,
+`users`, and `api_tokens` (migration 2).
 
 Capture semantics worth knowing:
 
@@ -255,6 +258,49 @@ anonymous is a single shared voter). A re-vote always updates the verdict,
 and an empty comment on a re-vote KEEPS the existing note - the comment
 box is deliberately never prefilled, so flipping a verdict cannot wipe a
 voter's own note. There is no comment-clearing path.
+
+### The sysadmin API
+
+`/api/` paths on the same `serve` process take a separate middleware stack
+(`apiauth.go`): bearer-token auth only, no CSRF guard, no cookie session,
+whatever `--auth` says. A token is 32 random bytes shown once; the
+`api_tokens` table keeps its sha256, an 8-character prefix as the human
+handle, the owning user, `last_used_at` (touched on every call),
+`expires_at` and a revoked flag. `token create|list|revoke` manages them
+on the box. Absent, revoked and expired tokens all get the same 401.
+
+Routes (`api.go`, `apiwrite.go`); every response is JSON, every error is
+`{"error": "..."}`:
+
+- `GET /api/me` - the token's user, prefix and expiry (the skill's probe)
+- `GET /api/findings` - `SearchFindings` with the CLI's filters as query
+  parameters (`host`, `service`, `severity`, `kind`, `q`, `since`,
+  `until`, `limit` capped at 500, `offset`)
+- `GET /api/findings/{id}` - `FindingDetail` plus its feedback rows
+- `POST /api/findings/{id}/feedback` - `verdict`, `comment`; the token's
+  user is the voter
+- `POST /api/findings/{id}/mute` - `reason` (one line, 200 characters),
+  optional `expires`. `DeriveKnownEntries` (`knownsmute.go`) turns the
+  finding into one host+program entry per affected host: an anomaly names
+  both directly; an issue's program is parsed from its example log line,
+  falling back to `affected_service` only when that already looks like a
+  program token, else 422. `AppendKnownEntries` writes them to the
+  known-knowns TOML (`serve --known-knowns` / `SYSLOG_KNOWN_KNOWNS`, the
+  file `run` reads) via temp file and rename, re-parsing before the
+  rename, and skips entries already active (all skipped is a 409). The
+  reason is stamped `(finding N, muted by <user> via API)`. A per-token
+  fixed-window cap (`SYSLOG_API_MUTE_LIMIT` per 24 hours, default 20)
+  answers 429 with `Retry-After`
+- `GET /api/runs` - `ListRuns` over a date range (default last 30 days)
+  with per-run finding counts
+- `GET /api/aggregates` - `DailyTotals`: the aggregates table summed
+  over time-of-day windows for `since`..`until` (both required, at most
+  366 days), optionally narrowed to an exact `host` and/or `program`
+
+The client is curl plus the Claude skill in `skills/syslog-reporter/`
+(ant ADR srg-yYpms: no client binary, since managed laptops refuse
+unsigned binaries; no MCP, since Claude Code drives curl directly). The
+login throttle and the mute cap share one `windowCounter` (`throttle.go`).
 
 ### Auth modes
 

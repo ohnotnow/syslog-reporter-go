@@ -52,8 +52,14 @@ internal/reporter/
   capture.go                files one run's findings into the library
   librarystore.go           findings library store (runs/findings/feedback/users)
   apitokens.go              sysadmin API bearer tokens (sha256 + 8-char prefix)
+  knownsmute.go             mute-by-finding-id: derive host+program entries
+                            from a finding, append them to the TOML atomically
   mgmtreport.go             management summary (HTML + plain text)
-internal/web/               serve mode: findings UI, auth seam, hot-reload TLS
+internal/web/               serve mode: findings UI, auth seam, hot-reload TLS,
+                            and the bearer-token JSON API under /api/
+                            (apiauth.go, api.go, apiwrite.go)
+skills/syslog-reporter/     Claude Code skill for the API; the team's only
+                            "client" (curl + this file), see README
 internal/cli/               findings subcommands + ParseFlagsAnywhere
 internal/llm/               provider seam: litellm-style prefix -> official SDK
 tools/elk_dump.py           ELK NDJSON dumper (stdlib-only python3; runs on

@@ -163,6 +163,68 @@ with no login; for a shared box there is a local-accounts mode
 [HOW_IT_WORKS.md](HOW_IT_WORKS.md) for a tour with screenshots and
 [TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md) for the full reference.
 
+## The sysadmin API
+
+The same `serve` process exposes a small JSON API under `/api/`, so the
+team can query and act on findings from Claude Code (or plain curl)
+without installing anything on their own machines. Reads: findings with
+the same filters as the CLI, one finding in full, the daily runs, and
+per-day line counts for trend questions. Writes: record feedback, and
+mute a finding by its number. A mute takes only a reason; the server
+works out the host and program from the finding and appends the entry to
+the known-knowns file, so nobody sends a regex over the network.
+
+Every call needs a personal bearer token, whatever `--auth` the web UI
+runs with. An admin mints them on the server:
+
+```bash
+./syslog-reporter token create jbloggs --expires 2027-01-31   # prints the token once
+./syslog-reporter token list                                   # who has one, last used, expiry
+./syslog-reporter token revoke 5210c8e0                        # by the 8-character prefix
+```
+
+Each person then sets two environment variables and can check them with:
+
+```bash
+export SYSLOG_API_URL=http://reports.example.test:7373
+export SYSLOG_API_TOKEN=...
+curl -sS -H "Authorization: Bearer $SYSLOG_API_TOKEN" "$SYSLOG_API_URL/api/me"
+```
+
+The daily email prints a `syslog-mute 1234 "reason"` line under each
+finding. That is a shell function, not a command in the binary; paste
+one of these into your shell profile:
+
+```bash
+# bash / zsh (~/.bashrc or ~/.zshrc)
+syslog-mute() {
+  curl -sS -X POST -H "Authorization: Bearer $SYSLOG_API_TOKEN" \
+    --data-urlencode "reason=$2" \
+    "$SYSLOG_API_URL/api/findings/$1/mute"
+  echo
+}
+```
+
+```powershell
+# PowerShell ($PROFILE)
+function syslog-mute($id, $reason) {
+  Invoke-RestMethod -Method Post -Uri "$env:SYSLOG_API_URL/api/findings/$id/mute" `
+    -Headers @{ Authorization = "Bearer $env:SYSLOG_API_TOKEN" } `
+    -Body @{ reason = $reason }
+}
+```
+
+Mutes made this way record who made them and which finding they came
+from, and each token gets twenty a day (`SYSLOG_API_MUTE_LIMIT`).
+
+For Claude Code, copy [skills/syslog-reporter](skills/syslog-reporter)
+into `~/.claude/skills/` and ask in plain words: "what did the syslog
+report find today?", "look at finding 1234", "mute the dhcp one on
+dhcp01, it has no pool by design". The skill carries the endpoint list,
+the JSON shapes and the etiquette (read a finding before muting it,
+always confirm, never invent a reason). The full endpoint reference is in
+[TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md).
+
 ## The management report
 
 Once a few weeks of history have accumulated, the same binary can render
