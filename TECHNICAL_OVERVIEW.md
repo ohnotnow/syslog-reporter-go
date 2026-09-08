@@ -106,10 +106,12 @@ Anomaly detection runs on the RAW log, upstream of the filter, so it can see
 the high-volume programs the denylist removes. Everything else runs on the
 filtered log.
 
-Operator-acknowledged "known knowns" (a gitignored TOML file) apply in two
-places: the filter drops matching lines host-aware, and matching
-(host, program) anomalies are muted before the explainer spends LLM money.
-Suppression stays visible: the report footer lists which entries fired and
+Operator-acknowledged "known knowns" (a gitignored TOML file, format in
+[GETTING_STARTED.md](GETTING_STARTED.md#ignoring-things-you-already-know-about))
+apply in two places: the filter drops lines host-aware (a `match` entry
+drops the lines its regex matches, a `program` entry drops every line from
+that program), and matching (host, program) anomalies are muted before the
+explainer spends LLM money. Suppression stays visible: the report footer lists which entries fired and
 flags lapsed ones. Expiry compares against the slice date, not the wall
 clock, so backfills behave historically.
 
@@ -467,7 +469,8 @@ Read from the environment or a `.env` beside the working directory
   at runtime - the home for estate-identifying entries (hostnames, internal
   IPs) so the committed filter stays estate-neutral
 - `SYSLOG_KNOWN_KNOWNS` path to the known-knowns TOML (default
-  `known_knowns.toml`; CLI `--known-knowns` overrides; missing file means none)
+  `known_knowns.toml`; CLI `--known-knowns` overrides; missing file means
+  none; format in GETTING_STARTED.md)
 - `SYSLOG_WEB_LISTEN` serve mode's host:port (default `127.0.0.1:7373`)
 - `SYSLOG_WEB_TLS_CERT` / `SYSLOG_WEB_TLS_KEY` certificate pair for HTTPS
 - `SYSLOG_WEB_SECURE_COOKIES` set to `1` to force the session cookie's

@@ -101,7 +101,9 @@ estate, and `--dump-filtered` shows exactly what they are letting
 through. `./syslog-reporter --help` lists every command and
 `./syslog-reporter run --help` every batch flag;
 [TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md) has the full flag and
-environment-variable reference and the known-knowns suppression file.
+environment-variable reference, and
+[GETTING_STARTED.md](GETTING_STARTED.md#ignoring-things-you-already-know-about)
+explains the known-knowns file that mutes your estate's expected oddities.
 
 Not sure which model combination to use? `eval` runs the detection,
 deduplication and resolution stages over a small bundled log sample, using

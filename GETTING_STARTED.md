@@ -129,6 +129,61 @@ _Note: Replace unit placeholders only after identifying the actual runaway unit;
 - `mgmt-report` renders a weekly or monthly management summary.
 - `--help` on any command for more details.
 
+## Ignoring things you already know about
+
+Every estate has oddities that are expected, not wrong: the DHCP server
+with no pool by design, the lab box with a raw socket held open for an
+instrument. Once they have been eye-rolled at, they should stop appearing
+in every report. That is what the known-knowns file is for.
+
+It is a TOML file called `known_knowns.toml` in the working directory
+(`/var/lib/syslog-reporter` when you deploy with the helper scripts). Point
+somewhere else with `--known-knowns` or `SYSLOG_KNOWN_KNOWNS`. It is
+gitignored because it names your real hosts, and a missing file simply
+means nothing is suppressed.
+
+```toml
+[[known]]
+host = "dhcp01.example.test"    # glob: "dhcp01.example.test", "lab*", or "*"
+program = "dhcpd"               # glob; drops dhcpd's lines on the host and
+                                # mutes its unusual-activity entries
+reason = "no pool on this box by design, the leases warning is expected"
+added = 2026-09-08
+
+[[known]]
+host = "*"
+match = "port 1234"             # regex on the message; drops only matching lines
+reason = "microscope controller keeps a raw socket open"
+added = 2026-09-08
+expires = 2027-01-31            # entry lapses after this log-slice date
+```
+
+Field by field:
+
+- `host` (required) - a glob matched against the hostname as it appears in
+  the log.
+- `program` - a glob matched against the syslog program token (`dhcpd` in
+  `dhcpd[712]: ...`). Drops every line from that program on the host and
+  mutes that host/program pair in the unusual-activity section.
+- `match` - a regular expression (Go RE2 syntax) applied to the message
+  after the hostname. Drops only the lines it matches.
+- `reason` (required) - why, in your words. It is shown in the report
+  footer when the entry fires, so write it for a colleague.
+- `added` - a date, for your own bookkeeping.
+- `expires` - a date after which the entry stops applying. Judged against
+  the date of the log slice being processed, not today, so a backfill of
+  old days behaves as it would have at the time.
+
+Every entry needs a `reason` and at least one of `program` or `match`. In
+one line: host plus program mutes the lot; host plus match mutes specific
+lines.
+
+Suppression is never silent. The report footer lists which entries fired
+and how many have lapsed. A regex that does not compile fails the run at
+startup rather than quietly matching nothing. `--dump-filtered` prints what
+survives the filter, which is the quickest way to check an entry does what
+you meant.
+
 ## Running unattended
 
 The daily run is a cron job. `--out-dir` keeps the report file drops out
