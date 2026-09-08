@@ -7,13 +7,16 @@ package reporter
 //
 //	[[known]]
 //	host = "blah"              # glob pattern: "blah", "lab*", or "*"
-//	match = "port 1234"        # optional: regex, applied after the hostname
-//	program = "kernel"         # optional: glob, mutes (host, program) anomalies
+//	match = "port 1234"        # optional: regex on the message; drops only matching lines
+//	program = "kernel"         # optional: glob; drops the program's lines on the host
+//	                           #   AND mutes its (host, program) anomalies
 //	reason = "microscope attached for the optics experiment"
 //	added = 2026-08-27
 //	expires = 2030-09-01       # optional: entry lapses after this slice date
 //
-// Each entry needs a reason and at least one of match / program. Expiry is
+// Each entry needs a reason and at least one of match / program. Host plus
+// program mutes the lot; host plus match mutes specific lines (ant ADR
+// srg-zX4An, owner decision 2026-09-08). Expiry is
 // judged against the date of the log slice being processed, not the wall
 // clock, so historical backfills behave historically.
 
@@ -138,14 +141,30 @@ func LoadKnownKnowns(tomlPath string, logDate time.Time) (*KnownKnowns, error) {
 	return NewKnownKnowns(entries, logDate), nil
 }
 
-// LineIgnored reports whether a line from host (message = everything after
-// the hostname, i.e. program + text) matches an active entry.
-func (k *KnownKnowns) LineIgnored(host, message string) bool {
+// LineIgnored reports whether an active entry drops this line from host. A
+// match entry drops the lines its regex matches; a program-only entry drops
+// every line from that program. program is the token ParseLine extracts,
+// or "" for a line it cannot parse, so program entries never fire on odd
+// lines. First hit wins and is counted for the report footer.
+func (k *KnownKnowns) LineIgnored(host, program, message string) bool {
 	for _, e := range k.Active {
-		if e.matchRe != nil && e.matchesHost(host) && e.matchRe.MatchString(message) {
-			e.Hits++
-			return true
+		if !e.matchesHost(host) {
+			continue
 		}
+		switch {
+		case e.matchRe != nil:
+			if !e.matchRe.MatchString(message) {
+				continue
+			}
+		case program == "":
+			continue
+		default:
+			if ok, err := path.Match(e.Program, program); err != nil || !ok {
+				continue
+			}
+		}
+		e.Hits++
+		return true
 	}
 	return false
 }

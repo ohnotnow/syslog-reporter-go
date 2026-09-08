@@ -75,10 +75,10 @@ func TestKnownsExpiryJudgedAgainstSliceDateNotToday(t *testing.T) {
 func TestKnownsLineIgnoredScopesToTheHost(t *testing.T) {
 	kk := NewKnownKnowns([]*KnownEntry{
 		mustEntry(t, "scopebox", "microscope", "port 1234", "", nil)}, sliceDate)
-	if !kk.LineIgnored("scopebox", "widgetd[9]: retry on port 1234") {
+	if !kk.LineIgnored("scopebox", "", "widgetd[9]: retry on port 1234") {
 		t.Error("expected match on scopebox")
 	}
-	if kk.LineIgnored("otherbox", "widgetd[9]: retry on port 1234") {
+	if kk.LineIgnored("otherbox", "", "widgetd[9]: retry on port 1234") {
 		t.Error("expected no match on otherbox")
 	}
 }
@@ -86,10 +86,10 @@ func TestKnownsLineIgnoredScopesToTheHost(t *testing.T) {
 func TestKnownsHostIsAGlobPattern(t *testing.T) {
 	kk := NewKnownKnowns([]*KnownEntry{
 		mustEntry(t, "lab*", "lab kit", "usb reset", "", nil)}, sliceDate)
-	if !kk.LineIgnored("lab042", "kernel: usb reset") {
+	if !kk.LineIgnored("lab042", "", "kernel: usb reset") {
 		t.Error("expected lab* to match lab042")
 	}
-	if kk.LineIgnored("office1", "kernel: usb reset") {
+	if kk.LineIgnored("office1", "", "kernel: usb reset") {
 		t.Error("expected lab* not to match office1")
 	}
 }
@@ -97,7 +97,7 @@ func TestKnownsHostIsAGlobPattern(t *testing.T) {
 func TestKnownsStarHostMatchesEverywhere(t *testing.T) {
 	kk := NewKnownKnowns([]*KnownEntry{
 		mustEntry(t, "*", "fleet-wide", "widget spam", "", nil)}, sliceDate)
-	if !kk.LineIgnored("anybox", "widgetd: widget spam") {
+	if !kk.LineIgnored("anybox", "", "widgetd: widget spam") {
 		t.Error("expected * to match any host")
 	}
 }
@@ -127,9 +127,9 @@ func TestKnownsMatchOnlyEntryNeverMutesAnomalies(t *testing.T) {
 func TestKnownsHitsAreCountedPerEntry(t *testing.T) {
 	entry := mustEntry(t, "scopebox", "microscope", "port 1234", "", nil)
 	kk := NewKnownKnowns([]*KnownEntry{entry}, sliceDate)
-	kk.LineIgnored("scopebox", "retry on port 1234")
-	kk.LineIgnored("scopebox", "retry on port 1234")
-	kk.LineIgnored("otherbox", "retry on port 1234") // no match, no hit
+	kk.LineIgnored("scopebox", "", "retry on port 1234")
+	kk.LineIgnored("scopebox", "", "retry on port 1234")
+	kk.LineIgnored("otherbox", "", "retry on port 1234") // no match, no hit
 	if entry.Hits != 2 {
 		t.Errorf("hits = %d, want 2", entry.Hits)
 	}
@@ -224,5 +224,55 @@ func TestNoKnownsChangesNothing(t *testing.T) {
 	}
 	if got := NewLogFilter(lines, nil).Run(); !reflect.DeepEqual(got, lines) {
 		t.Errorf("got %#v, want unchanged", got)
+	}
+}
+
+func TestKnownsProgramEntryDropsThatProgramsLinesOnTheHost(t *testing.T) {
+	entry := mustEntry(t, "dhcp01.example.test", "no pool by design", "", "dhcpd", nil)
+	kk := NewKnownKnowns([]*KnownEntry{entry}, sliceDate)
+	if !kk.LineIgnored("dhcp01.example.test", "dhcpd", "dhcpd[7]: no free leases") {
+		t.Error("expected drop for dhcpd on the named host")
+	}
+	if kk.LineIgnored("dhcp02.example.test", "dhcpd", "dhcpd[7]: no free leases") {
+		t.Error("expected no drop on another host")
+	}
+	if kk.LineIgnored("dhcp01.example.test", "sshd", "sshd[9]: session opened") {
+		t.Error("expected no drop for another program")
+	}
+	if entry.Hits != 1 {
+		t.Errorf("hits = %d, want 1", entry.Hits)
+	}
+}
+
+func TestKnownsProgramEntryHostIsAGlob(t *testing.T) {
+	kk := NewKnownKnowns([]*KnownEntry{
+		mustEntry(t, "dhcp*", "lab dhcp boxes", "", "dhcpd", nil)}, sliceDate)
+	if !kk.LineIgnored("dhcp07.example.test", "dhcpd", "dhcpd[7]: no free leases") {
+		t.Error("expected glob host to match")
+	}
+	if kk.LineIgnored("web01.example.test", "dhcpd", "dhcpd[7]: no free leases") {
+		t.Error("expected glob host not to match")
+	}
+}
+
+func TestKnownsProgramEntryNeverFiresOnAnUnparsedLine(t *testing.T) {
+	kk := NewKnownKnowns([]*KnownEntry{
+		mustEntry(t, "*", "everything dhcpd", "", "dhcpd", nil)}, sliceDate)
+	if kk.LineIgnored("dhcp01.example.test", "", "dhcpd[7]: no free leases") {
+		t.Error("an empty program token must not match a program entry")
+	}
+}
+
+func TestKnownsEntryWithMatchAndProgramLetsTheRegexDecideLines(t *testing.T) {
+	kk := NewKnownKnowns([]*KnownEntry{
+		mustEntry(t, "scopebox", "microscope", "port 1234", "widgetd", nil)}, sliceDate)
+	if kk.LineIgnored("scopebox", "widgetd", "widgetd[9]: started") {
+		t.Error("a non-matching widgetd line must survive when match is set")
+	}
+	if !kk.LineIgnored("scopebox", "widgetd", "widgetd[9]: retry on port 1234") {
+		t.Error("the matching line must drop")
+	}
+	if !kk.AnomalyMuted("scopebox", "widgetd") {
+		t.Error("program still mutes the anomaly")
 	}
 }

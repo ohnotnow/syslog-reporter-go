@@ -6,6 +6,7 @@ package reporter
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -99,5 +100,29 @@ func TestErrorShapedLinesStillSurvive(t *testing.T) {
 		if got := filterOne(t, line); !reflect.DeepEqual(got, []string{line}) {
 			t.Errorf("expected %q kept, got %#v", line, got)
 		}
+	}
+}
+
+func TestProgramOnlyKnownEntryDropsLinesThroughTheFilter(t *testing.T) {
+	entry := mustEntry(t, "dhcp01.example.test", "no pool by design", "", "dhcpd", nil)
+	knowns := NewKnownKnowns([]*KnownEntry{entry}, sliceDate)
+	lines := []string{
+		"Aug 26 14:00:05 dhcp01.example.test dhcpd[7]: DHCPDISCOVER from 00:11:22:33:44:55: no free leases",
+		"Aug 26 14:00:06 dhcp02.example.test dhcpd[8]: DHCPDISCOVER from 00:11:22:33:44:66: no free leases",
+		"Aug 26 14:00:07 dhcp01.example.test sshd[9]: error: kex_exchange_identification: read: Connection reset",
+		"malformed line from dhcp01.example.test dhcpd: no free leases",
+	}
+	// Run() also normalises surviving lines, so pin the drop, not the text.
+	got := NewLogFilter(lines, knowns).Run()
+	if len(got) != 3 {
+		t.Errorf("kept %d lines, want 3: %#v", len(got), got)
+	}
+	for _, line := range got {
+		if strings.HasPrefix(line, "Aug 26 14:00:05 dhcp01.example.test dhcpd") {
+			t.Errorf("the dhcp01 dhcpd line should have been dropped: %q", line)
+		}
+	}
+	if entry.Hits != 1 {
+		t.Errorf("hits = %d, want 1", entry.Hits)
 	}
 }

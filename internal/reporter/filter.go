@@ -75,9 +75,19 @@ func (f *LogFilter) removeKnownLines(lines []string) []string {
 	}
 	kept := make([]string, 0, len(lines))
 	for _, line := range lines {
-		// Syslog format: "Month Day Time hostname message"
+		// Syslog format: "Month Day Time hostname message". ParseLine
+		// supplies the program token for program-only entries; a line it
+		// rejects still gets the host + message check for match entries.
 		parts := splitWS(line, 4)
-		if len(parts) >= 5 && f.knowns.LineIgnored(parts[3], parts[4]) {
+		if len(parts) < 5 {
+			kept = append(kept, line)
+			continue
+		}
+		program := ""
+		if p := ParseLine(line); p != nil {
+			program = p.Program
+		}
+		if f.knowns.LineIgnored(parts[3], program, parts[4]) {
 			continue
 		}
 		kept = append(kept, line)

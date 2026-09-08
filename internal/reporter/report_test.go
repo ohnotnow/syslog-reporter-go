@@ -233,7 +233,7 @@ func knownsReport(knowns *KnownKnowns) *ReportAgent {
 func TestFiredKnownEntriesAppearInBodyAndFullReport(t *testing.T) {
 	entry := mustEntry(t, "scopebox", "microscope kit", "port 1234", "", nil)
 	knowns := NewKnownKnowns([]*KnownEntry{entry}, day(2026, 8, 27))
-	knowns.LineIgnored("scopebox", "retry on port 1234")
+	knowns.LineIgnored("scopebox", "", "retry on port 1234")
 
 	rep := knownsReport(knowns)
 	for _, text := range []string{rep.EmailBody(), rep.Run()} {
