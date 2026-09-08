@@ -233,7 +233,7 @@ function syslog-mute($id, $reason) {
   }
   Invoke-RestMethod -Method Post -Uri "$env:SYSLOG_API_URL/api/findings/$id/mute" `
     -Headers @{ Authorization = "Bearer $env:SYSLOG_API_TOKEN" } `
-    -Body @{ reason = $reason }
+    -Body @{ reason = $reason } -SkipHttpErrorCheck
 }
 ```
 
