@@ -198,6 +198,17 @@ one of these into your shell profile:
 ```bash
 # bash / zsh (~/.bashrc or ~/.zshrc)
 syslog-mute() {
+  if [ -z "$SYSLOG_API_URL" ] || [ -z "$SYSLOG_API_TOKEN" ]; then
+    echo "syslog-mute: set SYSLOG_API_URL and SYSLOG_API_TOKEN first (see README, The sysadmin API)" >&2
+    return 2
+  fi
+  case "$1" in
+    ''|*[!0-9]*) echo "usage: syslog-mute <finding-id> \"reason\"" >&2; return 2 ;;
+  esac
+  if [ -z "$2" ]; then
+    echo "syslog-mute: a reason is required, e.g. syslog-mute $1 \"dhcpd has no pool on this box\"" >&2
+    return 2
+  fi
   curl -sS -X POST -H "Authorization: Bearer $SYSLOG_API_TOKEN" \
     --data-urlencode "reason=$2" \
     "$SYSLOG_API_URL/api/findings/$1/mute"
@@ -208,6 +219,18 @@ syslog-mute() {
 ```powershell
 # PowerShell ($PROFILE)
 function syslog-mute($id, $reason) {
+  if (-not $env:SYSLOG_API_URL -or -not $env:SYSLOG_API_TOKEN) {
+    Write-Error "syslog-mute: set SYSLOG_API_URL and SYSLOG_API_TOKEN first (see README, The sysadmin API)"
+    return
+  }
+  if ($id -notmatch '^[0-9]+$') {
+    Write-Error 'usage: syslog-mute <finding-id> "reason"'
+    return
+  }
+  if (-not $reason) {
+    Write-Error "syslog-mute: a reason is required, e.g. syslog-mute $id `"dhcpd has no pool on this box`""
+    return
+  }
   Invoke-RestMethod -Method Post -Uri "$env:SYSLOG_API_URL/api/findings/$id/mute" `
     -Headers @{ Authorization = "Bearer $env:SYSLOG_API_TOKEN" } `
     -Body @{ reason = $reason }
