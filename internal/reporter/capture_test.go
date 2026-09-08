@@ -5,6 +5,7 @@ package reporter
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -235,4 +236,34 @@ func readFindingIDs(t *testing.T, lib *LibraryStore) []int64 {
 		t.Fatal(err)
 	}
 	return out
+}
+
+func TestCaptureRunHandsBackFindingIdsAndKeepsThemOutOfPayloads(t *testing.T) {
+	lib := newTestLibrary(t)
+	sample := sampleIssuePayload()
+	issue := sample.Issue
+	anom := sampleAnomaly()
+	if issue.ID != 0 || anom.ID != 0 {
+		t.Fatal("fixtures should start without ids")
+	}
+	if err := CaptureRun(lib, day(2026, 6, 1), "openai/gpt-test", 1, 1,
+		&IssueList{Issues: []*Issue{&issue}}, nil, []*ExplainedAnomaly{anom}); err != nil {
+		t.Fatal(err)
+	}
+	if issue.ID == 0 || anom.ID == 0 || issue.ID == anom.ID {
+		t.Errorf("ids = %d / %d, want two distinct non-zero ids", issue.ID, anom.ID)
+	}
+	for _, id := range []int64{issue.ID, anom.ID} {
+		d, err := lib.GetFinding(id)
+		if err != nil {
+			t.Fatalf("finding %d not readable: %v", id, err)
+		}
+		var payload string
+		if err := lib.db.QueryRow("SELECT payload FROM findings WHERE id = ?", id).Scan(&payload); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(payload, `"ID"`) || strings.Contains(payload, `"id"`) {
+			t.Errorf("finding %d payload carries an id field: %s", d.ID, payload)
+		}
+	}
 }

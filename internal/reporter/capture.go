@@ -39,17 +39,39 @@ func CaptureRun(lib *LibraryStore, logDate time.Time, model string,
 	if issues != nil {
 		for _, issue := range issues.Issues {
 			payload := IssuePayload{Issue: *issue, Resolution: byIssue[issue.Issue]}
-			if _, err := addFinding(tx, runID, "issue", issue.Severity, issue.Issue,
-				issue.AffectedService, issue.AffectedHost, payload); err != nil {
+			id, err := addFinding(tx, runID, "issue", issue.Severity, issue.Issue,
+				issue.AffectedService, issue.AffectedHost, payload)
+			if err != nil {
 				return err
 			}
+			issue.ID = id
 		}
 	}
 	for _, a := range anomalies {
-		if _, err := addFinding(tx, runID, a.Kind, "", a.Headline, a.Program,
-			[]string{a.Host}, a); err != nil {
+		id, err := addFinding(tx, runID, a.Kind, "", a.Headline, a.Program,
+			[]string{a.Host}, a)
+		if err != nil {
 			return err
 		}
+		a.ID = id
 	}
-	return tx.Commit()
+	// Ids are only real once the transaction lands; a rollback must not
+	// leave the report advertising finding numbers that do not exist.
+	if err := tx.Commit(); err != nil {
+		for _, issue := range issuesOf(issues) {
+			issue.ID = 0
+		}
+		for _, a := range anomalies {
+			a.ID = 0
+		}
+		return err
+	}
+	return nil
+}
+
+func issuesOf(l *IssueList) []*Issue {
+	if l == nil {
+		return nil
+	}
+	return l.Issues
 }

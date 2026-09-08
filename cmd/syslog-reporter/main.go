@@ -858,25 +858,11 @@ func run(cfg runConfig) {
 		log.Info("LLM usage: %d prompt tokens, %d completion tokens", usage.PromptTokens, usage.CompletionTokens)
 	}
 
-	// Generate the report: a short digest for the email body, and the full
-	// findings as an attachment.
-	log.Info("Generating report")
-	rep := &reporter.ReportAgent{
-		Issues:      issues,
-		Resolutions: resolutions,
-		Anomalies:   explained,
-		LLMSkipped:  !cfg.llmOn,
-		Model:       modelLabel,
-		Knowns:      knowns,
-		LogDate:     logDate,
-	}
-	fullReport := rep.Run()
-	emailBody := rep.EmailBody()
-	log.Debug("Generated report")
-
 	// Persist this run's findings into the library (same SQLite file as the
-	// aggregates) so history accumulates before any UI exists. A capture
-	// failure costs the library one day, not the report or the email.
+	// aggregates) BEFORE rendering: capture hands each finding its library
+	// id, which the digest prints alongside a paste-ready mute line (ait
+	// srg-Kj5Q8.7). A capture failure costs the library one day and the
+	// ids, not the report or the email.
 	if cfg.storeOn {
 		captureModel := modelLabel
 		if !cfg.llmOn {
@@ -897,6 +883,23 @@ func run(cfg runConfig) {
 	} else {
 		log.Info("--no-store: skipping findings capture")
 	}
+
+	// Generate the report: a short digest for the email body, and the full
+	// findings as an attachment.
+	log.Info("Generating report")
+	rep := &reporter.ReportAgent{
+		Issues:      issues,
+		Resolutions: resolutions,
+		Anomalies:   explained,
+		LLMSkipped:  !cfg.llmOn,
+		Model:       modelLabel,
+		RepoURL:     selfupdate.RepoURL,
+		Knowns:      knowns,
+		LogDate:     logDate,
+	}
+	fullReport := rep.Run()
+	emailBody := rep.EmailBody()
+	log.Debug("Generated report")
 
 	// The report files are the artefact cron archives and what survives a
 	// failed send; --out-dir places them, defaulting to the working

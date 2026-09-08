@@ -42,6 +42,9 @@ type ReportAgent struct {
 	// as a footer so teams comparing models can tell reports apart (owner
 	// decision 2026-08-28). Empty or --no-llm means no footer.
 	Model string
+	// RepoURL is where the README lives; the mute-line footer links to its
+	// sysadmin API section. Empty suppresses that footer.
+	RepoURL string
 	// Optional KnownKnowns: suppression must stay visible in the report, or
 	// a muted entry can quietly become a real fault nobody looks at.
 	Knowns *KnownKnowns
@@ -109,10 +112,33 @@ func (r *ReportAgent) Run() string {
 			b.WriteString(expiredSentence(expired) + "\n\n")
 		}
 	}
+	if footer := r.muteFooter(r.Issues, r.Anomalies); footer != "" {
+		b.WriteString("\n" + footer)
+	}
 	if footer := r.modelFooter(); footer != "" {
 		b.WriteString("\n---\n\n" + footer)
 	}
 	return b.String()
+}
+
+// muteFooter explains the syslog-mute lines, once, when any rendered
+// finding carried one.
+func (r *ReportAgent) muteFooter(issues *IssueList, anomalies []*ExplainedAnomaly) string {
+	if r.RepoURL == "" {
+		return ""
+	}
+	any := false
+	for _, i := range issuesOf(issues) {
+		any = any || i.ID != 0
+	}
+	for _, a := range anomalies {
+		any = any || a.ID != 0
+	}
+	if !any {
+		return ""
+	}
+	return "_syslog-mute is a shell function; see " + r.RepoURL +
+		"/blob/master/README.md#the-sysadmin-api to set it up._\n"
 }
 
 // EvalFragment renders just the issue/resolution half of a report for the
@@ -172,7 +198,7 @@ func (r *ReportAgent) emailBodyN(topIssues, topAnomalies int) string {
 		if i.OS != "" {
 			fmt.Fprintf(&b, " · **OS:** %s", i.OS)
 		}
-		b.WriteString("\n\n")
+		b.WriteString(findingTag(i.ID) + "\n\n")
 		b.WriteString(i.Description + "\n\n")
 		// The verbatim log line goes before the resolution: the resolution
 		// writer refers back to "the supplied example", so the reader must
@@ -199,14 +225,14 @@ func (r *ReportAgent) emailBodyN(topIssues, topAnomalies int) string {
 		} else {
 			b.WriteString("👉 " + i.RecommendedAction + "\n")
 		}
-		b.WriteString("\n")
+		b.WriteString(muteParagraph(i.ID) + "\n")
 	}
 
 	if len(anomalies) > 0 {
 		fmt.Fprintf(&b, "## Unusual activity (top %d)\n\n", len(anomalies))
 		b.WriteString("Hosts behaving unlike their peers or their own recent normal - worth a glance.\n\n")
 		for _, a := range anomalies {
-			fmt.Fprintf(&b, "### %s / %s\n\n", a.Host, a.Program)
+			fmt.Fprintf(&b, "### %s / %s%s\n\n", a.Host, a.Program, headingID(a.ID))
 			fmt.Fprintf(&b, "_%s_ (%s)\n\n", a.Headline, a.OSFamily)
 			b.WriteString(a.Detail + "\n\n")
 			b.WriteString(a.LikelyCauses + "\n\n")
@@ -217,7 +243,7 @@ func (r *ReportAgent) emailBodyN(topIssues, topAnomalies int) string {
 				}
 				b.WriteString("```\n")
 			}
-			b.WriteString("\n")
+			b.WriteString(muteParagraph(a.ID) + "\n")
 		}
 	}
 
@@ -233,6 +259,9 @@ func (r *ReportAgent) emailBodyN(topIssues, topAnomalies int) string {
 	}
 	if expired := r.expiredCount(); expired > 0 {
 		b.WriteString("\n_" + expiredSentence(expired) + "_\n")
+	}
+	if footer := r.muteFooter(&IssueList{Issues: issues}, anomalies); footer != "" {
+		b.WriteString("\n" + footer)
 	}
 	if footer := r.modelFooter(); footer != "" {
 		b.WriteString("\n" + footer)

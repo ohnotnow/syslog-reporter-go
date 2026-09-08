@@ -409,3 +409,66 @@ func TestLookForRendersBetweenInvestigateAndFix(t *testing.T) {
 		t.Error("empty look_for should render nothing in the digest")
 	}
 }
+
+// Finding ids and the syslog-mute line (ait srg-Kj5Q8.7): shown on both
+// layouts only for captured findings, with one footer line explaining the
+// shell function; a run that captured nothing prints none of it.
+func TestFindingIdsAndMuteLinesOnBothLayouts(t *testing.T) {
+	issue := testIssue("disk-full", "critical")
+	issue.ID = 1234
+	anom := testAnomaly()
+	anom.ID = 77
+	rep := &ReportAgent{
+		Issues:      &IssueList{Issues: []*Issue{issue}},
+		Resolutions: &ResolutionList{Resolutions: []*Resolution{testResolution("disk-full")}},
+		Anomalies:   []*ExplainedAnomaly{anom},
+		RepoURL:     "https://example.test/repo",
+	}
+	for name, body := range map[string]string{"email": rep.EmailBody(), "full": rep.Run()} {
+		for _, want := range []string{
+			"**Finding:** #1234",
+			`syslog-mute 1234 "why it is expected"`,
+			"(#77)",
+			`syslog-mute 77 "why it is expected"`,
+			"https://example.test/repo/blob/master/README.md#the-sysadmin-api",
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s layout missing %q", name, want)
+			}
+		}
+		if n := strings.Count(body, "syslog-mute is a shell function"); n != 1 {
+			t.Errorf("%s layout has %d mute footers, want 1", name, n)
+		}
+	}
+	// The email puts the mute line after the resolution, not before it.
+	email := rep.EmailBody()
+	if strings.Index(email, "systemctl restart disk-full") > strings.Index(email, "syslog-mute 1234") {
+		t.Error("email mute line should follow the Try block")
+	}
+}
+
+func TestNoIdsMeansNoMuteLinesOrFooter(t *testing.T) {
+	rep := &ReportAgent{
+		Issues:      &IssueList{Issues: []*Issue{testIssue("disk-full", "critical")}},
+		Resolutions: &ResolutionList{Resolutions: []*Resolution{testResolution("disk-full")}},
+		Anomalies:   []*ExplainedAnomaly{testAnomaly()},
+		RepoURL:     "https://example.test/repo",
+	}
+	for name, body := range map[string]string{"email": rep.EmailBody(), "full": rep.Run()} {
+		for _, banned := range []string{"Finding:", "syslog-mute", "(#"} {
+			if strings.Contains(body, banned) {
+				t.Errorf("%s layout with no ids contains %q", name, banned)
+			}
+		}
+	}
+}
+
+func TestMuteFooterNeedsARepoURL(t *testing.T) {
+	issue := testIssue("disk-full", "critical")
+	issue.ID = 5
+	rep := &ReportAgent{Issues: &IssueList{Issues: []*Issue{issue}},
+		Resolutions: &ResolutionList{}}
+	if body := rep.EmailBody(); strings.Contains(body, "shell function") || !strings.Contains(body, "syslog-mute 5") {
+		t.Error("without a RepoURL the mute line stays but the footer link goes")
+	}
+}

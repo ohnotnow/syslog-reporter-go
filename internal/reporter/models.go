@@ -16,6 +16,11 @@ var SeverityRank = map[string]int{"critical": 0, "high": 1, "medium": 2, "low": 
 // decodes straight into these, and the dedupe agent re-serialises them in
 // declared field order.
 type Issue struct {
+	// ID is the findings-library row this issue was captured as, set by
+	// CaptureRun before the report renders so the digest can print it and
+	// a paste-ready mute line (ait srg-Kj5Q8.7). Zero when nothing was
+	// captured (--no-store, or capture failed); never serialised.
+	ID                 int64    `json:"-"`
 	Issue              string   `json:"issue"`
 	Severity           string   `json:"severity"` // critical / high / medium / low
 	Description        string   `json:"description"`
@@ -50,17 +55,37 @@ func (i *Issue) ToMarkdown() string {
 	}
 	return fmt.Sprintf(
 		"## %s\n\n"+
-			"**Severity:** %s · **Service:** %s · **When:** %s\n\n"+
+			"**Severity:** %s · **Service:** %s · **When:** %s%s\n\n"+
 			"%s\n\n"+
 			"- **Affected:** %s\n"+
 			"%s"+
 			"- **Impact:** %s\n"+
 			"- **Recommended action:** %s\n\n"+
 			"**Example log entry:**\n\n"+
-			"```\n%s\n```\n",
-		i.Issue, i.Severity, i.AffectedService, i.TimestampFrequency,
+			"```\n%s\n```\n"+
+			"%s",
+		i.Issue, i.Severity, i.AffectedService, i.TimestampFrequency, findingTag(i.ID),
 		i.Description, i.HostsSummary(), osLine, i.PotentialImpact,
-		i.RecommendedAction, i.ExampleLogEntry)
+		i.RecommendedAction, i.ExampleLogEntry, muteParagraph(i.ID))
+}
+
+// findingTag is the " · **Finding:** #1234" suffix for a captured finding,
+// empty when there is no id to show.
+func findingTag(id int64) string {
+	if id == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" · **Finding:** #%d", id)
+}
+
+// muteParagraph is the paste-ready mute line under a captured finding. The
+// syslog-mute shell function is documented in the README (owner's ask:
+// the email should hand the sysadmin the exact command).
+func muteParagraph(id int64) string {
+	if id == 0 {
+		return ""
+	}
+	return fmt.Sprintf("\nMute this on the affected hosts: `syslog-mute %d \"why it is expected\"`\n", id)
 }
 
 type IssueList struct {
@@ -139,6 +164,7 @@ const DefaultMaxExplain = 15
 // findings library's stored payload format (librarystore.go); renaming any
 // of them needs a migration story, so don't.
 type ExplainedAnomaly struct {
+	ID                 int64    `json:"-"` // findings-library row, as Issue.ID
 	Host               string   `json:"host"`
 	Program            string   `json:"program"`
 	Kind               string   `json:"kind"`     // peer / baseline / temporal
@@ -169,15 +195,24 @@ func (e *ExplainedAnomaly) ToMarkdown() string {
 		example = fmt.Sprintf("**Example:** `%s`\n\n", e.ExampleLine)
 	}
 	return fmt.Sprintf(
-		"### %s - %s\n"+
+		"### %s - %s%s\n"+
 			"**%s** (%s)\n\n"+
 			"%s\n\n"+
 			"%s"+
 			"**Likely causes:** %s\n\n"+
 			"**Investigate:**\n%s\n\n"+
-			"**Suggested commands:**\n%s\n",
-		e.Host, e.Program, e.Headline, e.OSFamily, e.Detail, example,
-		e.LikelyCauses, steps, cmdBlock)
+			"**Suggested commands:**\n%s\n"+
+			"%s",
+		e.Host, e.Program, headingID(e.ID), e.Headline, e.OSFamily, e.Detail, example,
+		e.LikelyCauses, steps, cmdBlock, muteParagraph(e.ID))
+}
+
+// headingID is the " (#1234)" suffix on an anomaly heading.
+func headingID(id int64) string {
+	if id == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (#%d)", id)
 }
 
 // FactsOnly builds ExplainedAnomaly records without any LLM call (--no-llm
