@@ -783,3 +783,88 @@ func TestRemoveUserReassignsVotesToAnonymous(t *testing.T) {
 		t.Error("unknown username should error")
 	}
 }
+
+func TestListRunsFiltersByDateAndCountsFindings(t *testing.T) {
+	lib := newTestLibrary(t)
+	first, err := lib.BeginRun(day(2026, 9, 1), "openai/model-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lib.SetRunStats(first, 1000, 40); err != nil {
+		t.Fatal(err)
+	}
+	anom := &ExplainedAnomaly{Host: "web01.example.test", Program: "sshd", Kind: "peer"}
+	for i := 0; i < 2; i++ {
+		if _, err := lib.AddFinding(first, "peer", "", "loud", "sshd", []string{"web01.example.test"}, anom); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := lib.BeginRun(day(2026, 9, 3), ""); err != nil {
+		t.Fatal(err)
+	}
+	runs, err := lib.ListRuns("2026-09-01", "2026-09-02")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 || runs[0].ID != first || runs[0].Findings != 2 || runs[0].Model != "openai/model-a" {
+		t.Fatalf("runs = %+v", runs)
+	}
+	if runs[0].RawLines == nil || *runs[0].RawLines != 1000 || runs[0].FilteredLines == nil || *runs[0].FilteredLines != 40 {
+		t.Errorf("line stats = %v / %v", runs[0].RawLines, runs[0].FilteredLines)
+	}
+	all, err := lib.ListRuns("", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 || all[1].Model != "" || all[1].RawLines != nil {
+		t.Errorf("open range = %+v", all)
+	}
+}
+
+func TestDailyTotalsSumWindowsAndFilterExactly(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shared.db")
+	agg, err := OpenAggregateStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { agg.Close() })
+	for _, w := range []struct {
+		d      time.Time
+		counts map[AggKey]int
+	}{
+		{day(2026, 9, 1), map[AggKey]int{
+			{"web01.example.test", "sshd", "09:00"}: 5,
+			{"web01.example.test", "sshd", "09:10"}: 7,
+			{"web02.example.test", "cron", "09:00"}: 1}},
+		{day(2026, 9, 2), map[AggKey]int{{"web01.example.test", "sshd", "09:00"}: 2}},
+		{day(2026, 9, 3), map[AggKey]int{{"web01.example.test", "sshd", "09:00"}: 99}},
+	} {
+		if _, err := agg.WriteAggregates(w.d, w.counts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lib := openTestLibrary(t, path)
+	rows, err := lib.DailyTotals(day(2026, 9, 1), day(2026, 9, 2), "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []*DailyTotal{
+		{"2026-09-01", "web01.example.test", "sshd", 12},
+		{"2026-09-01", "web02.example.test", "cron", 1},
+		{"2026-09-02", "web01.example.test", "sshd", 2},
+	}
+	if !reflect.DeepEqual(rows, want) {
+		t.Errorf("rows = %+v", rows)
+	}
+	rows, err = lib.DailyTotals(day(2026, 9, 1), day(2026, 9, 3), "web0", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("host filter must be exact, not a substring: %+v", rows)
+	}
+	rows, _ = lib.DailyTotals(day(2026, 9, 1), day(2026, 9, 3), "web02.example.test", "cron")
+	if len(rows) != 1 || rows[0].Count != 1 {
+		t.Errorf("host+program filter = %+v", rows)
+	}
+}

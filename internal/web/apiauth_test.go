@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,11 +15,23 @@ import (
 	"github.com/ohnotnow/syslog-reporter-go/internal/reporter"
 )
 
-// newAPIServer builds a server in the given auth mode over a fresh store,
-// with one user and one live token, and returns the raw token.
-func newAPIServer(t *testing.T, authMode string) (*httptest.Server, *reporter.LibraryStore, string) {
+// apiFixture is a server in the given auth mode over a fresh store, with
+// one user and one live token (raw is the token as a client would send it).
+type apiFixture struct {
+	ts     *httptest.Server
+	lib    *reporter.LibraryStore
+	raw    string
+	dbPath string
+}
+
+func newAPIServer(t *testing.T, authMode string) apiFixture {
 	t.Helper()
-	lib := newAuthTestStore(t)
+	dbPath := filepath.Join(t.TempDir(), "api.db")
+	lib, err := reporter.OpenLibraryStore(dbPath)
+	if err != nil {
+		t.Fatalf("open library store: %v", err)
+	}
+	t.Cleanup(func() { lib.Close() })
 	createTestUser(t, lib, "opsuser", "correct horse")
 	user, err := lib.UserByUsername("opsuser")
 	if err != nil || user == nil {
@@ -39,7 +52,7 @@ func newAPIServer(t *testing.T, authMode string) (*httptest.Server, *reporter.Li
 	}
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)
-	return ts, lib, raw
+	return apiFixture{ts: ts, lib: lib, raw: raw, dbPath: dbPath}
 }
 
 func apiRequest(t *testing.T, method, url, token string, body string) *http.Response {
@@ -73,7 +86,8 @@ func decodeJSON(t *testing.T, resp *http.Response, v any) {
 }
 
 func TestAPIRefusesMissingBadRevokedAndExpiredTokens(t *testing.T) {
-	ts, lib, raw := newAPIServer(t, "none")
+	f := newAPIServer(t, "none")
+	ts, lib, raw := f.ts, f.lib, f.raw
 	user, _ := lib.UserByUsername("opsuser")
 	past := time.Now().Add(-time.Hour)
 	expiredRaw, _, err := lib.CreateAPIToken(user.ID, &past)
@@ -120,7 +134,8 @@ func TestAPIRefusesMissingBadRevokedAndExpiredTokens(t *testing.T) {
 }
 
 func TestAPIGoodTokenNamesTheUserAndRecordsLastUse(t *testing.T) {
-	ts, lib, raw := newAPIServer(t, "none")
+	f := newAPIServer(t, "none")
+	ts, lib, raw := f.ts, f.lib, f.raw
 	before := time.Now().Add(-time.Second)
 	resp := apiRequest(t, http.MethodGet, ts.URL+"/api/me", raw, "")
 	if resp.StatusCode != http.StatusOK {
@@ -145,7 +160,8 @@ func TestAPIGoodTokenNamesTheUserAndRecordsLastUse(t *testing.T) {
 }
 
 func TestAPIIgnoresSessionCookiesAndCSRF(t *testing.T) {
-	ts, _, raw := newAPIServer(t, "local")
+	f := newAPIServer(t, "local")
+	ts, raw := f.ts, f.raw
 	// A bearer POST from a foreign site is fine: no CSRF on /api/.
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/me", nil)
 	req.Header.Set("Authorization", "Bearer "+raw)

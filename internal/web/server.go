@@ -244,6 +244,10 @@ func New(cfg Config, auth Authenticator, lib *reporter.LibraryStore) (*Server, e
 	s.mux.HandleFunc("POST /findings/{id}/feedback", s.handleFeedback)
 	s.mux.Handle("GET /static/", http.FileServerFS(staticFS))
 	s.mux.HandleFunc("GET /api/me", s.handleMe)
+	s.mux.HandleFunc("GET /api/findings", s.handleAPIFindings)
+	s.mux.HandleFunc("GET /api/findings/{id}", s.handleAPIFinding)
+	s.mux.HandleFunc("GET /api/runs", s.handleAPIRuns)
+	s.mux.HandleFunc("GET /api/aggregates", s.handleAPIAggregates)
 	auth.Routes(s.mux)
 	return s, nil
 }

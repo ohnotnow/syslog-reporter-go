@@ -497,3 +497,100 @@ func (s *LibraryStore) userWhere(cond string, arg any) (*User, error) {
 	}
 	return u, nil
 }
+
+// RunSummary is one runs-table row for the API's runs listing, with the
+// finding count that a "how noisy was this month" question needs.
+type RunSummary struct {
+	ID            int64  `json:"id"`
+	LogDate       string `json:"log_date"`
+	Model         string `json:"model"` // '' for a --no-llm run
+	RawLines      *int   `json:"raw_lines"`
+	FilteredLines *int   `json:"filtered_lines"`
+	Findings      int    `json:"findings"`
+}
+
+// ListRuns returns the runs whose log_date lies in [from, to] (ISO dates,
+// either may be empty for "open"), oldest first.
+func (s *LibraryStore) ListRuns(from, to string) ([]*RunSummary, error) {
+	where := []string{"1=1"}
+	var args []any
+	if from != "" {
+		where = append(where, "r.log_date >= ?")
+		args = append(args, from)
+	}
+	if to != "" {
+		where = append(where, "r.log_date <= ?")
+		args = append(args, to)
+	}
+	rows, err := s.db.Query(
+		"SELECT r.id, r.log_date, COALESCE(r.model, ''), r.raw_lines, r.filtered_lines, "+
+			"(SELECT COUNT(*) FROM findings f WHERE f.run_id = r.id) "+
+			"FROM runs r WHERE "+strings.Join(where, " AND ")+" ORDER BY r.log_date, r.id",
+		args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*RunSummary
+	for rows.Next() {
+		rs := &RunSummary{}
+		var raw, filtered sql.NullInt64
+		if err := rows.Scan(&rs.ID, &rs.LogDate, &rs.Model, &raw, &filtered, &rs.Findings); err != nil {
+			return nil, err
+		}
+		if raw.Valid {
+			v := int(raw.Int64)
+			rs.RawLines = &v
+		}
+		if filtered.Valid {
+			v := int(filtered.Int64)
+			rs.FilteredLines = &v
+		}
+		out = append(out, rs)
+	}
+	return out, rows.Err()
+}
+
+// DailyTotal is one (date, host, program) row of the aggregates table with
+// its time-of-day windows summed: the grain a trend question wants.
+type DailyTotal struct {
+	Date    string `json:"date"`
+	Host    string `json:"host"`
+	Program string `json:"program"`
+	Count   int    `json:"count"`
+}
+
+// DailyTotals reads the aggregates table for [from, to] inclusive, optionally
+// narrowed to one exact host and/or program, ordered by date, host, program.
+// It lives on the library store rather than AggregateStore because serve
+// mode holds one handle on the shared file and this is its only aggregate
+// read.
+func (s *LibraryStore) DailyTotals(from, to time.Time, host, program string) ([]*DailyTotal, error) {
+	where := []string{"date >= ?", "date <= ?"}
+	args := []any{isoDate(from), isoDate(to)}
+	if host != "" {
+		where = append(where, "host = ?")
+		args = append(args, host)
+	}
+	if program != "" {
+		where = append(where, "program = ?")
+		args = append(args, program)
+	}
+	rows, err := s.db.Query(
+		"SELECT date, host, program, SUM(count) FROM aggregates WHERE "+
+			strings.Join(where, " AND ")+" GROUP BY date, host, program ORDER BY date, host, program",
+		args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*DailyTotal
+	for rows.Next() {
+		d := &DailyTotal{}
+		if err := rows.Scan(&d.Date, &d.Host, &d.Program, &d.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
