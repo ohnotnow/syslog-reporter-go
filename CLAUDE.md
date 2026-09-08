@@ -1,4 +1,4 @@
-# CLAUDE.md
+# syslog-reporter-go
 
 A batch CLI tool that turns a noisy, org-wide syslog stream into a short,
 prioritised email report for a small university sysadmin team. Deterministic
