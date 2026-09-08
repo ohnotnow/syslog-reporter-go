@@ -443,6 +443,10 @@ func (s *LibraryStore) SetUserPassword(username, passwordHash string) error {
 // deleted, so a finding's worked/didnt counts survive the leaver; where an
 // anonymous vote already exists on the same finding, the leaver's vote is
 // dropped (one anonymous vote per finding is the schema's invariant).
+// Their API tokens go with the account, revoked or not: api_tokens
+// references users and RevokeAPIToken only flips a flag, so without this
+// the delete fails its foreign key for anyone who ever held a token
+// (SECURITY_REVIEW.md SR-03).
 func (s *LibraryStore) RemoveUser(username string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -464,6 +468,9 @@ func (s *LibraryStore) RemoveUser(username string) error {
 	}
 	if _, err := tx.Exec(
 		"UPDATE feedback SET user_id = NULL WHERE user_id = ?", id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM api_tokens WHERE user_id = ?", id); err != nil {
 		return err
 	}
 	if _, err := tx.Exec("DELETE FROM users WHERE id = ?", id); err != nil {

@@ -130,6 +130,23 @@ func TestHomePageServesBaseLayout(t *testing.T) {
 	}
 }
 
+// Rendered HTML is never cached and the findings page opts out of htmx
+// history snapshots, so a logout leaves nothing behind in the tab
+// (SECURITY_REVIEW.md SR-08). Static assets stay cacheable.
+func TestHTMLIsNoStoreAndFindingsSkipsHTMXHistory(t *testing.T) {
+	s := newTestServer(t, Config{})
+	rec := get(t, s, "/")
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Errorf("GET / Cache-Control = %q, want no-store", got)
+	}
+	if !strings.Contains(rec.Body.String(), `hx-history="false"`) {
+		t.Error("findings page lacks hx-history=\"false\"")
+	}
+	if got := get(t, s, "/static/app.css").Header().Get("Cache-Control"); got == "no-store" {
+		t.Error("static asset should not be no-store")
+	}
+}
+
 func TestStaticAssetsAreEmbedded(t *testing.T) {
 	s := newTestServer(t, Config{})
 	for _, path := range []string{"/static/app.css", "/static/htmx-2.0.10.min.js"} {

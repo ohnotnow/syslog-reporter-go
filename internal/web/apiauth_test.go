@@ -148,6 +148,14 @@ func TestAPIRefusesMissingBadRevokedAndExpiredTokens(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("good token = %d, want 200", resp.StatusCode)
 	}
+	// Removing the account takes its tokens with it (SR-03).
+	if err := lib.RemoveUser("opsuser"); err != nil {
+		t.Fatalf("remove token-holding user: %v", err)
+	}
+	resp = apiRequest(t, http.MethodGet, ts.URL+"/api/me", raw, "")
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("removed user's token = %d, want 401", resp.StatusCode)
+	}
 }
 
 func TestAPIGoodTokenNamesTheUserAndRecordsLastUse(t *testing.T) {

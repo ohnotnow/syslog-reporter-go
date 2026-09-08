@@ -113,6 +113,11 @@ func (s *Server) handleAPIMute(w http.ResponseWriter, r *http.Request) {
 			"cannot derive a program name for this finding; mute it on the box")
 		return
 	}
+	if errors.Is(err, reporter.ErrCannotDeriveHost) {
+		writeJSONError(w, http.StatusUnprocessableEntity,
+			"a host on this finding is not a plain hostname; mute it on the box")
+		return
+	}
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "server error")
 		return

@@ -4,7 +4,9 @@ package reporter
 // helpers and sample records; fictional hostnames only.
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -191,10 +193,31 @@ func TestCaptureRunFailurePreservesPreviousRun(t *testing.T) {
 
 	poisoned := issue
 	poisoned.Issue = "poisoned"
+	survivor := sampleAnomaly()
 	err := CaptureRun(lib, day(2026, 6, 1), "openai/gpt-test", 2000, 75,
-		&IssueList{Issues: []*Issue{&issue, &poisoned}}, nil, nil)
+		&IssueList{Issues: []*Issue{&issue, &poisoned}}, nil,
+		[]*ExplainedAnomaly{survivor})
 	if err == nil {
 		t.Fatal("capture with poisoned finding did not fail")
+	}
+	// The good issue was inserted (and stamped) before the poisoned one
+	// aborted the transaction; nothing may keep an id, and neither report
+	// layout may advertise one (SECURITY_REVIEW.md SR-07).
+	for name, id := range map[string]int64{"issue": issue.ID, "poisoned": poisoned.ID, "anomaly": survivor.ID} {
+		if id != 0 {
+			t.Errorf("%s still carries id %d after a rolled-back capture", name, id)
+		}
+	}
+	rep := &ReportAgent{
+		Issues:      &IssueList{Issues: []*Issue{&issue, &poisoned}},
+		Resolutions: &ResolutionList{},
+		Anomalies:   []*ExplainedAnomaly{survivor},
+		RepoURL:     "https://example.test/repo",
+	}
+	for name, body := range map[string]string{"email": rep.EmailBody(), "full": rep.Run()} {
+		if strings.Contains(body, "syslog-mute") || strings.Contains(body, "**Finding:** #") {
+			t.Errorf("%s layout advertises ids after a rolled-back capture", name)
+		}
 	}
 
 	// The failed replacement rolled back wholesale: original run, both
@@ -264,6 +287,34 @@ func TestCaptureRunHandsBackFindingIdsAndKeepsThemOutOfPayloads(t *testing.T) {
 		}
 		if strings.Contains(payload, `"ID"`) || strings.Contains(payload, `"id"`) {
 			t.Errorf("finding %d payload carries an id field: %s", d.ID, payload)
+		}
+	}
+}
+
+// A rerun of the same day must never reissue an id: a mute line copied
+// from the earlier email would otherwise silently target whatever finding
+// inherited the number (SECURITY_REVIEW.md SR-02, migration 3).
+func TestCaptureRunRerunNeverReusesFindingIDs(t *testing.T) {
+	lib := newTestLibrary(t)
+	first := sampleAnomaly()
+	if err := CaptureRun(lib, day(2026, 6, 1), "", 1000, 40, nil, nil,
+		[]*ExplainedAnomaly{first}); err != nil {
+		t.Fatalf("first capture: %v", err)
+	}
+	oldIDs := readFindingIDs(t, lib)
+
+	second := sampleAnomaly()
+	second.Host = "db07.example.test"
+	if err := CaptureRun(lib, day(2026, 6, 1), "", 1001, 41, nil, nil,
+		[]*ExplainedAnomaly{second}); err != nil {
+		t.Fatalf("second capture: %v", err)
+	}
+	for _, old := range oldIDs {
+		if second.ID <= old {
+			t.Errorf("rerun handed out id %d, not above the retired %d", second.ID, old)
+		}
+		if _, err := lib.GetFinding(old); !errors.Is(err, sql.ErrNoRows) {
+			t.Errorf("retired id %d: err = %v, want sql.ErrNoRows", old, err)
 		}
 	}
 }

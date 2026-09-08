@@ -218,7 +218,11 @@ standard pragmas (WAL journal, enforced foreign keys, 5s busy timeout) and
 runs a numbered `schema_version` migration ladder shared by the whole
 file; schema changes are new migrations there, never inline DDL. The
 library tables are `runs`, `findings`, `finding_hosts`, `feedback`,
-`users`, and `api_tokens` (migration 2).
+`users`, and `api_tokens` (migration 2). Since migration 3 the `findings`
+and `users` ids are AUTOINCREMENT: a deleted id is never handed out
+again, so a mute line copied from an old email either hits the finding
+it named or gets a 404, never a different finding that inherited the
+number.
 
 Capture semantics worth knowing:
 
@@ -232,6 +236,48 @@ Capture semantics worth knowing:
 - On `--no-llm` runs the run's model is stored as NULL and issue-kind
   findings simply don't exist (no LLM, no issues); the anomaly facts are
   still captured.
+
+### Backing up the database
+
+The file is in WAL (write-ahead log) mode, which changes what "copy the
+file" means. A committed write does not go into `syslog_aggregates.db`
+straight away: it is appended to the sidecar `syslog_aggregates.db-wal`,
+and only folded into the main file at a checkpoint (automatically once
+the log passes about 4 MB, or when the last connection closes cleanly).
+The third file, `-shm`, is a shared-memory index over the log and holds
+nothing of its own. So while the reporter or `serve` is running, the main
+file alone is a snapshot of some earlier moment, and copying all three
+files mid-write can catch the log half-appended.
+
+`sqlite3 <file> ".backup <dest>"` sidesteps all of that. It uses SQLite's
+online backup API: it takes a read lock, walks every page of the live
+database (main file and log together, as one consistent view) and writes
+a single ordinary database file at `<dest>`. Writers are not blocked and
+the source is not modified; a restore is just putting that one file back
+in place under the configured name, with no `-wal` or `-shm` alongside
+(delete stale ones if present). The cron job and the daily run do not
+need stopping. Run it as a user that can read the file, for example:
+
+```bash
+sqlite3 /var/lib/syslog-reporter/syslog_aggregates.db \
+  ".backup /var/backups/syslog-reporter/syslog_aggregates-$(date +%F).db"
+```
+
+A plain `cp` of the main file is fine ONLY when nothing has the database
+open: the last connection to close checkpoints the log and removes the
+sidecars, so an idle database is one self-contained file again. If the
+`-wal` file is present and non-empty, something is open or something
+crashed, and `.backup` is the safe choice. `VACUUM INTO '<dest>'` from
+the sqlite3 shell does the same job and compacts the copy; either is
+fine.
+
+Take a `.backup` before the first run of a binary that carries a new
+migration (`schema_version` climbs; the migration runs on open and is
+one transaction, but a copy from before it is the only way back). After
+the migration that made finding ids non-reusable (schema version 3),
+check any mute line copied from an email sent before the upgrade against
+the library first: ids retired before the migration ran can be issued
+once more.
 
 ### serve mode
 
@@ -510,8 +556,8 @@ Read from the environment or a `.env` beside the working directory
   `syslog_aggregates.db`; CLI `--db` overrides; `--no-store` skips
   persistence and the history-based detectors). The file is in WAL mode:
   a plain `cp` of a live database drops commits still in the `-wal`
-  sidecar, so back up with `sqlite3 <file> ".backup <dest>"` or copy
-  only while nothing is running
+  sidecar, so back up with `sqlite3 <file> ".backup <dest>"`; see
+  "Backing up the database" under the findings library section
 - `SYSLOG_DB_KEEP_DAYS` store retention, pruned each run (default 90)
 - `SYSLOG_BLANKET_IGNORE` comma-separated substrings appended to the filter
   at runtime - the home for estate-identifying entries (hostnames, internal

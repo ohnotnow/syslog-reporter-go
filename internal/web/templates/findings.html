@@ -3,7 +3,8 @@
     <h1>Findings library</h1>
     <form class="filters" method="get" action="/"
           hx-get="/" hx-target="#results" hx-swap="outerHTML"
-          hx-trigger="input delay:300ms, change" hx-push-url="true">
+          hx-trigger="input delay:300ms, change" hx-push-url="true"
+          hx-history="false">
       {{with .Data.Filters}}
       <div class="filter-field filter-field--wide">
         <label for="filter-q">Search titles</label>

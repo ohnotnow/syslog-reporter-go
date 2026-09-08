@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -19,15 +20,30 @@ import (
 // had it: no spaces, no quotes, nothing a glob would misread.
 var programToken = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 
+// hostToken is a literal hostname (or IP literal): letters, digits, dots,
+// hyphens, underscores and colons. Hosts in the known-knowns file are
+// globs (path.Match), and an issue's hosts come from the LLM, so a host
+// carrying a glob metacharacter must never be copied into an entry: a
+// single API mute would become an estate-wide rule.
+var hostToken = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]*$`)
+
+var appendMu sync.Mutex
+
 // ErrCannotDeriveProgram means the finding carries no usable program name,
 // so muting it is a job for the box (edit the TOML or use the CLI).
 var ErrCannotDeriveProgram = fmt.Errorf("cannot derive a program name for this finding")
+
+// ErrCannotDeriveHost means a host on the finding is not a plain hostname,
+// so muting it is a job for the box (SECURITY_REVIEW.md SR-06).
+var ErrCannotDeriveHost = fmt.Errorf("a host on this finding is not a plain hostname")
 
 // DeriveKnownEntries builds one host+program entry per affected host. An
 // anomaly finding names both directly. An issue finding's program is parsed
 // from its example log line (the same parse logcontext.go uses to anchor
 // the example), falling back to the LLM's affected_service only when that
 // already looks like a program token; otherwise ErrCannotDeriveProgram.
+// Every host must be a literal hostname (hostToken), else
+// ErrCannotDeriveHost: the whole finding is refused, never partly muted.
 func DeriveKnownEntries(d *FindingDetail, reason string, added time.Time, expires *time.Time) ([]*KnownEntry, error) {
 	var hosts []string
 	var program string
@@ -50,6 +66,9 @@ func DeriveKnownEntries(d *FindingDetail, reason string, added time.Time, expire
 		if host == "" {
 			continue
 		}
+		if !hostToken.MatchString(host) {
+			return nil, ErrCannotDeriveHost
+		}
 		e, err := newKnownEntry(host, reason, "", program, &added, expires)
 		if err != nil {
 			return nil, err
@@ -70,6 +89,14 @@ func DeriveKnownEntries(d *FindingDetail, reason string, added time.Time, expire
 // a partial one; the candidate is re-parsed before the rename so a bad
 // write can never break the next run.
 func AppendKnownEntries(path string, entries []*KnownEntry) ([]*KnownEntry, error) {
+	// One writer at a time: the rename makes each write atomic for readers,
+	// but two concurrent load-dedupe-write sequences would both start from
+	// the same file and the last rename would discard the other's entries,
+	// with both callers told 200 (SECURITY_REVIEW.md SR-04). A server has
+	// one known-knowns path, so one process-wide mutex is enough; hand
+	// edits from another process are not coordinated (ant ADR srg-ZE9vQ).
+	appendMu.Lock()
+	defer appendMu.Unlock()
 	today := time.Now().UTC()
 	existing, err := LoadKnownKnowns(path, today)
 	if err != nil {

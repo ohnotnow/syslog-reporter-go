@@ -246,6 +246,12 @@ func renderBlockStatus(w http.ResponseWriter, page, block string, status int, d 
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// Findings pages are behind auth (or deliberately anonymous on a LAN);
+	// either way nothing between browser and server should keep a copy.
+	// Pairs with hx-history="false" on the findings page, which keeps
+	// htmx from snapshotting the list into sessionStorage across a
+	// logout (SECURITY_REVIEW.md SR-08).
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	if err := tpl.ExecuteTemplate(w, block, d); err != nil {
 		// Headers are gone already; nothing useful left to send.

@@ -159,10 +159,51 @@ func TestMigrateV1FileGainsAPITokens(t *testing.T) {
 	if err := runMigrations(lib.db); err != nil {
 		t.Fatalf("re-migrate: %v", err)
 	}
-	if v := schemaVersion(t, lib.db); v != 2 {
-		t.Errorf("schema version = %d, want 2", v)
+	if v, want := schemaVersion(t, lib.db), migrations[len(migrations)-1].version; v != want {
+		t.Errorf("schema version = %d, want %d", v, want)
 	}
 	if _, _, err := lib.CreateAPIToken(uid, nil); err != nil {
 		t.Errorf("token table missing after upgrade: %v", err)
+	}
+}
+
+// RemoveUser takes the leaver's tokens with the account, whatever their
+// state; api_tokens references users, so leaving them behind would make
+// the delete fail (SECURITY_REVIEW.md SR-03).
+func TestRemoveUserDeletesTheirTokensInEveryState(t *testing.T) {
+	lib := newTestLibrary(t)
+	leaver := newTokenUser(t, lib, "leaver")
+	stayer := newTokenUser(t, lib, "stayer")
+	past := time.Now().Add(-time.Hour)
+	if _, _, err := lib.CreateAPIToken(leaver, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := lib.CreateAPIToken(leaver, &past); err != nil {
+		t.Fatal(err)
+	}
+	_, revoked, err := lib.CreateAPIToken(leaver, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lib.RevokeAPIToken(revoked.Prefix); err != nil {
+		t.Fatal(err)
+	}
+	_, kept, err := lib.CreateAPIToken(stayer, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := lib.RemoveUser("leaver"); err != nil {
+		t.Fatalf("remove user with tokens: %v", err)
+	}
+	if u, err := lib.UserByUsername("leaver"); err != nil || u != nil {
+		t.Fatalf("leaver still present: %v, %v", u, err)
+	}
+	left, err := lib.ListAPITokens()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(left) != 1 || left[0].ID != kept.ID {
+		t.Fatalf("tokens after removal = %+v, want only the stayer's %d", left, kept.ID)
 	}
 }

@@ -19,7 +19,24 @@ import "time"
 
 func CaptureRun(lib *LibraryStore, logDate time.Time, model string,
 	rawLines, filteredLines int,
-	issues *IssueList, resolutions *ResolutionList, anomalies []*ExplainedAnomaly) error {
+	issues *IssueList, resolutions *ResolutionList, anomalies []*ExplainedAnomaly) (err error) {
+	// Ids are only real once the transaction lands. Every failure path,
+	// not just a failed Commit, must clear them: an insert that fails
+	// part-way has already stamped the earlier objects, and runBatch
+	// renders those same objects after logging the capture error, so the
+	// report would advertise numbers that do not exist
+	// (SECURITY_REVIEW.md SR-07).
+	defer func() {
+		if err == nil {
+			return
+		}
+		for _, issue := range issuesOf(issues) {
+			issue.ID = 0
+		}
+		for _, a := range anomalies {
+			a.ID = 0
+		}
+	}()
 	tx, err := lib.db.Begin()
 	if err != nil {
 		return err
@@ -55,18 +72,7 @@ func CaptureRun(lib *LibraryStore, logDate time.Time, model string,
 		}
 		a.ID = id
 	}
-	// Ids are only real once the transaction lands; a rollback must not
-	// leave the report advertising finding numbers that do not exist.
-	if err := tx.Commit(); err != nil {
-		for _, issue := range issuesOf(issues) {
-			issue.ID = 0
-		}
-		for _, a := range anomalies {
-			a.ID = 0
-		}
-		return err
-	}
-	return nil
+	return tx.Commit()
 }
 
 func issuesOf(l *IssueList) []*Issue {

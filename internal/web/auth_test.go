@@ -308,3 +308,46 @@ func TestSafeNext(t *testing.T) {
 		}
 	}
 }
+
+// A removed account's still-live cookie must not become a recreated
+// account's session: user ids are never reissued (migration 3) and the
+// middleware bounces an id with no row (SECURITY_REVIEW.md SR-01).
+func TestModeLocalRemovedUsersSessionDiesEvenAfterRecreation(t *testing.T) {
+	lib := newAuthTestStore(t)
+	createTestUser(t, lib, "leaver", "correct horse")
+	ts := newLocalServer(t, lib)
+	client := sessionClient(t)
+	resp, err := client.PostForm(ts.URL+"/login", url.Values{
+		"username": {"leaver"}, "password": {"correct horse"}, "next": {"/"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body := bodyOf(t, resp); !strings.Contains(body, "Log out") {
+		t.Fatalf("login did not sign in: %.200s", body)
+	}
+	before, err := lib.UserByUsername("leaver")
+	if err != nil || before == nil {
+		t.Fatalf("leaver: %v", err)
+	}
+	if err := lib.RemoveUser("leaver"); err != nil {
+		t.Fatal(err)
+	}
+	createTestUser(t, lib, "newcomer", "other horse")
+	after, err := lib.UserByUsername("newcomer")
+	if err != nil || after == nil {
+		t.Fatalf("newcomer: %v", err)
+	}
+	if after.ID <= before.ID {
+		t.Errorf("newcomer got id %d, not above the removed %d", after.ID, before.ID)
+	}
+
+	resp, err = client.Get(ts.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := bodyOf(t, resp)
+	if !strings.Contains(body, "Sign in") || strings.Contains(body, "newcomer") {
+		t.Errorf("old cookie should land on the login form, got: %.200s", body)
+	}
+}

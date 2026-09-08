@@ -91,6 +91,7 @@ type migration struct {
 var migrations = []migration{
 	{1, "baseline schema", applyBaselineSchema},
 	{2, "api tokens", applyAPITokens},
+	{3, "non-reusable finding and user ids", applyNonReusableIDs},
 }
 
 const baselineSchema = `
@@ -246,5 +247,73 @@ CREATE INDEX IF NOT EXISTS idx_api_tokens_prefix ON api_tokens (token_prefix);
 
 func applyAPITokens(tx *sql.Tx) error {
 	_, err := tx.Exec(apiTokensSchema)
+	return err
+}
+
+// Migration 3 (SECURITY_REVIEW.md SR-02 and SR-01, ait srg-zNcwP.2): findings
+// and users get AUTOINCREMENT ids. A plain INTEGER PRIMARY KEY hands the
+// highest id out again after a delete, so a rerun of the latest day
+// renumbered its findings and a mute line copied from the earlier email
+// silently targeted a different host+program; likewise a deleted account's
+// live cookie could become a recreated account's session. SQLite cannot
+// alter a column to AUTOINCREMENT, so each table is rebuilt: copy with the
+// existing ids (which also seeds sqlite_sequence to the current maximum),
+// drop, rename into place.
+//
+// The ladder runs inside a transaction with foreign_keys ON, and neither
+// can be changed there. PRAGMA defer_foreign_keys does not help either:
+// DROP TABLE's implicit DELETE counts every referencing child row as a
+// deferred violation and nothing in a rebuild counts them back down, so
+// the commit fails (tried; modernc.org/sqlite v1.57.0). Hence the child
+// rows (finding_hosts, feedback, api_tokens) are parked in temp tables,
+// their tables emptied, the parents rebuilt, and the children put back,
+// all with their original ids. Plain DML, checked immediately, no pragma.
+const nonReusableIDsSchema = `
+CREATE TEMP TABLE stash_finding_hosts AS SELECT * FROM finding_hosts;
+CREATE TEMP TABLE stash_feedback      AS SELECT * FROM feedback;
+CREATE TEMP TABLE stash_api_tokens    AS SELECT * FROM api_tokens;
+DELETE FROM finding_hosts;
+DELETE FROM feedback;
+DELETE FROM api_tokens;
+
+CREATE TABLE findings_new (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id   INTEGER NOT NULL REFERENCES runs(id),
+    kind     TEXT NOT NULL,             -- 'issue' | 'peer' | 'baseline' | 'temporal'
+    severity TEXT,                      -- issues only: critical/high/medium/low
+    title    TEXT NOT NULL,             -- Issue.Issue, or anomaly Headline
+    service  TEXT,                      -- AffectedService, or anomaly Program
+    payload  TEXT NOT NULL              -- full record as JSON (IssuePayload / ExplainedAnomaly)
+);
+INSERT INTO findings_new (id, run_id, kind, severity, title, service, payload)
+    SELECT id, run_id, kind, severity, title, service, payload FROM findings;
+DROP TABLE findings;
+ALTER TABLE findings_new RENAME TO findings;
+CREATE INDEX idx_findings_run ON findings (run_id);
+
+CREATE TABLE users_new (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    email         TEXT NOT NULL UNIQUE,
+    username      TEXT NOT NULL UNIQUE,
+    forenames     TEXT,
+    surname       TEXT,
+    password_hash TEXT,                 -- bcrypt; NULL for SSO-created users
+    created_at    TEXT NOT NULL
+);
+INSERT INTO users_new (id, email, username, forenames, surname, password_hash, created_at)
+    SELECT id, email, username, forenames, surname, password_hash, created_at FROM users;
+DROP TABLE users;
+ALTER TABLE users_new RENAME TO users;
+
+INSERT INTO finding_hosts SELECT * FROM stash_finding_hosts;
+INSERT INTO feedback      SELECT * FROM stash_feedback;
+INSERT INTO api_tokens    SELECT * FROM stash_api_tokens;
+DROP TABLE stash_finding_hosts;
+DROP TABLE stash_feedback;
+DROP TABLE stash_api_tokens;
+`
+
+func applyNonReusableIDs(tx *sql.Tx) error {
+	_, err := tx.Exec(nonReusableIDsSchema)
 	return err
 }

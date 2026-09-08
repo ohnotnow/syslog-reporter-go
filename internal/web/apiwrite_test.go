@@ -17,7 +17,8 @@ import (
 
 // seedMutable stores an anomaly finding (id 1) and a two-host issue finding
 // (id 2) whose example line parses to dhcpd, plus one (id 3) whose program
-// cannot be derived.
+// cannot be derived and one (id 4) whose program derives cleanly but whose
+// only host is a glob.
 func seedMutable(t *testing.T, lib *reporter.LibraryStore) {
 	t.Helper()
 	runID, err := lib.BeginRun(day(2026, 9, 7), "test/model")
@@ -42,6 +43,13 @@ func seedMutable(t *testing.T, lib *reporter.LibraryStore) {
 		AffectedService: "the web tier"}}
 	if _, err := lib.AddFinding(runID, "issue", "low", prose.Issue.Issue, "the web tier",
 		prose.AffectedHost, prose); err != nil {
+		t.Fatal(err)
+	}
+	glob := reporter.IssuePayload{Issue: reporter.Issue{Issue: "Everything is on fire",
+		ExampleLogEntry: "Sep  7 10:00:01 web03.example.test nginx[1]: boom",
+		AffectedHost:    []string{"*"}, AffectedService: "nginx"}}
+	if _, err := lib.AddFinding(runID, "issue", "low", glob.Issue.Issue, "nginx",
+		glob.AffectedHost, glob); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -122,6 +130,7 @@ func TestAPIMuteRefusals(t *testing.T) {
 		{"past expiry", "1", url.Values{"reason": {"ok"}, "expires": {"2020-01-01"}}, http.StatusBadRequest},
 		{"unknown finding", "999", url.Values{"reason": {"ok"}}, http.StatusNotFound},
 		{"underivable program", "3", url.Values{"reason": {"ok"}}, http.StatusUnprocessableEntity},
+		{"glob host", "4", url.Values{"reason": {"ok"}}, http.StatusUnprocessableEntity},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

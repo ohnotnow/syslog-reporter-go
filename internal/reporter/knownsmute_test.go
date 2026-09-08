@@ -2,9 +2,11 @@ package reporter
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -68,6 +70,26 @@ func TestDeriveKnownEntriesRefusesProseServiceAndEmptyHosts(t *testing.T) {
 	d = issueDetail(nil, "Sep  7 10:00:01 web01.example.test nginx[1]: boom", "nginx")
 	if _, err := DeriveKnownEntries(d, "x", muteDay, nil); !errors.Is(err, ErrCannotDeriveProgram) {
 		t.Errorf("no hosts err = %v", err)
+	}
+}
+
+// Hosts come from the LLM and become path.Match globs in the file, so a
+// host that is not a plain hostname refuses the whole finding
+// (SECURITY_REVIEW.md SR-06).
+func TestDeriveKnownEntriesRefusesHostsThatAreNotPlainHostnames(t *testing.T) {
+	example := "Sep  7 10:00:01 web01.example.test nginx[1]: boom"
+	for _, host := range []string{"*", "web[0-9]", "a b", "?", `a\b`, "-leading"} {
+		d := issueDetail([]string{"web01.example.test", host}, example, "nginx")
+		if _, err := DeriveKnownEntries(d, "x", muteDay, nil); !errors.Is(err, ErrCannotDeriveHost) {
+			t.Errorf("host %q: err = %v, want ErrCannotDeriveHost", host, err)
+		}
+	}
+	for _, host := range []string{"web01", "db-2.example.test", "web_01", "fd00::1", "10.0.0.7"} {
+		d := issueDetail([]string{host}, example, "nginx")
+		entries, err := DeriveKnownEntries(d, "x", muteDay, nil)
+		if err != nil || len(entries) != 1 || entries[0].Host != host {
+			t.Errorf("host %q: entries = %v, err = %v", host, entries, err)
+		}
 	}
 }
 
@@ -143,5 +165,60 @@ func TestAppendKnownEntriesRefusesABrokenExistingFile(t *testing.T) {
 	e := mustEntry(t, "web01.example.test", "expected", "", "sshd", nil)
 	if _, err := AppendKnownEntries(path, []*KnownEntry{e}); err == nil {
 		t.Error("expected the existing file's missing reason to be reported")
+	}
+}
+
+// Concurrent mutes must all land: the append is serialised process-wide
+// (SECURITY_REVIEW.md SR-04). Run with -race.
+func TestAppendKnownEntriesSerialisesConcurrentWriters(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "known_knowns.toml")
+	added := time.Date(2026, 9, 8, 0, 0, 0, 0, time.UTC)
+	const n = 8
+	entryFor := func(host string) []*KnownEntry {
+		e, err := newKnownEntry(host, "expected", "", "cron", &added, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return []*KnownEntry{e}
+	}
+	run := func(hostFor func(i int) string) {
+		t.Helper()
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		errs := make(chan error, n)
+		for i := 0; i < n; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				<-start
+				if _, err := AppendKnownEntries(path, entryFor(hostFor(i))); err != nil {
+					errs <- err
+				}
+			}(i)
+		}
+		close(start)
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			t.Errorf("append: %v", err)
+		}
+	}
+
+	run(func(i int) string { return fmt.Sprintf("web%02d.example.test", i) })
+	kk, err := LoadKnownKnowns(path, added)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(kk.Active) != n {
+		t.Fatalf("distinct concurrent mutes left %d entries, want %d", len(kk.Active), n)
+	}
+
+	run(func(int) string { return "db01.example.test" })
+	kk, err = LoadKnownKnowns(path, added)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(kk.Active) != n+1 {
+		t.Fatalf("identical concurrent mutes left %d entries, want %d", len(kk.Active), n+1)
 	}
 }

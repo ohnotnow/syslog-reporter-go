@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -278,5 +279,82 @@ func TestExistingDatabaseKeepsItsMode(t *testing.T) {
 	}
 	if perm := info.Mode().Perm(); perm != 0o644 {
 		t.Errorf("existing database mode = %o, want the admin's 644 untouched", perm)
+	}
+}
+
+// A populated version-2 file: the rebuild in migration 3 must keep every
+// row and id across findings, its two children, users and api_tokens, and
+// leave AUTOINCREMENT on findings and users (SECURITY_REVIEW.md SR-02).
+func TestMigrateV2FileGainsNonReusableIDs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v2.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v2 := baselineSchema + apiTokensSchema + `
+CREATE TABLE schema_version (id INTEGER PRIMARY KEY CHECK (id = 1), version INTEGER NOT NULL DEFAULT 0);
+INSERT INTO schema_version (id, version) VALUES (1, 2);
+INSERT INTO runs (id, log_date, created_at, model) VALUES (1, '2026-06-01', '2026-06-02T06:00:00Z', 'test-model');
+INSERT INTO findings (id, run_id, kind, severity, title, service, payload)
+    VALUES (7, 1, 'issue', 'high', 'disk filling', 'cron', '{}'),
+           (9, 1, 'peer', NULL, 'sshd burst', 'sshd', '{}');
+INSERT INTO finding_hosts (finding_id, host) VALUES (7, 'web01.example.test'), (9, 'db02.example.test');
+INSERT INTO users (id, email, username, created_at) VALUES (3, 'ops@example.test', 'opsuser', '2026-06-01T00:00:00Z');
+INSERT INTO feedback (finding_id, user_id, verdict, comment, created_at) VALUES (7, 3, 'worked', 'ta', '2026-06-03T00:00:00Z');
+INSERT INTO api_tokens (user_id, token_hash, token_prefix, created_at) VALUES (3, 'abc', 'abcdefgh', '2026-06-01T00:00:00Z');
+`
+	if _, err := raw.Exec(v2); err != nil {
+		t.Fatalf("build v2 db: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := openDatabase(path)
+	if err != nil {
+		t.Fatalf("migrating open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if v := schemaVersion(t, db); v != 3 {
+		t.Errorf("schema version = %d, want 3", v)
+	}
+	for _, table := range []string{"findings", "users"} {
+		var ddl string
+		if err := db.QueryRow(
+			"SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", table).Scan(&ddl); err != nil {
+			t.Fatalf("%s ddl: %v", table, err)
+		}
+		if !strings.Contains(ddl, "AUTOINCREMENT") {
+			t.Errorf("%s lacks AUTOINCREMENT: %s", table, ddl)
+		}
+	}
+	var idx int
+	if err := db.QueryRow(
+		"SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_findings_run'").Scan(&idx); err != nil || idx != 1 {
+		t.Errorf("idx_findings_run after rebuild: count %d, err %v", idx, err)
+	}
+	counts := map[string]int{"findings": 2, "finding_hosts": 2, "feedback": 1, "users": 1, "api_tokens": 1}
+	for table, want := range counts {
+		var n int
+		if err := db.QueryRow("SELECT count(*) FROM " + table).Scan(&n); err != nil || n != want {
+			t.Errorf("%s rows = %d (err %v), want %d", table, n, err, want)
+		}
+	}
+	var host string
+	if err := db.QueryRow(
+		"SELECT h.host FROM finding_hosts h JOIN findings f ON f.id = h.finding_id WHERE f.id = 9").Scan(&host); err != nil || host != "db02.example.test" {
+		t.Errorf("finding 9 host = %q (err %v)", host, err)
+	}
+	var uid int64
+	if err := db.QueryRow("SELECT id FROM users WHERE username = 'opsuser'").Scan(&uid); err != nil || uid != 3 {
+		t.Errorf("user id = %d (err %v), want 3", uid, err)
+	}
+	rows, err := db.Query("PRAGMA foreign_key_check")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	if rows.Next() {
+		t.Error("foreign_key_check reported violations after the rebuild")
 	}
 }
