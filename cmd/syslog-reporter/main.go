@@ -228,6 +228,8 @@ func runServe(args []string) {
 	fs.StringVar(&cfg.KeyFile, "tls-key", cfg.KeyFile, "TLS private key")
 	fs.BoolVar(&cfg.SecureCookies, "secure-cookies", cfg.SecureCookies,
 		"Force the Secure cookie flag on, for TLS terminated at a reverse proxy")
+	fs.StringVar(&cfg.KnownsPath, "known-knowns", cfg.KnownsPath,
+		"Known-knowns TOML the API's mute endpoint appends to (the file 'run' reads)")
 	debug := fs.Bool("debug", false, "Log every request (method, path, status, duration)")
 	fs.Parse(args)
 	if fs.NArg() > 0 {

@@ -26,6 +26,23 @@ type apiFixture struct {
 
 func newAPIServer(t *testing.T, authMode string) apiFixture {
 	t.Helper()
+	return buildAPIServer(t, Config{AuthMode: authMode, Version: "test"})
+}
+
+// newAPIServerFromEnv builds the fixture from ConfigFromEnv, for tests that
+// set SYSLOG_* variables (auth mode none).
+func newAPIServerFromEnv(t *testing.T) apiFixture {
+	t.Helper()
+	cfg, err := ConfigFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Version = "test"
+	return buildAPIServer(t, cfg)
+}
+
+func buildAPIServer(t *testing.T, cfg Config) apiFixture {
+	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "api.db")
 	lib, err := reporter.OpenLibraryStore(dbPath)
 	if err != nil {
@@ -41,7 +58,7 @@ func newAPIServer(t *testing.T, authMode string) apiFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := Config{AuthMode: authMode, Version: "test"}
+	cfg.DBPath = dbPath
 	auth, err := NewAuthenticator(cfg, lib)
 	if err != nil {
 		t.Fatal(err)

@@ -471,8 +471,13 @@ Read from the environment or a `.env` beside the working directory
   at runtime - the home for estate-identifying entries (hostnames, internal
   IPs) so the committed filter stays estate-neutral
 - `SYSLOG_KNOWN_KNOWNS` path to the known-knowns TOML (default
-  `known_knowns.toml`; CLI `--known-knowns` overrides; missing file means
-  none; format in GETTING_STARTED.md)
+  `known_knowns.toml`; CLI `--known-knowns` overrides on both `run` and
+  `serve`; missing file means none; format in GETTING_STARTED.md). The
+  sysadmin API's mute endpoint appends to this file, so `serve` must see
+  the same path `run` reads
+- `SYSLOG_API_MUTE_LIMIT` mutes allowed per API token per 24 hours
+  (default 20, must be at least 1; no flag). A leaked token or a looping
+  script cannot silence the estate in one go
 - `SYSLOG_WEB_LISTEN` serve mode's host:port (default `127.0.0.1:7373`)
 - `SYSLOG_WEB_TLS_CERT` / `SYSLOG_WEB_TLS_KEY` certificate pair for HTTPS
 - `SYSLOG_WEB_SECURE_COOKIES` set to `1` to force the session cookie's

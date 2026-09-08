@@ -35,6 +35,10 @@ const serveHelpEnv = `environment fallbacks, for systemd units and the like:
                              (the pair hot-reloads, no restart on renewal)
   SYSLOG_WEB_SECURE_COOKIES  --secure-cookies (1/true/yes/on)
   SYSLOG_DB_PATH             --db       (default syslog_aggregates.db)
+  SYSLOG_KNOWN_KNOWNS        --known-knowns (default known_knowns.toml); the
+                             sysadmin API's mute endpoint appends to it
+  SYSLOG_API_MUTE_LIMIT      mutes allowed per API token per 24 hours
+                             (default 20, no flag)
 `
 
 const mgmtHelpIntro = `Render the management summary (HTML file plus plain text on stdout).

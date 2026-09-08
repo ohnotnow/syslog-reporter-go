@@ -17,6 +17,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -50,8 +51,16 @@ type Config struct {
 	// without the override the flag would be derived (wrongly, for the
 	// browser) from the built-in TLS setting alone (srg-so8ja.9).
 	SecureCookies bool
-	Debug         bool   // log one line per request via Logger
-	Logger        Logger // nil silences request and login logging
+	// KnownsPath (--known-knowns / SYSLOG_KNOWN_KNOWNS) is the known-knowns
+	// TOML the API's mute endpoint appends to: the same file the daily run
+	// reads, resolved the same way (ait srg-Kj5Q8.6).
+	KnownsPath string
+	// MuteLimit (SYSLOG_API_MUTE_LIMIT, default 20) caps mutes per token per
+	// 24 hours, so a leaked token or a looping script cannot silence the
+	// estate in one go.
+	MuteLimit int
+	Debug     bool   // log one line per request via Logger
+	Logger    Logger // nil silences request and login logging
 }
 
 // ConfigFromEnv reads the SYSLOG_WEB_* settings into a Config. Flags layer
@@ -63,6 +72,10 @@ func ConfigFromEnv() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	muteLimit, err := parsePositiveIntEnv("SYSLOG_API_MUTE_LIMIT", defaultMuteLimit)
+	if err != nil {
+		return Config{}, err
+	}
 	return Config{
 		// Port 7373: 73 kilos is what Vila weighs (owner's choice, Blake's 7).
 		Listen:        getenvDefault("SYSLOG_WEB_LISTEN", "127.0.0.1:7373"),
@@ -71,7 +84,25 @@ func ConfigFromEnv() (Config, error) {
 		DBPath:        getenvDefault("SYSLOG_DB_PATH", "syslog_aggregates.db"),
 		AuthMode:      getenvDefault("SYSLOG_AUTH_MODE", "none"),
 		SecureCookies: secure,
+		KnownsPath:    getenvDefault("SYSLOG_KNOWN_KNOWNS", "known_knowns.toml"),
+		MuteLimit:     muteLimit,
 	}, nil
+}
+
+const defaultMuteLimit = 20
+
+// parsePositiveIntEnv reads an integer setting that must be at least 1;
+// unset means the fallback, anything else is a startup error.
+func parsePositiveIntEnv(key string, fallback int) (int, error) {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("%s=%q: want a whole number of at least 1", key, raw)
+	}
+	return n, nil
 }
 
 // Validate checks the combinations no deployment can mean. Plain HTTP (LAN
@@ -223,11 +254,12 @@ func renderBlockStatus(w http.ResponseWriter, page, block string, status int, d 
 }
 
 type Server struct {
-	cfg  Config
-	auth Authenticator
-	lib  *reporter.LibraryStore
-	mux  *http.ServeMux
-	csrf *http.CrossOriginProtection
+	cfg   Config
+	auth  Authenticator
+	lib   *reporter.LibraryStore
+	mux   *http.ServeMux
+	csrf  *http.CrossOriginProtection
+	mutes *windowCounter // per-token mute cap, keyed by token id
 }
 
 func New(cfg Config, auth Authenticator, lib *reporter.LibraryStore) (*Server, error) {
@@ -237,8 +269,15 @@ func New(cfg Config, auth Authenticator, lib *reporter.LibraryStore) (*Server, e
 	if lib == nil {
 		return nil, fmt.Errorf("web.New needs a LibraryStore")
 	}
+	if cfg.MuteLimit < 1 {
+		cfg.MuteLimit = defaultMuteLimit
+	}
+	if cfg.KnownsPath == "" {
+		cfg.KnownsPath = "known_knowns.toml"
+	}
 	s := &Server{cfg: cfg, auth: auth, lib: lib, mux: http.NewServeMux(),
-		csrf: http.NewCrossOriginProtection()}
+		csrf:  http.NewCrossOriginProtection(),
+		mutes: newWindowCounter(cfg.MuteLimit, 24*time.Hour)}
 	s.mux.HandleFunc("GET /{$}", s.handleFindings)
 	s.mux.HandleFunc("GET /findings/{id}", s.handleFindingDetail)
 	s.mux.HandleFunc("POST /findings/{id}/feedback", s.handleFeedback)
@@ -248,6 +287,8 @@ func New(cfg Config, auth Authenticator, lib *reporter.LibraryStore) (*Server, e
 	s.mux.HandleFunc("GET /api/findings/{id}", s.handleAPIFinding)
 	s.mux.HandleFunc("GET /api/runs", s.handleAPIRuns)
 	s.mux.HandleFunc("GET /api/aggregates", s.handleAPIAggregates)
+	s.mux.HandleFunc("POST /api/findings/{id}/mute", s.handleAPIMute)
+	s.mux.HandleFunc("POST /api/findings/{id}/feedback", s.handleAPIFeedback)
 	auth.Routes(s.mux)
 	return s, nil
 }
