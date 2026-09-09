@@ -8,7 +8,9 @@
 # every later attempt that day exits 0 without a word, so a flaky ELK
 # proxy only costs a retry an hour later. The marker is written after
 # the email goes out, so a failed or killed attempt never blocks the
-# retries. One attempt runs at a time (flock).
+# retries. One attempt runs at a time (flock). Killing this script
+# (SIGTERM or SIGINT) also kills whichever fetch or reporter it is
+# waiting on, so the lock clears and the next hourly attempt retries.
 #
 #   # crontab: yesterday's report to the team, first try at 07:30,
 #   # retried on the half hour until it goes out
@@ -40,14 +42,38 @@ OUT_DIR=${OUT_DIR:-$WORK_DIR}
 # directory, and the SQLite history lands here too.
 cd "$WORK_DIR"
 
-# One attempt at a time. flock(1) is util-linux; the lock is released
-# when this process exits, however it exits.
+# One attempt at a time. flock(1) is util-linux; the lock lives on the
+# open descriptor, not the file, so a stale daily-run.lock on disk
+# blocks nothing. The fetch and the reporter inherit fd 9 on purpose:
+# while either is running, even orphaned, the lock stays held and no
+# second copy starts against the same database.
 command -v flock >/dev/null || { echo "daily-run.sh needs flock (util-linux)" >&2; exit 1; }
-exec 9>"$WORK_DIR/daily-run.lock"
+lock="$WORK_DIR/daily-run.lock"
+exec 9>"$lock"
 if ! flock -n 9; then
-    echo "another daily-run is still going; leaving it to finish"
+    echo "another daily-run is still going (lock: $lock; find the holder with: fuser -v $lock); leaving it to finish"
     exit 0
 fi
+
+# Run a command as a child we can kill. A signal to this script kills
+# the child too, so killing daily-run.sh and killing the reporter come
+# to the same thing: the lock clears and the next attempt retries.
+# Always TERM, whatever we were sent: bash starts background children
+# with SIGINT ignored.
+child=
+on_signal() {
+    if [ -n "$child" ]; then
+        kill -TERM "$child" 2>/dev/null || true
+        wait "$child" 2>/dev/null || true
+    fi
+    exit 143
+}
+trap on_signal TERM INT
+run_child() {
+    "$@" &
+    child=$!
+    wait "$child"
+}
 
 # GNU date (Linux) and BSD date (macOS) disagree on relative dates.
 yesterday() {
@@ -76,11 +102,11 @@ mkdir -p "$DUMP_DIR"
 # complete day. Both elk_dump.py and the reporter pick gzip by the .gz
 # suffix, hence the infix rather than a trailing .part.
 if [ ! -s "$dump" ]; then
-    python3 "$ELK_DUMP" --day "$day" --out "$partial"
+    run_child python3 "$ELK_DUMP" --day "$day" --out "$partial"
     mv "$partial" "$dump"
 fi
 
-"$REPORTER" run "$dump" --date "$day" --send-email --out-dir "$OUT_DIR"
+run_child "$REPORTER" run "$dump" --date "$day" --send-email --out-dir "$OUT_DIR"
 touch "$sent"
 
 # Optional: tidy up dumps, partials and sent markers older than two weeks.
