@@ -5,16 +5,22 @@
 # fill in, two weeks of free history, the hourly cron job and, if you
 # want it, the findings web UI as a systemd service.
 #
-# Run it as root from a checkout that has the syslog-reporter binary in
-# it (built with `go build -o syslog-reporter ./cmd/syslog-reporter`,
-# or downloaded from the releases page):
+# Run it as root from a checkout:
 #
 #   sudo ./scripts/install.sh
 #
-# It asks three things: an address for cron's failure mail, whether to
-# run the backfill now, and whether to install the web UI service. Each
-# has a default, and with no terminal (`install.sh </dev/null`) the
-# defaults are taken, so it can run unattended.
+# The binary comes from the first of: a syslog-reporter (or a release
+# asset, syslog-reporter-linux-<arch>) already in the checkout; the
+# latest GitHub release, downloaded and checked against its SHA256SUMS;
+# or `go build`, if the go compiler is installed. The download and the
+# build each ask first. With none of those it stops before creating
+# anything.
+#
+# It then asks three things: an address for cron's failure mail, whether
+# to run the backfill now, and whether to install the web UI service.
+# Each question has a default, and with no terminal
+# (`install.sh </dev/null`) the defaults are taken, so it can run
+# unattended.
 #
 # Re-running is safe: the binary and helpers are refreshed, the cron
 # file and unit are rewritten, and an existing .env is left exactly as
@@ -26,18 +32,11 @@ SERVICE_USER=${SERVICE_USER:-syslog-reporter}
 WORK_DIR=${WORK_DIR:-/var/lib/syslog-reporter}
 BIN_DIR=${BIN_DIR:-/usr/local/bin}
 BACKFILL_DAYS=${BACKFILL_DAYS:-14}
+RELEASE_URL=${RELEASE_URL:-https://github.com/ohnotnow/syslog-reporter-go/releases/latest/download}
 
 here=$(cd "$(dirname "$0")/.." && pwd)
-binary="$here/syslog-reporter"
 
 die() { echo "install.sh: $*" >&2; exit 1; }
-
-[ "$(id -u)" -eq 0 ] || die "run as root: sudo $0"
-[ -x "$binary" ] || die "no binary at $binary - build one with
-  go build -o syslog-reporter ./cmd/syslog-reporter
-or download one from the releases page into the checkout"
-command -v python3 >/dev/null || die "python3 is needed for elk_dump.py"
-command -v flock >/dev/null || die "flock (util-linux) is needed by daily-run.sh"
 
 # ask "question" "default"  - a yes/no with the default taken when there
 # is no terminal to answer from.
@@ -53,6 +52,72 @@ ask() {
     esac
 }
 
+[ "$(id -u)" -eq 0 ] || die "run as root: sudo $0"
+command -v python3 >/dev/null || die "python3 is needed for elk_dump.py"
+command -v flock >/dev/null || die "flock (util-linux) is needed by daily-run.sh"
+
+# The release workflow names assets by GOARCH; uname speaks differently.
+case "$(uname -m)" in
+    x86_64) asset=syslog-reporter-linux-amd64 ;;
+    aarch64) asset=syslog-reporter-linux-arm64 ;;
+    *) asset= ;;
+esac
+
+# Download the latest release asset for this arch into the checkout,
+# verified against the published SHA256SUMS. Returns non-zero (and says
+# why) rather than dying, so the caller can fall through to go build.
+download_release() {
+    [ -n "$asset" ] || { echo "no release asset for $(uname -m)"; return 1; }
+    if ! curl -fsSLI --connect-timeout 10 -o /dev/null "$RELEASE_URL/SHA256SUMS"; then
+        echo "cannot reach $RELEASE_URL"
+        return 1
+    fi
+    ask "download the latest release ($asset) from GitHub?" y || return 1
+    local tmp
+    tmp=$(mktemp -d)
+    if ! curl -fsSL -o "$tmp/$asset" "$RELEASE_URL/$asset" ||
+       ! curl -fsSL -o "$tmp/SHA256SUMS" "$RELEASE_URL/SHA256SUMS"; then
+        rm -rf "$tmp"
+        echo "download failed"
+        return 1
+    fi
+    if ! (cd "$tmp" && grep " $asset\$" SHA256SUMS | sha256sum -c --quiet); then
+        rm -rf "$tmp"
+        echo "checksum mismatch on $asset - not installing it"
+        return 1
+    fi
+    install -m 755 "$tmp/$asset" "$here/syslog-reporter"
+    rm -rf "$tmp"
+    echo "downloaded and verified $asset"
+}
+
+build_from_source() {
+    command -v go >/dev/null || { echo "no go compiler on PATH"; return 1; }
+    [ -f "$here/go.mod" ] || { echo "$here is not a source checkout (no go.mod)"; return 1; }
+    ask "build syslog-reporter from source with go build?" y || return 1
+    (cd "$here" && go build -o syslog-reporter ./cmd/syslog-reporter)
+    echo "built $here/syslog-reporter"
+}
+
+echo "== binary"
+binary=
+for candidate in "$here/syslog-reporter" "$here/$asset"; do
+    if [ -n "$candidate" ] && [ -f "$candidate" ]; then
+        binary=$candidate
+        echo "using $binary"
+        break
+    fi
+done
+if [ -z "$binary" ]; then
+    download_release || build_from_source || die "no binary. Either
+  download $asset from $RELEASE_URL into $here, or
+  install go and run: go build -o syslog-reporter ./cmd/syslog-reporter
+then re-run this script. Nothing has been changed."
+    binary="$here/syslog-reporter"
+fi
+chmod 755 "$binary"
+"$binary" --help >/dev/null 2>&1 || die "$binary does not run here (wrong architecture?)"
+
 echo "== user and state directory"
 if id "$SERVICE_USER" >/dev/null 2>&1; then
     echo "user $SERVICE_USER exists"
@@ -63,7 +128,8 @@ fi
 install -d -o "$SERVICE_USER" -m 750 "$WORK_DIR"
 
 echo "== binary and helpers into $BIN_DIR"
-install -m 755 "$binary" "$here/tools/elk_dump.py" \
+install -m 755 "$binary" "$BIN_DIR/syslog-reporter"
+install -m 755 "$here/tools/elk_dump.py" \
     "$here/scripts/backfill.sh" "$here/scripts/daily-run.sh" "$BIN_DIR/"
 
 echo "== settings"

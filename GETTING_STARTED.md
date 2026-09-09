@@ -215,7 +215,7 @@ Once the daily email is going out, each finding in it carries a
 
 The daily run is a cron job on a server that can reach your logs, your
 mail relay and your LLM provider. The whole install is one script, run
-as root from a checkout with the binary in it:
+as root from a checkout:
 
 ```bash
 sudo ./scripts/install.sh
@@ -223,21 +223,26 @@ sudo ./scripts/install.sh
 
 It does the following:
 
-1. Creates a `syslog-reporter` system user and its state directory,
+1. Finds the binary: one already in the checkout (built, or a
+   downloaded `syslog-reporter-linux-<arch>`), else the latest GitHub
+   release, downloaded and checked against its `SHA256SUMS`, else
+   `go build` if the compiler is installed. The download and the build
+   each ask first, and with none of the three it stops here.
+2. Creates a `syslog-reporter` system user and its state directory,
    `/var/lib/syslog-reporter`, where the `.env`, the database, the
    dumps and the reports all live.
-2. Installs the binary, `elk_dump.py`, `backfill.sh` and `daily-run.sh`
+3. Installs the binary, `elk_dump.py`, `backfill.sh` and `daily-run.sh`
    into `/usr/local/bin`.
-3. Drops [scripts/dotenv.example](scripts/dotenv.example) in as the
+4. Drops [scripts/dotenv.example](scripts/dotenv.example) in as the
    `.env` and opens it in your editor: fill in the model and key, the
    SMTP relay and recipients, and the ELK credentials. An existing
    `.env` is left alone.
-4. Writes `/etc/cron.d/syslog-reporter`: `daily-run.sh` at 07:30, retried
+5. Writes `/etc/cron.d/syslog-reporter`: `daily-run.sh` at 07:30, retried
    on the half hour until it goes out, logging to `daily-run.log` in the
    state directory. It asks for a `MAILTO` address.
-5. Asks whether to run `backfill.sh` now: the last fortnight through
+6. Asks whether to run `backfill.sh` now: the last fortnight through
    `--no-llm` (free).
-6. Asks whether to install the findings web UI as a systemd service
+7. Asks whether to install the findings web UI as a systemd service
    (section 5).
 
 Each question has a default, so `install.sh </dev/null` runs it
