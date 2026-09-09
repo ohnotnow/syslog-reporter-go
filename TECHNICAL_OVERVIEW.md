@@ -175,17 +175,12 @@ the model id in the request body like OpenAI proper, so there is no
 per-deployment URL rewriting, no api-version parameter, and no Azure SDK
 dependency; older non-v1 endpoints are not supported.
 
-Azure throttles each deployment on tokens per minute. The detector's
-1000-line chunks run to roughly 35K tokens each, so the deployment needs
-200K TPM or more (`--sku-capacity 200`); at 50K TPM the second chunk is
-refused with `Retry-After: 30` and never clears. All three providers get
-a patient retry budget (eight retries, honouring Retry-After up to two
-minutes on the OpenAI SDK, uncapped on Anthropic's), and every 429 is
-logged as a WARN line with the attempt number and the wait the server
-asked for, so a throttled run shows in the log as it happens rather than
-as one bare error minutes later. Azure's 429s also carry
-`Retry-After-Ms: 0` alongside the honest `Retry-After`; the client drops
-the zero so it cannot turn the backoff into an instant retry.
+All three providers get a patient retry budget (eight retries, honouring
+Retry-After up to two minutes on the OpenAI SDK, uncapped on
+Anthropic's), and every 429 is logged as a WARN line with the attempt
+number and the wait the server asked for, so a throttled run shows in
+the log as it happens rather than as one bare error minutes later. Azure
+has its own section below.
 
 The resolution writer works a dozen issues per request
 (`reporter.resolutionBatchSize`), each batch carrying its own context
@@ -232,6 +227,34 @@ state-changing commands must start `# CHANGES STATE:`.
 
 Both report layouts end with `_Analysis by <model>_` when the LLM stages
 ran, so teams comparing models can tell reports apart.
+
+### Azure gotchas
+
+Everything that has bitten on Azure OpenAI, in one place. The guide's
+"Make it daily" section points here.
+
+- **The id is the deployment name, not the model name.**
+  `SYSLOG_DEFAULT_MODEL=azure/<deployment>`, and the endpoint is the
+  resource's v1 URL (`https://<resource>.openai.azure.com/openai/v1/`).
+  Older non-v1 endpoints are not supported.
+- **Size the deployment before the first real run.** Azure throttles
+  each deployment on tokens per minute (TPM). The detector's 1000-line
+  chunks run to roughly 35K tokens each, so a 50K TPM deployment holds
+  barely one chunk a minute: the second request is refused with
+  `Retry-After: 30`, the retry lands in the same minute and is refused
+  again, and the run waits out its eight retries and then fails. Give
+  the deployment 200K TPM or more: `--sku-capacity 200` on
+  `az cognitiveservices account deployment create`, which also raises an
+  existing deployment in place.
+- **Leave `SYSLOG_REASONING_EFFORT` at `low`.** Reasoning tokens count
+  against the same TPM budget as the prompt, so a higher effort on a
+  tightly sized deployment brings the throttling back.
+- **`Retry-After-Ms: 0`.** Azure's 429s carry that header alongside the
+  honest `Retry-After`; the client drops the zero so it cannot turn the
+  backoff into an instant retry.
+- **How to tell.** A throttled run logs each wait as a WARN line with the
+  attempt number, so `daily-run.log` shows an undersized deployment as it
+  happens.
 
 ## The findings library
 
