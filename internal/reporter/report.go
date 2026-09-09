@@ -42,6 +42,11 @@ type ReportAgent struct {
 	// as a footer so teams comparing models can tell reports apart (owner
 	// decision 2026-08-28). Empty or --no-llm means no footer.
 	Model string
+	// ResolutionCap is how many issues the resolution writer was given when
+	// SYSLOG_MAX_RESOLVE_ISSUES / --max-resolve-issues cut the list short;
+	// 0 means every issue was sent. Both layouts state it, in the same
+	// register as the truncation notice.
+	ResolutionCap int
 	// RepoURL is where the README lives; the mute-line footer links to its
 	// sysadmin API section. Empty suppresses that footer.
 	RepoURL string
@@ -94,6 +99,9 @@ func (r *ReportAgent) Run() string {
 	b.WriteString("## Issues\n")
 	b.WriteString(issues + "\n")
 	b.WriteString("\n## Resolutions\n")
+	if notice := r.resolutionCapNotice(); notice != "" {
+		b.WriteString(notice + "\n")
+	}
 	if !r.LLMSkipped {
 		b.WriteString(commandCaution + "\n")
 	}
@@ -180,6 +188,9 @@ func (r *ReportAgent) emailBodyN(topIssues, topAnomalies int) string {
 	if totalIssues > len(issues) {
 		fmt.Fprintf(&b, "The %d most pressing of %d issues are below; the full breakdown is attached.\n\n",
 			len(issues), totalIssues)
+	}
+	if notice := r.resolutionCapNotice(); notice != "" {
+		b.WriteString(notice + "\n")
 	}
 	if !r.LLMSkipped && (len(issues) > 0 || len(anomalies) > 0) {
 		b.WriteString(commandCaution + "\n")
@@ -303,10 +314,29 @@ func (r *ReportAgent) expiredCount() int {
 	return len(r.Knowns.Expired)
 }
 
+// resolutionCapNotice is the one factual line for a day whose issue list
+// was cut before the resolution writer saw it; empty when nothing was.
+func (r *ReportAgent) resolutionCapNotice() string {
+	total := len(r.Issues.Issues)
+	if r.ResolutionCap <= 0 || r.ResolutionCap >= total {
+		return ""
+	}
+	return fmt.Sprintf("Resolutions were written for the %d most severe of %d issues; the rest are listed without one.\n",
+		r.ResolutionCap, total)
+}
+
 // topIssues returns the n most urgent issues, most-severe first (stable
 // within a severity).
 func (r *ReportAgent) topIssues(n int) []*Issue {
-	sorted := append([]*Issue{}, r.Issues.Issues...)
+	return MostSevere(r.Issues.Issues, n)
+}
+
+// MostSevere returns the n most urgent issues, most-severe first and
+// otherwise in their original order, as a new slice. It is the one
+// ranking behind both the digest's top ten and the resolution writer's
+// cap, so the issues that get resolutions are the ones the email shows.
+func MostSevere(issues []*Issue, n int) []*Issue {
+	sorted := append([]*Issue{}, issues...)
 	sort.SliceStable(sorted, func(i, j int) bool {
 		return severityRankOf(sorted[i].Severity) < severityRankOf(sorted[j].Severity)
 	})

@@ -62,6 +62,10 @@ OPENAI_API_KEY=sk-...                     # or ANTHROPIC_API_KEY for anthropic/ 
 # same-host log lines either side of each issue's example that the
 # resolution writer sees (default 5; 0 disables)
 # SYSLOG_CONTEXT_LINES=5
+# most issues handed to the resolution writer per run, most severe first
+# (default 60; 0 resolves every issue) - the writer's output tokens are
+# most of a day's bill, so this bounds a storm day
+# SYSLOG_MAX_RESOLVE_ISSUES=60
 # for azure/ models on Azure OpenAI, set:
 # SYSLOG_DEFAULT_MODEL=azure/your-deployment-name
 # AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/openai/v1/

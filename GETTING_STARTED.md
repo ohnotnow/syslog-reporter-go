@@ -279,6 +279,12 @@ AZURE_OPENAI_API_KEY=...
 # Optional: how many same-host log lines either side of each issue's example
 # the resolution writer sees (default 5; 0 sends the issues alone).
 #SYSLOG_CONTEXT_LINES=5
+# Optional: the most issues one run hands to the resolution writer, most
+# severe first (default 60; 0 resolves every issue). The writer runs on the
+# expensive model and its output is most of a day's bill, so this bounds a
+# storm day; issues past the cap still appear in the attachment and the
+# findings library, just without a resolution.
+#SYSLOG_MAX_RESOLVE_ISSUES=60
 
 # Where elk_dump.py fetches yesterday's logs from. ELK_API_KEY works
 # instead of username/password; ELK_INSECURE=1 skips TLS verification

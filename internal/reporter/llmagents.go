@@ -238,6 +238,15 @@ func NewResolutionAgent(issues *IssueList, contexts []LogContext, model string, 
 // retry redoes one batch rather than the day.
 const resolutionBatchSize = 12
 
+// DefaultMaxResolveIssues is the default SYSLOG_MAX_RESOLVE_ISSUES: the
+// most issues one run hands to the resolution writer. The writer runs on
+// the expensive model and its output tokens are most of a day's bill, so
+// a storm day that detects a thousand issues must not turn into a
+// thousand resolutions (owner decision 2026-09-09). The digest's severity
+// ranking picks which ones are written; the rest still reach the
+// attachment and the library as detected.
+const DefaultMaxResolveIssues = 60
+
 // batches splits the agent into per-request agents of at most
 // resolutionBatchSize issues, each carrying the context windows for its
 // own issues (Contexts is index-aligned with Issues, or nil).

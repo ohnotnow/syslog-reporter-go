@@ -472,3 +472,58 @@ func TestMuteFooterNeedsARepoURL(t *testing.T) {
 		t.Error("without a RepoURL the mute line stays but the footer link goes")
 	}
 }
+
+// MostSevere is the one ranking behind the digest's top ten and the
+// resolution writer's cap: most-severe first, original order within a
+// severity, unknown severities last, and never more than asked for.
+func TestMostSevereRanksBySeverityThenOriginalOrder(t *testing.T) {
+	issues := []*Issue{
+		testIssue("low-first", "low"),
+		testIssue("odd", "bizarre"),
+		testIssue("high-a", "high"),
+		testIssue("crit", "critical"),
+		testIssue("high-b", "high"),
+	}
+	var got []string
+	for _, i := range MostSevere(issues, 3) {
+		got = append(got, i.Issue)
+	}
+	if want := "crit high-a high-b"; strings.Join(got, " ") != want {
+		t.Errorf("MostSevere(3) = %q, want %q", strings.Join(got, " "), want)
+	}
+	if n := len(MostSevere(issues, 10)); n != 5 {
+		t.Errorf("MostSevere(10) of 5 returned %d", n)
+	}
+	if issues[0].Issue != "low-first" {
+		t.Error("MostSevere must not reorder the caller's slice")
+	}
+}
+
+// A capped day says so once in each layout, in the same factual register
+// as the truncation notice; an uncapped day says nothing.
+func TestResolutionCapNoticeInBothLayouts(t *testing.T) {
+	rep := &ReportAgent{
+		Issues: &IssueList{Issues: []*Issue{
+			testIssue("disk-full", "critical"),
+			testIssue("clock-skew", "high"),
+			testIssue("cosmetic-thing", "low"),
+		}},
+		Resolutions: &ResolutionList{Resolutions: []*Resolution{testResolution("disk-full")}},
+	}
+	for _, out := range []string{rep.EmailBody(), rep.Run()} {
+		if strings.Contains(out, "most severe of") {
+			t.Errorf("uncapped run must carry no cap notice:\n%s", out)
+		}
+	}
+	rep.ResolutionCap = 1
+	want := "Resolutions were written for the 1 most severe of 3 issues; the rest are listed without one."
+	for name, out := range map[string]string{"email": rep.EmailBody(), "attachment": rep.Run()} {
+		if strings.Count(out, want) != 1 {
+			t.Errorf("%s layout should carry the cap notice once:\n%s", name, out)
+		}
+	}
+	rep.ResolutionCap = 3 // cap equal to the count is no cap at all
+	if strings.Contains(rep.Run(), "most severe of") {
+		t.Error("a cap that cut nothing must not be announced")
+	}
+}

@@ -496,6 +496,10 @@ func runBatch(cliArgs []string) {
 	if err != nil {
 		fatal("SYSLOG_DB_KEEP_DAYS must be an integer: %v", err)
 	}
+	defaultMaxResolve, err := maxResolveIssuesFromEnv()
+	if err != nil {
+		fatal("%v", err)
+	}
 	defaultContextLines, err := contextLinesFromEnv()
 	if err != nil {
 		fatal("%v", err)
@@ -526,6 +530,8 @@ func runBatch(cliArgs []string) {
 	noLLM := fs.Bool("no-llm", false,
 		"Skip every LLM stage (issue detection, dedupe, resolutions, anomaly "+
 			"explanations) so the run costs nothing")
+	maxResolve := fs.Int("max-resolve-issues", defaultMaxResolve,
+		"Most issues handed to the resolution writer, most severe first (0 = all; default: SYSLOG_MAX_RESOLVE_ISSUES)")
 	contextLines := fs.Int("context-lines", defaultContextLines,
 		"Same-host log lines to show the resolution writer either side of each issue's example (0 disables; default: SYSLOG_CONTEXT_LINES)")
 	dumpFiltered := fs.Bool("dump-filtered", false,
@@ -649,7 +655,19 @@ func runBatch(cliArgs []string) {
 		knownsPath:   *knownsPath,
 		dumpOnly:     *dumpFiltered,
 		contextLines: *contextLines,
+		maxResolve:   *maxResolve,
 	})
+}
+
+// maxResolveIssuesFromEnv reads SYSLOG_MAX_RESOLVE_ISSUES (default
+// reporter.DefaultMaxResolveIssues); 0 resolves every issue.
+func maxResolveIssuesFromEnv() (int, error) {
+	raw := getenvDefault("SYSLOG_MAX_RESOLVE_ISSUES", strconv.Itoa(reporter.DefaultMaxResolveIssues))
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("SYSLOG_MAX_RESOLVE_ISSUES must be a whole number of issues (0 = all), got %q", raw)
+	}
+	return n, nil
 }
 
 // contextLinesFromEnv reads SYSLOG_CONTEXT_LINES (default
@@ -680,6 +698,7 @@ type runConfig struct {
 	knownsPath   string
 	dumpOnly     bool
 	contextLines int // same-host lines either side of each issue's example; 0 = none
+	maxResolve   int // most issues sent to the resolution writer; 0 = all
 }
 
 func run(cfg runConfig) {
@@ -731,6 +750,7 @@ func run(cfg runConfig) {
 	ctx := context.Background()
 	issues := &reporter.IssueList{}
 	resolutions := &reporter.ResolutionList{}
+	resolutionCap := 0 // issues sent to the resolution writer when capped; 0 = all
 	if cfg.llmOn {
 		log.Info("Detecting issues")
 		var err error
@@ -747,21 +767,32 @@ func run(cfg runConfig) {
 		}
 		log.Debug("Consolidated to %d issues", len(issues.Issues))
 
+		// The resolution writer runs on the expensive model, so a storm
+		// day is capped to its most severe issues; the rest still reach
+		// the attachment and the library as detected.
+		toResolve := issues
+		if cfg.maxResolve > 0 && len(issues.Issues) > cfg.maxResolve {
+			toResolve = &reporter.IssueList{Issues: reporter.MostSevere(issues.Issues, cfg.maxResolve)}
+			resolutionCap = cfg.maxResolve
+			log.Warn("Resolving only the %d most severe of %d issues (SYSLOG_MAX_RESOLVE_ISSUES / --max-resolve-issues)",
+				cfg.maxResolve, len(issues.Issues))
+		}
+
 		// Context windows come from the RAW lines: the routine chatter the
 		// filter drops (a restart, a cron kick) is often what explains the
 		// odd line. --context-lines 0 sends the issues alone.
 		var contexts []reporter.LogContext
 		if cfg.contextLines > 0 {
-			contexts = reporter.NewLogIndex(cfg.lines, cfg.contextLines).ContextsFor(issues)
+			contexts = reporter.NewLogIndex(cfg.lines, cfg.contextLines).ContextsFor(toResolve)
 			for i, c := range contexts {
 				log.Debug("Context for %q: %s (host %q, %d lines)",
-					issues.Issues[i].Issue, c.Match, c.Host, len(c.Lines))
+					toResolve.Issues[i].Issue, c.Match, c.Host, len(c.Lines))
 			}
 		} else {
 			log.Debug("Context windows disabled (--context-lines 0)")
 		}
-		log.Info("Resolving %d issues", len(issues.Issues))
-		resolutions, err = reporter.NewResolutionAgent(issues, contexts, cfg.issueModel, cfg.hostOS).Run(ctx)
+		log.Info("Resolving %d issues", len(toResolve.Issues))
+		resolutions, err = reporter.NewResolutionAgent(toResolve, contexts, cfg.issueModel, cfg.hostOS).Run(ctx)
 		if err != nil {
 			fatal("resolving issues: %v", err)
 		}
@@ -893,14 +924,15 @@ func run(cfg runConfig) {
 	// findings as an attachment.
 	log.Info("Generating report")
 	rep := &reporter.ReportAgent{
-		Issues:      issues,
-		Resolutions: resolutions,
-		Anomalies:   explained,
-		LLMSkipped:  !cfg.llmOn,
-		Model:       modelLabel,
-		RepoURL:     selfupdate.RepoURL,
-		Knowns:      knowns,
-		LogDate:     logDate,
+		Issues:        issues,
+		Resolutions:   resolutions,
+		Anomalies:     explained,
+		LLMSkipped:    !cfg.llmOn,
+		Model:         modelLabel,
+		ResolutionCap: resolutionCap,
+		RepoURL:       selfupdate.RepoURL,
+		Knowns:        knowns,
+		LogDate:       logDate,
 	}
 	fullReport := rep.Run()
 	emailBody := rep.EmailBody()

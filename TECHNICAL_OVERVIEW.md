@@ -198,7 +198,17 @@ treated the timeout as a connection error and re-sent the identical
 request, and nine attempts of ten minutes was the hour-long "hang" the
 cron monitor reported. Each batch goes through the same retry budget on
 its own, so a network blip costs one batch, and a batch that exhausts its
-retries still fails the run loudly. A `--debug` run logs every HTTP
+retries still fails the run loudly. The writer is also capped per run:
+`SYSLOG_MAX_RESOLVE_ISSUES` / `--max-resolve-issues` (default 60, the
+`reporter.DefaultMaxResolveIssues`; 0 = all) hands it only the most
+severe issues, ranked by `reporter.MostSevere`, the same ordering the
+digest's top ten uses. The writer runs on the expensive model and its
+output tokens are most of a day's bill (owner's prices, 2026-09-09: the
+issue model's output is roughly forty times the scan model's input per
+token), so a storm day that detects a thousand issues costs five batches
+rather than eighty-four; the issues past the cap still reach the
+attachment and the findings library as detected, without a resolution,
+and both layouts carry one factual notice saying so. A `--debug` run logs every HTTP
 attempt as it is sent (attempt number, body size, URL) and as it returns
 (status or transport error, elapsed), so a run stuck inside the SDK's
 retry loop is readable from the log.
@@ -544,6 +554,9 @@ Read from the environment or a `.env` beside the working directory
 - `SYSLOG_CONTEXT_LINES` same-host log lines shown to the resolution
   writer either side of each issue's example entry (default 5; 0 turns
   the context windows off); `--context-lines` overrides it per run
+- `SYSLOG_MAX_RESOLVE_ISSUES` the most issues one run hands to the
+  resolution writer, most severe first (default 60; 0 resolves every
+  issue); `--max-resolve-issues` overrides it per run
 - `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` for whichever provider is used
 - `AZURE_OPENAI_ENDPOINT` + `AZURE_OPENAI_API_KEY` for `azure/` models
   (the resource's v1 endpoint; see the provider routing section)
