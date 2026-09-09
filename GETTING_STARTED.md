@@ -1,9 +1,11 @@
 # Getting started
 
-Yesterday's syslog goes in, a short prioritised report comes out. Try it
-on a real day of your own logs first - the trial run needs no LLM calls or API key so is free.
+Yesterday's syslog goes in, a short prioritised report comes out. This
+guide runs in the order you will actually live it: try it on one day of
+your own logs for free, give it a model, tune it to your estate, then
+put it on a server as a daily email and live with what it finds.
 
-## Try it
+## 1. Try it
 
 Grab a binary from the
 [releases page](https://github.com/ohnotnow/syslog-reporter-go/releases),
@@ -15,16 +17,20 @@ cd syslog-reporter-go
 go build -o syslog-reporter ./cmd/syslog-reporter
 ```
 
-Pull a days logs out - `/var/log/syslog` on Debian, or `/var/log/messages` on RHEL-alikes:
+Pull a day's logs out - `/var/log/syslog` on Debian, or `/var/log/messages`
+on RHEL-alikes:
 
 ```bash
 # single-digit days are padded: `Aug 28 ` but `Aug  8 `
 grep '^Aug 28 ' /var/log/syslog > yesterday.log
 ```
 
-(If you're fancy and have ELK instead? `tools/elk_dump.py` pulls a day out of a cluster into a format the tool reads - usage notes at the top of the script.)
+(If you're fancy and have ELK instead, `tools/elk_dump.py` pulls a day
+out of a cluster into a format the tool reads - usage notes at the top
+of the script. Files named `*.ndjson` or `*.ndjson.gz` are picked up as
+ELK dumps, anything else as raw syslog text.)
 
-Run syslog reporter:
+Run it:
 
 ```bash
 ./syslog-reporter run yesterday.log --no-llm
@@ -55,7 +61,7 @@ _Louder than its peers_ (unknown)
 (no explanation generated)
 ```
 
-## Give it a model
+## 2. Give it a model
 
 Put a model and its key in the environment, or a `.env` in the
 directory you run it from:
@@ -65,10 +71,14 @@ SYSLOG_DEFAULT_MODEL=openai/gpt-5.6-luna
 OPENAI_API_KEY=sk-...
 ```
 
-([TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md) has the full environment
-reference, including Anthropic and Azure OpenAI.)
+The model is named litellm-style, `provider/model`; `anthropic/` models
+take `ANTHROPIC_API_KEY`, and `azure/` deployments take
+`AZURE_OPENAI_ENDPOINT` plus `AZURE_OPENAI_API_KEY`.
+[TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md) has the full environment
+reference.
 
-Run the same day again as a full 'agentic' run and feel all superior and futuristic.
+Run the same day again as a full 'agentic' run and feel all superior and
+futuristic:
 
 ```bash
 ./syslog-reporter run yesterday.log
@@ -102,25 +112,62 @@ ssh example-host 'uptime; sensors 2>/dev/null; ps -eo pid,pcpu,pmem,cmd --sort=-
 _Note: Replace unit placeholders only after identifying the actual runaway unit; take example-host offline or power it down if temperatures remain beyond hardware limits._
 ```
 
-## If it looks good
+### Which model?
 
-- Cron the daily run with `--send-email` to get the report as a morning
-  email - SMTP settings are in TECHNICAL_OVERVIEW.md.
-- `--dump-filtered` shows what the noise filter is letting through;
-  put your estate's own background noise in `SYSLOG_BLANKET_IGNORE`.
-- Every run files its findings into a local SQLite library.
-  `syslog-reporter serve` puts a web UI over that history on
-  `127.0.0.1:7373`, with a worked / didn't-work vote on each finding -
-  [HOW_IT_WORKS.md](HOW_IT_WORKS.md) is a tour with screenshots.
-- `mgmt-report` renders a weekly or monthly management summary.
-- `--help` on any command for more details.
+`eval` runs the detection, deduplication and resolution stages over a
+log sample and writes a report fragment with timings and token counts,
+so you can compare providers before committing to one:
 
-## Ignoring things you already know about
+```sh
+for MODEL in openai/gpt-5.6-luna anthropic/claude-sonnet-5; do
+  ./syslog-reporter eval --model "${MODEL}" --input yesterday.log
+done
+```
 
-Every estate has oddities that are expected, not wrong: the DHCP server
-with no pool by design, the lab box with a raw socket held open for an
-instrument. Once they have been eye-rolled at, they should stop appearing
-in every report. That is what the known-knowns file is for.
+Leave `--input` off to use the bundled sample of fictional log lines.
+The noise filter runs first, so the model only sees what a real run
+would send it - a full day through eval costs about the same as a full
+day's real run, per model. Each run writes its result to its own
+`eval_<model>_<timestamp>.md`, with the model name, time taken, line and
+token counts up top (you'll have to check your provider to work out how
+that maps to the cost).
+
+The pipeline can also split across two models: a cheap one for the bulk
+log scanning (`SYSLOG_LOGSCAN_MODEL`) and a stronger one for the
+resolutions and explanations people actually read
+(`SYSLOG_ISSUE_MODEL`). `eval --scan-model` and `--issue-model` try a
+combination without touching your `.env`; the stage variables win over
+`--model`, so set both flags to force a single model when a split is
+configured.
+
+## 3. Make it yours
+
+Every estate has its own background noise, and the first few reports
+will tell you what yours is. Three tools, in the order you'll reach for
+them.
+
+**See what the filter lets through.** `--dump-filtered` prints the
+post-filter lines and exits, so you can eyeball exactly what the model
+would be sent:
+
+```bash
+./syslog-reporter run yesterday.log --dump-filtered | less
+```
+
+**Drop your own routine chatter.** `SYSLOG_BLANKET_IGNORE` is a
+comma-separated list of substrings appended to the built-in noise filter
+at runtime. It is the home for estate-identifying entries (hostnames,
+internal IPs) so the filter in the code stays estate-neutral:
+
+```bash
+SYSLOG_BLANKET_IGNORE="backup-agent heartbeat,10.20.30."
+```
+
+**Ignore things you already know about.** Some oddities are expected,
+not wrong: the DHCP server with no pool by design, the lab box with a
+raw socket held open for an instrument. Once they have been eye-rolled
+at, they should stop appearing in every report. That is what the
+known-knowns file is for.
 
 It is a TOML file called `known_knowns.toml` in the working directory
 (`/var/lib/syslog-reporter` when you deploy with the helper scripts). Point
@@ -170,138 +217,81 @@ startup rather than quietly matching nothing. `--dump-filtered` prints what
 survives the filter, which is the quickest way to check an entry does what
 you meant.
 
-## Running unattended
+Once the daily email is going out, each finding in it carries a
+`syslog-mute` line that adds a known-knowns entry from your own shell,
+without editing the file by hand. The README's "sysadmin API" section
+covers that.
 
-The daily run is a cron job, and `scripts/daily-run.sh` is that cron job
-as a ready-made wrapper: it fetches yesterday's dump with `elk_dump.py`,
-runs the pipeline, and exits non-zero if anything failed, so cron's own
-failure mail can do its job. Schedule it hourly: once a day's
-report has gone out it leaves a `syslog-<day>.sent` marker in the dumps
-directory and every later attempt that day exits quietly, so a flaky
-ELK proxy just costs a retry an hour later. Its sibling `scripts/backfill.sh`
-bootstraps a fresh install by running the last fortnight through
-`--no-llm` (free) so the history-based detectors have something to
-compare against from day one. A full deployment is:
+## 4. Make it daily
+
+The daily run is a cron job on a server that can reach your logs, your
+mail relay and your LLM provider. The whole install is one script, run
+as root from a checkout with the binary in it:
 
 ```bash
-# a system user and its state directory
-sudo useradd -r -s /usr/sbin/nologin syslog-reporter
-sudo install -d -o syslog-reporter -m 750 /var/lib/syslog-reporter
-
-# the binary, the ELK dumper, and the two wrapper scripts
-sudo install -m 755 syslog-reporter tools/elk_dump.py \
-  scripts/backfill.sh scripts/daily-run.sh /usr/local/bin/
-
-# the settings: model + API key, SMTP, ELK credentials
-# (example just below; TECHNICAL_OVERVIEW.md is the full reference)
-sudoedit /var/lib/syslog-reporter/.env
-sudo chown syslog-reporter /var/lib/syslog-reporter/.env
-sudo chmod 600 /var/lib/syslog-reporter/.env
-
-# two weeks of free history so the detectors wake up with context
-sudo -u syslog-reporter backfill.sh
-
-# then the daily email: first try at 07:30, retried hourly until it goes out
-sudo crontab -u syslog-reporter -e
-#   MAILTO=you@example.ac.uk
-#   30 7-17 * * * /usr/local/bin/daily-run.sh >> /var/lib/syslog-reporter/daily-run.log 2>&1
+sudo ./scripts/install.sh
 ```
 
-Both the binary and `elk_dump.py` read their `.env` from the working
-directory (real environment variables win), so the scripts `cd` into
-`/var/lib/syslog-reporter` before doing anything. That is also where
-the SQLite history lands - the same path the systemd example below
-points `--db` at. Every path is a variable at the top of each script
-(`REPORTER`, `ELK_DUMP`, `WORK_DIR`, `DUMP_DIR`); to try one from a
-checkout instead:
+It does the following, and is safe to re-run:
+
+1. Creates a `syslog-reporter` system user and its state directory,
+   `/var/lib/syslog-reporter`, where the `.env`, the SQLite history, the
+   dumps and the reports all live.
+2. Installs the binary, `elk_dump.py`, `backfill.sh` and `daily-run.sh`
+   into `/usr/local/bin`.
+3. Drops [scripts/dotenv.example](scripts/dotenv.example) in as the
+   `.env` (owned by the service user, mode 600) and opens it in your
+   editor. Every line is commented: fill in the model and key, the SMTP
+   relay and recipients, and the ELK credentials. An existing `.env` is
+   left alone.
+4. Writes `/etc/cron.d/syslog-reporter`: `daily-run.sh` at 07:30, retried
+   on the half hour until it goes out, logging to `daily-run.log` in the
+   state directory. It asks for a `MAILTO` address so cron tells you when
+   an attempt fails.
+5. Asks whether to run `backfill.sh` now: the last fortnight through
+   `--no-llm` (free), so the history-based detectors have something to
+   compare against from day one.
+6. Asks whether to install the findings web UI as a systemd service
+   (section 5).
+
+Each question has a default, so `install.sh </dev/null` runs it
+unattended. Everything it does is plain `useradd`, `install` and file
+writes; read the script if you would rather do it by hand, and every
+path is a variable at the top of each helper (`REPORTER`, `ELK_DUMP`,
+`WORK_DIR`, `DUMP_DIR`), so trying one from a checkout looks like:
 
 ```bash
 REPORTER=./syslog-reporter ELK_DUMP=./tools/elk_dump.py WORK_DIR=. \
   ./scripts/backfill.sh 3
 ```
 
-### An example .env
+How `daily-run.sh` behaves is worth knowing: it fetches yesterday's dump
+with `elk_dump.py`, runs the pipeline, emails the report and leaves a
+`syslog-<day>.sent` marker in the dumps directory. Every later attempt
+that day exits quietly, so a flaky ELK proxy just costs a retry an hour
+later, and a non-zero exit means that attempt did not send the report.
+Pass a date to re-run a specific day by hand.
 
-Everything the daily run needs, in one file. This one uses an Azure
-OpenAI deployment and an ELK cluster with basic auth; swap the model and
-key lines for `openai/` or `anthropic/` as
-[TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md) describes.
+**No ELK?** Then there is nothing to fetch, and the wrapper is more than
+you need. Slice yesterday's log however suits your estate and cron the
+binary directly:
 
-```bash
-# /var/lib/syslog-reporter/.env  (chmod 600, owned by syslog-reporter)
-
-# Where the report goes. Recipients are a comma-separated list and ride
-# the SMTP envelope only (BCC); the sender is what appears in To.
-SYSLOG_SMTP_SERVER=mail-relay.example.ac.uk:25
-SYSLOG_SMTP_SENDER=syslog-reporter@example.ac.uk
-SYSLOG_SMTP_RECIPIENTS=sysadmin-team@example.ac.uk,oncall@example.ac.uk
-# Only if your relay rejects the machine's own hostname in the greeting.
-#SYSLOG_SMTP_HELO=reporter.example.ac.uk
-
-# The model. For azure/ the id is your DEPLOYMENT name, not the model
-# name, and the endpoint is the resource's v1 URL. Reasoning effort is
-# low unless you say otherwise (low, medium, high, xhigh, max); low is
-# right for a batch run and keeps the token budget down.
-SYSLOG_DEFAULT_MODEL=azure/gpt-5.6-luna
-#SYSLOG_REASONING_EFFORT=low
-AZURE_OPENAI_ENDPOINT=https://my-resource.openai.azure.com/openai/v1/
-AZURE_OPENAI_API_KEY=...
-# Optional: keep the cheap model for the bulk log scanning but hand the
-# final resolutions and explanations to a stronger one. Each stage falls
-# back to SYSLOG_DEFAULT_MODEL when its variable is unset.
-#SYSLOG_LOGSCAN_MODEL=azure/gpt-5.6-luna
-#SYSLOG_ISSUE_MODEL=azure/gpt-6-astra
-# Optional: how many same-host log lines either side of each issue's example
-# the resolution writer sees (default 5; 0 sends the issues alone).
-#SYSLOG_CONTEXT_LINES=5
-# Optional: the most issues one run hands to the resolution writer, most
-# severe first (default 60; 0 resolves every issue). The writer runs on the
-# expensive model and its output is most of a day's bill, so this bounds a
-# storm day; issues past the cap still appear in the attachment and the
-# findings library, just without a resolution.
-#SYSLOG_MAX_RESOLVE_ISSUES=60
-
-# Where elk_dump.py fetches yesterday's logs from. ELK_API_KEY works
-# instead of username/password; ELK_INSECURE=1 skips TLS verification
-# for a self-signed cluster (ELK_CA_CERT=/path/to/ca.pem trusts a local
-# CA instead).
-ELK_URL=https://elk.example.ac.uk:9200
-ELK_USERNAME=syslog-reporter
-ELK_PASSWORD=...
-ELK_INDEX=logs-system.syslog-default
-ELK_INSECURE=1
-
-# Only on a server with no direct internet route - see "Behind a proxy".
-#http_proxy=http://proxy.example.ac.uk:3128
-#https_proxy=http://proxy.example.ac.uk:3128
-#no_proxy=elk.example.ac.uk
+```cron
+# in the syslog-reporter user's crontab: yesterday's rotated log, emailed
+# at 07:30; the cd is so the .env and database in the state directory are found
+30 7 * * * cd /var/lib/syslog-reporter && /usr/local/bin/syslog-reporter run /var/log/syslog.1 \
+  --send-email >> /var/lib/syslog-reporter/daily-run.log 2>&1
 ```
 
-Real environment variables win over the file, so a proxy or key
-exported in the cron environment overrides what is here.
+There is no retry this way: a failed attempt is cron mail and a re-run
+by hand.
 
-**Azure OpenAI: size the deployment before you run.** The issue detector
-sends the filtered log in 1000-line chunks, and a chunk of syslog is
-roughly 35K tokens before the model writes a word. Azure throttles each
-deployment on tokens per minute (TPM), so a 50K TPM deployment holds
-barely one chunk a minute: the second request is refused with "retry in
-30 seconds", the retry lands in the same minute and is refused again,
-and the run waits out its eight retries and then fails. Give the
-deployment 200K TPM or more (`--sku-capacity 200` on
-`az cognitiveservices account deployment create`, which also raises an
-existing deployment in place), and leave `SYSLOG_REASONING_EFFORT` at its
-default of `low` so reasoning tokens don't eat into the same budget. A
-throttled run logs each wait as a WARN line, so `daily-run.log` will tell
-you if it is still undersized.
-
-### Behind a proxy
-
-On a server with no direct internet route, the LLM calls need the
-standard proxy variables - and they need to be where the *binary's*
-process can see them. `sudo -u` resets the environment and cron starts
-with a near-empty one, so a proxy exported in your login shell silently
-never arrives; the reliable place is the same `.env`, which both the
-binary and `elk_dump.py` load before their first request:
+**Behind a proxy?** On a server with no direct internet route, the LLM
+calls need the standard proxy variables, and they need to be where the
+*binary's* process can see them. `sudo -u` resets the environment and
+cron starts with a near-empty one, so a proxy exported in your login
+shell silently never arrives. The reliable place is the same `.env`,
+which both the binary and `elk_dump.py` load before their first request:
 
 ```bash
 https_proxy=http://proxy.example.ac.uk:3128
@@ -314,45 +304,64 @@ Go and Python both honour upper- or lower-case spellings, real
 environment variables win over the `.env`, and `no_proxy` takes a
 comma-separated list (a bare domain matches its subdomains).
 
-### The web UI
+**Azure OpenAI? Size the deployment before the first real run.** The
+issue detector sends the filtered log in 1000-line chunks, and a chunk of
+syslog is roughly 35K tokens before the model writes a word. Azure
+throttles each deployment on tokens per minute (TPM), so a 50K TPM
+deployment holds barely one chunk a minute: the second request is
+refused with "retry in 30 seconds", the retry lands in the same minute
+and is refused again, and the run waits out its eight retries and then
+fails. Give the deployment 200K TPM or more (`--sku-capacity 200` on
+`az cognitiveservices account deployment create`, which also raises an
+existing deployment in place), and leave `SYSLOG_REASONING_EFFORT` at its
+default of `low` so reasoning tokens don't eat into the same budget. A
+throttled run logs each wait as a WARN line, so `daily-run.log` will tell
+you if it is still undersized.
 
-The web UI suits a small systemd service. Flags and environment variables
-are interchangeable (the flag wins), so use whichever reads better in a
-unit file:
+## 5. Live with it
 
-```ini
-[Unit]
-Description=syslog-reporter findings UI
-After=network.target
+Every run files its findings into the same SQLite file as the history,
+so the morning email stops being throwaway.
 
-[Service]
-ExecStart=/usr/local/bin/syslog-reporter serve --listen 127.0.0.1:7373 \
-  --db /var/lib/syslog-reporter/syslog_aggregates.db --auth local
-User=syslog-reporter
-Restart=on-failure
+**The web UI.** `install.sh` offers to install
+[scripts/syslog-reporter-web.service](scripts/syslog-reporter-web.service),
+which serves the findings library on `127.0.0.1:7373` with local
+accounts. It refuses to start until the database exists, so the backfill
+or the first daily run comes first. Then add a login:
 
-[Install]
-WantedBy=multi-user.target
+```bash
+cd /var/lib/syslog-reporter
+sudo -u syslog-reporter syslog-reporter user add jbloggs jbloggs@example.ac.uk
 ```
 
-serve refuses to start if the database file does not exist yet - do a
-first `run` (or point `--db` at the right file) before enabling it.
+Search and filters over every past finding, and a worked / didn't-work
+vote with an optional note on each one, so the team learns which
+suggested fixes actually fix things.
+[HOW_IT_WORKS.md](HOW_IT_WORKS.md) is a tour with screenshots. For a
+shared box on a LAN, `--listen` and the TLS flags are in
+[TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md).
 
+**From the terminal.** The same library, no browser:
 
-## Quick evaluations
-
-If you want to try out different providers/models against a sample of your logs (or the bundled test ones) you can do something like this :
-
-```sh
-for MODEL in openai/gpt-5.6-luna anthropic/claude-sonnet-5; do
-  ./syslog-reporter eval --model "${MODEL}" --input yesterday.log
-done
+```bash
+cd /var/lib/syslog-reporter
+sudo -u syslog-reporter syslog-reporter findings list --host web-01 --severity high
+sudo -u syslog-reporter syslog-reporter findings show 42
+sudo -u syslog-reporter syslog-reporter findings feedback 42 worked --comment "cache cleared, sorted"
 ```
 
-Leave `--input` off to use the bundled sample. The noise filter runs
-first, so the model only sees what a real run would send it - a full day
-through eval costs about the same as a full day's real run, per model.
+**For management.** Once a few weeks of history have accumulated,
+`mgmt-report` renders a periodic summary: headline numbers, a daily
+volume chart, issues by severity and the team's feedback votes, as a
+self-contained HTML email. `--days 7` for a weekly flavour, and
+`--send-email` goes to `SYSLOG_MGMT_RECIPIENTS`, a separate list from
+the daily digest.
 
-Each run writes its result to its own `eval_<model>_<timestamp>.md`, with
-the model name, time taken, line and token counts up top (you'll have to
-check your provider to work out how that maps to the cost).
+**From your own machine.** The `serve` process also exposes a small JSON
+API, so the team can query findings and mute the expected ones from
+Claude Code or plain curl without a login to the server. The README's
+"sysadmin API" section has the tokens and the `syslog-mute` shell
+function.
+
+`--help` on any command lists its flags, and `syslog-reporter
+self-update` replaces the binary with the latest release.

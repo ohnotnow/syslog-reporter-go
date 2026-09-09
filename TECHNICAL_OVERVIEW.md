@@ -111,7 +111,7 @@ the high-volume programs the denylist removes. Everything else runs on the
 filtered log.
 
 Operator-acknowledged "known knowns" (a gitignored TOML file, format in
-[GETTING_STARTED.md](GETTING_STARTED.md#ignoring-things-you-already-know-about))
+[GETTING_STARTED.md](GETTING_STARTED.md#3-make-it-yours))
 apply in two places: the filter drops lines host-aware (a `match` entry
 drops the lines its regex matches, a `program` entry drops every line from
 that program), and matching (host, program) anomalies are muted before the

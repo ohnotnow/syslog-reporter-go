@@ -49,95 +49,19 @@ cd syslog-reporter-go
 go build -o syslog-reporter ./cmd/syslog-reporter
 ```
 
-Configuration comes from environment variables, or a `.env` file next to
-where you run it:
+Then point it at a day of your own syslog. The first run is free: it
+only does the deterministic filtering and anomaly checks, with no LLM
+calls and no API key.
 
 ```bash
-SYSLOG_DEFAULT_MODEL=openai/gpt-5.6-luna # litellm-style provider/model
-OPENAI_API_KEY=sk-...                     # or ANTHROPIC_API_KEY for anthropic/ models
-# optional split: a cheap model for the bulk log scanning, a stronger one
-# for the resolutions and explanations people actually read
-# SYSLOG_LOGSCAN_MODEL=openai/gpt-5.6-luna
-# SYSLOG_ISSUE_MODEL=anthropic/claude-fable-5-1
-# same-host log lines either side of each issue's example that the
-# resolution writer sees (default 5; 0 disables)
-# SYSLOG_CONTEXT_LINES=5
-# most issues handed to the resolution writer per run, most severe first
-# (default 60; 0 resolves every issue) - the writer's output tokens are
-# most of a day's bill, so this bounds a storm day
-# SYSLOG_MAX_RESOLVE_ISSUES=60
-# for azure/ models on Azure OpenAI, set:
-# SYSLOG_DEFAULT_MODEL=azure/your-deployment-name
-# AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/openai/v1/
-# AZURE_OPENAI_API_KEY=...
-
-# optional: literal strings to strip from anything sent to the LLM
-# provider, e.g. your domain. Case-insensitive, replaced with [redacted].
-# A courtesy for hiding estate identity - NOT PII/compliance redaction;
-# if your logs need that, stick to --no-llm.
-# SYSLOG_REDACT=example.ac.uk,10.20.
-```
-
-Then point it at a day of syslog:
-
-```bash
-# free run: filter + anomaly detection only, no LLM cost
 ./syslog-reporter run /var/log/messages-20260827 --no-llm
-
-# full run
-./syslog-reporter run /var/log/messages-20260827
-
-# an ELK NDJSON dump works too, and .gz is handled
-# (tools/elk_dump.py pulls a day of syslog from an ELK cluster into this format)
-./syslog-reporter run syslog-2026-08-27.ndjson.gz
-
-# email the report: an HTML rendering of the digest for easy reading,
-# with the digest and full report attached as markdown for copy/paste
-# (or for handing straight to your own sysadmin agents)
-./syslog-reporter run syslog-2026-08-27.ndjson.gz --send-email --recipients team@example.ac.uk
 ```
 
-The first week or two, run it daily (or backfill historical days with
-`--no-llm --date YYYY-MM-DD` - `scripts/backfill.sh` does the last
-fortnight in one go) so the SQLite history builds up. The noise
-filter and the per-estate ignore lists are meant to be tuned to your
-estate, and `--dump-filtered` shows exactly what they are letting
-through. `./syslog-reporter --help` lists every command and
-`./syslog-reporter run --help` every batch flag;
-[TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md) has the full flag and
-environment-variable reference, and
-[GETTING_STARTED.md](GETTING_STARTED.md#ignoring-things-you-already-know-about)
-explains the known-knowns file that mutes your estate's expected oddities.
-
-Not sure which model combination to use? `eval` runs the detection,
-deduplication and resolution stages over a small bundled log sample, using
-the same model environment variables and defaults as `run`. It writes a
-report fragment with both models, the shared reasoning effort, per-stage
-timings and token counts, and total token counts. Anomaly explanations are
-not evaluated.
-
-```bash
-# evaluate your daily configuration
-./syslog-reporter eval
-
-# keep the configured scanner and try a different resolution model
-./syslog-reporter eval --issue-model openai/gpt-6-astra
-
-# explicitly choose both models
-./syslog-reporter eval --scan-model openai/gpt-5.6-luna --issue-model openai/gpt-6-astra
-
-# force a single model, even when .env configures a split
-./syslog-reporter eval --scan-model openai/gpt-5.6-luna --issue-model openai/gpt-5.6-luna
-
-# or use your own plain-text logs (the noise filter runs first)
-./syslog-reporter eval --input yesterday.log --out comparison.md
-```
-
-Precedence for each stage is: stage flag > stage environment variable >
-`--model` > `SYSLOG_DEFAULT_MODEL` > built-in default. In particular,
-`SYSLOG_LOGSCAN_MODEL` and `SYSLOG_ISSUE_MODEL` override `--model`.
-Compare combinations with separate invocations. Each invocation reruns
-scanning, so even the same scanner can produce different findings.
+[GETTING_STARTED.md](GETTING_STARTED.md) takes it from there: giving
+it a model, choosing one with `eval`, tuning the noise filter to your
+estate, and the server install that turns it into a daily email.
+[TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md) is the full flag and
+environment-variable reference.
 
 ## The findings library
 
