@@ -1,0 +1,73 @@
+# /var/lib/syslog-reporter/.env  (chmod 600, owned by syslog-reporter)
+#
+# Everything the daily run needs, in one file. Both the binary and
+# elk_dump.py read it from their working directory; real environment
+# variables win over anything here. TECHNICAL_OVERVIEW.md is the full
+# reference.
+
+# Where the report goes. Recipients are a comma-separated list and ride
+# the SMTP envelope only (BCC); the sender is what appears in To.
+SYSLOG_SMTP_SERVER=mail-relay.example.ac.uk:25
+SYSLOG_SMTP_SENDER=syslog-reporter@example.ac.uk
+SYSLOG_SMTP_RECIPIENTS=sysadmin-team@example.ac.uk,oncall@example.ac.uk
+# Only if your relay rejects the machine's own hostname in the greeting.
+#SYSLOG_SMTP_HELO=reporter.example.ac.uk
+
+# The model, litellm-style provider/model. Pick ONE of the three blocks.
+# Reasoning effort is low unless you say otherwise (low, medium, high,
+# xhigh, max); low is right for a batch run and keeps the token budget
+# down.
+#SYSLOG_REASONING_EFFORT=low
+
+# OpenAI
+SYSLOG_DEFAULT_MODEL=openai/gpt-5.6-luna
+OPENAI_API_KEY=sk-...
+
+# Anthropic
+#SYSLOG_DEFAULT_MODEL=anthropic/claude-sonnet-5
+#ANTHROPIC_API_KEY=...
+
+# Azure OpenAI. The id after azure/ is your DEPLOYMENT name, not the
+# model name, and the endpoint is the resource's v1 URL. Size the
+# deployment at 200K tokens per minute or more; see GETTING_STARTED.md.
+#SYSLOG_DEFAULT_MODEL=azure/gpt-5.6-luna
+#AZURE_OPENAI_ENDPOINT=https://my-resource.openai.azure.com/openai/v1/
+#AZURE_OPENAI_API_KEY=...
+
+# Optional: keep the cheap model for the bulk log scanning but hand the
+# final resolutions and explanations to a stronger one. Each stage falls
+# back to SYSLOG_DEFAULT_MODEL when its variable is unset.
+#SYSLOG_LOGSCAN_MODEL=openai/gpt-5.6-luna
+#SYSLOG_ISSUE_MODEL=anthropic/claude-fable-5-1
+# Optional: how many same-host log lines either side of each issue's
+# example the resolution writer sees (default 5; 0 sends the issues alone).
+#SYSLOG_CONTEXT_LINES=5
+# Optional: the most issues one run hands to the resolution writer, most
+# severe first (default 60; 0 resolves every issue). The writer runs on
+# the expensive model and its output is most of a day's bill, so this
+# bounds a storm day; issues past the cap still appear in the attachment
+# and the findings library, just without a resolution.
+#SYSLOG_MAX_RESOLVE_ISSUES=60
+# Optional: literal strings to strip from anything sent to the LLM
+# provider, e.g. your domain. Case-insensitive, replaced with [redacted].
+# A courtesy for hiding estate identity, NOT PII/compliance redaction;
+# if your logs need that, stick to --no-llm.
+#SYSLOG_REDACT=example.ac.uk,10.20.
+
+# Where elk_dump.py fetches yesterday's logs from. ELK_API_KEY works
+# instead of username/password; ELK_INSECURE=1 skips TLS verification
+# for a self-signed cluster (ELK_CA_CERT=/path/to/ca.pem trusts a local
+# CA instead). No ELK? Leave these unset and see the notes at the top
+# of daily-run.sh for slicing yesterday's log yourself.
+ELK_URL=https://elk.example.ac.uk:9200
+ELK_USERNAME=syslog-reporter
+ELK_PASSWORD=...
+ELK_INDEX=logs-system.syslog-default
+ELK_INSECURE=1
+
+# Only on a server with no direct internet route. Go and Python both
+# honour upper- or lower-case spellings; no_proxy keeps internal traffic
+# (your ELK cluster, your mail relay) off the proxy.
+#http_proxy=http://proxy.example.ac.uk:3128
+#https_proxy=http://proxy.example.ac.uk:3128
+#no_proxy=elk.example.ac.uk,mail-relay.example.ac.uk

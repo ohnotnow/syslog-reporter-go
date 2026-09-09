@@ -1,0 +1,24 @@
+# The findings web UI as a small systemd service. install.sh copies this
+# to /etc/systemd/system/; by hand:
+#   sudo install -m 644 scripts/syslog-reporter-web.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now syslog-reporter-web
+#
+# Flags and SYSLOG_WEB_* environment variables are interchangeable (the
+# flag wins). serve refuses to start until the database exists, so do a
+# first run (or backfill.sh) before enabling it. Plain HTTP on localhost
+# with local accounts is the default; TECHNICAL_OVERVIEW.md covers TLS,
+# other listen addresses and the auth modes.
+
+[Unit]
+Description=syslog-reporter findings UI
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/syslog-reporter serve --listen 127.0.0.1:7373 \
+  --db /var/lib/syslog-reporter/syslog_aggregates.db --auth local
+WorkingDirectory=/var/lib/syslog-reporter
+User=syslog-reporter
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
