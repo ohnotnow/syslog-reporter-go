@@ -26,7 +26,19 @@
 # file and unit are rewritten, and an existing .env is left exactly as
 # it is. Debian and RHEL-alikes with cron and systemd only.
 
-set -euo pipefail
+set -Eeuo pipefail
+
+# Any command that fails unexpectedly stops the script (set -e); say
+# which step and which command, so nobody is left guessing why it
+# exited 1 or how far it got. The deliberate stops go through die().
+step=starting
+step() { step=$1; echo "== $step"; }
+on_error() {
+    echo "install.sh: failed during '$step' at line $1:" >&2
+    echo "    $2" >&2
+    echo "Steps before '$step' are done; fix the cause and re-run (re-running is safe)." >&2
+}
+trap 'on_error "$LINENO" "$BASH_COMMAND"' ERR
 
 SERVICE_USER=${SERVICE_USER:-syslog-reporter}
 WORK_DIR=${WORK_DIR:-/var/lib/syslog-reporter}
@@ -99,7 +111,7 @@ build_from_source() {
     echo "built $here/syslog-reporter"
 }
 
-echo "== binary"
+step "binary"
 binary=
 for candidate in "$here/syslog-reporter" "$here/$asset"; do
     if [ -n "$candidate" ] && [ -f "$candidate" ]; then
@@ -118,7 +130,7 @@ fi
 chmod 755 "$binary"
 "$binary" --help >/dev/null 2>&1 || die "$binary does not run here (wrong architecture?)"
 
-echo "== user and state directory"
+step "user and state directory"
 if id "$SERVICE_USER" >/dev/null 2>&1; then
     echo "user $SERVICE_USER exists"
 else
@@ -127,12 +139,12 @@ else
 fi
 install -d -o "$SERVICE_USER" -m 750 "$WORK_DIR"
 
-echo "== binary and helpers into $BIN_DIR"
+step "binary and helpers into $BIN_DIR"
 install -m 755 "$binary" "$BIN_DIR/syslog-reporter"
 install -m 755 "$here/tools/elk_dump.py" \
     "$here/scripts/backfill.sh" "$here/scripts/daily-run.sh" "$BIN_DIR/"
 
-echo "== settings"
+step "settings"
 env_file="$WORK_DIR/.env"
 if [ -e "$env_file" ]; then
     echo "$env_file exists, leaving it alone"
@@ -146,7 +158,7 @@ else
     fi
 fi
 
-echo "== cron"
+step "cron"
 mailto=
 if [ -t 0 ]; then
     read -r -p "address for cron's failure mail (blank for none): " mailto
@@ -162,7 +174,7 @@ cron_file=/etc/cron.d/syslog-reporter
 chmod 644 "$cron_file"
 echo "wrote $cron_file"
 
-echo "== history"
+step "history"
 if ask "run backfill.sh for the last $BACKFILL_DAYS days now (free, no LLM)?" y; then
     runuser -u "$SERVICE_USER" -- "$BIN_DIR/backfill.sh" "$BACKFILL_DAYS" ||
         echo "backfill reported failures - check the ELK lines in $env_file and re-run: sudo -u $SERVICE_USER backfill.sh" >&2
@@ -170,7 +182,7 @@ else
     echo "skipped - run it later with: sudo -u $SERVICE_USER backfill.sh"
 fi
 
-echo "== web UI"
+step "web UI"
 if ask "install the findings web UI as a systemd service (127.0.0.1:7373)?" n; then
     command -v systemctl >/dev/null || die "systemctl not found"
     install -m 644 "$here/scripts/syslog-reporter-web.service" /etc/systemd/system/
