@@ -1,6 +1,12 @@
 package reporter
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -245,6 +251,101 @@ func TestPromptsEmbedded(t *testing.T) {
 	for name, p := range prompts {
 		if len(p) < 200 {
 			t.Errorf("%s prompt suspiciously short (%d bytes); go:embed broken?", name, len(p))
+		}
+	}
+}
+
+// A whole day's issues go to the resolution writer a dozen at a time, and
+// each batch must keep the context windows that belong to its own issues
+// (Contexts is index-aligned with Issues, or absent altogether).
+func TestResolutionBatchesKeepContextsAligned(t *testing.T) {
+	const n = 30
+	issues := &IssueList{}
+	var contexts []LogContext
+	for i := 0; i < n; i++ {
+		name := fmt.Sprintf("issue-%02d", i)
+		issues.Issues = append(issues.Issues, &Issue{Issue: name})
+		contexts = append(contexts, LogContext{Host: name})
+	}
+	batches := NewResolutionAgent(issues, contexts, "test/model", nil).batches()
+	if got := len(batches); got != 3 {
+		t.Fatalf("got %d batches for %d issues, want 3", got, n)
+	}
+	var sizes []int
+	for _, b := range batches {
+		sizes = append(sizes, len(b.Issues.Issues))
+		if len(b.Contexts) != len(b.Issues.Issues) {
+			t.Fatalf("batch has %d contexts for %d issues", len(b.Contexts), len(b.Issues.Issues))
+		}
+		for j, issue := range b.Issues.Issues {
+			if b.Contexts[j].Host != issue.Issue {
+				t.Errorf("context %q sits beside issue %q", b.Contexts[j].Host, issue.Issue)
+			}
+		}
+	}
+	if want := []int{12, 12, 6}; !slices.Equal(sizes, want) {
+		t.Errorf("batch sizes %v, want %v", sizes, want)
+	}
+
+	plain := NewResolutionAgent(issues, nil, "test/model", nil).batches()
+	for _, b := range plain {
+		if b.Contexts != nil {
+			t.Errorf("batch without contexts got %d", len(b.Contexts))
+		}
+	}
+}
+
+// Run must make one request per batch and hand back every batch's
+// resolutions in issue order, so downstream pairing by issue title still
+// finds them all.
+func TestResolutionRunConcatenatesBatches(t *testing.T) {
+	var payloads []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Messages []struct{ Content string } `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decoding request: %v", err)
+		}
+		user := req.Messages[len(req.Messages)-1].Content
+		payloads = append(payloads, user)
+		var res []map[string]any
+		for _, line := range strings.Split(user, "\n") {
+			if title, ok := strings.CutPrefix(line, "## "); ok {
+				res = append(res, map[string]any{"issue": title, "investigate": " ls "})
+			}
+		}
+		content, _ := json.Marshal(map[string]any{"resolutions": res})
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"choices": []map[string]any{
+			{"message": map[string]any{"role": "assistant", "content": string(content)}},
+		}})
+	}))
+	defer server.Close()
+	t.Setenv("OPENAI_BASE_URL", server.URL+"/v1")
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("SYSLOG_REASONING_EFFORT", "")
+
+	issues := &IssueList{}
+	for i := 0; i < 25; i++ {
+		issues.Issues = append(issues.Issues, &Issue{Issue: fmt.Sprintf("issue-%02d", i)})
+	}
+	got, err := NewResolutionAgent(issues, nil, "openai/test-model", nil).Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(payloads) != 3 {
+		t.Fatalf("made %d requests for 25 issues, want 3", len(payloads))
+	}
+	if len(got.Resolutions) != 25 {
+		t.Fatalf("got %d resolutions, want 25", len(got.Resolutions))
+	}
+	for i, r := range got.Resolutions {
+		if want := fmt.Sprintf("issue-%02d", i); r.Issue != want {
+			t.Errorf("resolution %d is for %q, want %q", i, r.Issue, want)
+		}
+		if r.Investigate != "ls" {
+			t.Errorf("investigate not trimmed: %q", r.Investigate)
 		}
 	}
 }

@@ -187,6 +187,22 @@ as one bare error minutes later. Azure's 429s also carry
 `Retry-After-Ms: 0` alongside the honest `Retry-After`; the client drops
 the zero so it cannot turn the backoff into an instant retry.
 
+The resolution writer works a dozen issues per request
+(`reporter.resolutionBatchSize`), each batch carrying its own context
+windows, and the batches' resolutions are concatenated in issue order. A
+single request for the whole day sends nothing back until every
+resolution is written, and on a slow provider day that outlived the
+connection: on 2026-09-09, 48 issues to an Azure gpt-6 deployment
+produced no response headers inside openai-go's ten-minute cap, the SDK
+treated the timeout as a connection error and re-sent the identical
+request, and nine attempts of ten minutes was the hour-long "hang" the
+cron monitor reported. Each batch goes through the same retry budget on
+its own, so a network blip costs one batch, and a batch that exhausts its
+retries still fails the run loudly. A `--debug` run logs every HTTP
+attempt as it is sent (attempt number, body size, URL) and as it returns
+(status or transport error, elapsed), so a run stuck inside the SDK's
+retry loop is readable from the log.
+
 `SYSLOG_REASONING_EFFORT` takes one of `low`, `medium`, `high`, `xhigh`,
 `max` and goes to both providers verbatim (OpenAI's `reasoning_effort`,
 Anthropic's `output_config.effort`). Unset means `low`: nobody waits on a

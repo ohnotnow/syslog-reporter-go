@@ -229,6 +229,31 @@ func NewResolutionAgent(issues *IssueList, contexts []LogContext, model string, 
 	return &ResolutionAgent{Issues: issues, Contexts: contexts, Model: model, HostOS: hostOS}
 }
 
+// resolutionBatchSize caps the issues per resolution request. One request
+// for a whole day's issues sends nothing back until every resolution is
+// written, and on a slow provider day that outlived the connection: 48
+// issues produced no response headers in ten minutes (openai-go's cap,
+// seen 2026-09-09), and the SDK then re-sent the identical request eight
+// more times. A dozen per call keeps each request to a few minutes, so a
+// retry redoes one batch rather than the day.
+const resolutionBatchSize = 12
+
+// batches splits the agent into per-request agents of at most
+// resolutionBatchSize issues, each carrying the context windows for its
+// own issues (Contexts is index-aligned with Issues, or nil).
+func (a *ResolutionAgent) batches() []*ResolutionAgent {
+	var out []*ResolutionAgent
+	for i := 0; i < len(a.Issues.Issues); i += resolutionBatchSize {
+		end := min(i+resolutionBatchSize, len(a.Issues.Issues))
+		b := &ResolutionAgent{Issues: &IssueList{Issues: a.Issues.Issues[i:end]}, Model: a.Model, HostOS: a.HostOS}
+		if i < len(a.Contexts) {
+			b.Contexts = a.Contexts[i:min(end, len(a.Contexts))]
+		}
+		out = append(out, b)
+	}
+	return out
+}
+
 // payload is the issues as markdown, each followed by its context window
 // when one was found.
 func (a *ResolutionAgent) payload() string {
@@ -284,22 +309,27 @@ func (a *ResolutionAgent) Run(ctx context.Context) (*ResolutionList, error) {
 	if len(a.Issues.Issues) == 0 {
 		return &ResolutionList{}, nil
 	}
-	var got ResolutionList
-	err := llm.Complete(ctx, a.Model, resolutionPrompt(a.HostOS, len(a.Contexts) > 0), a.payload(),
-		"ResolutionList", resolutionListSchema(), &got)
-	if err != nil {
-		return nil, err
+	system := resolutionPrompt(a.HostOS, len(a.Contexts) > 0)
+	var all ResolutionList
+	for _, batch := range a.batches() {
+		var got ResolutionList
+		err := llm.Complete(ctx, a.Model, system, batch.payload(),
+			"ResolutionList", resolutionListSchema(), &got)
+		if err != nil {
+			return nil, err
+		}
+		all.Resolutions = append(all.Resolutions, got.Resolutions...)
 	}
 	// Models pad some list entries with stray leading whitespace (seen from
 	// gpt-5.6-luna, 2026-08-29: '# comment' lines with one leading space).
 	// Trim at the parse boundary so every downstream view - markdown files,
 	// email, findings library - agrees.
-	for _, r := range got.Resolutions {
+	for _, r := range all.Resolutions {
 		r.Investigate = strings.TrimSpace(r.Investigate)
 		r.LookFor = strings.TrimSpace(r.LookFor)
 		trimEach(r.FixCommands)
 	}
-	return &got, nil
+	return &all, nil
 }
 
 // trimEach TrimSpaces a list of LLM-supplied lines in place.

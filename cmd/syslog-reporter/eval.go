@@ -109,6 +109,7 @@ func runEval(args []string) {
 	}
 	log := &logger{}
 	llm.SetLogger(log.Warn)
+	llm.SetDebugLogger(log.Debug)
 
 	lines := strings.Split(strings.TrimRight(evalFixture, "\n"), "\n")
 	source := "bundled fixture"

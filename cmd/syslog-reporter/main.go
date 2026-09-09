@@ -685,6 +685,7 @@ type runConfig struct {
 func run(cfg runConfig) {
 	log := &logger{debugEnabled: cfg.debug}
 	llm.SetLogger(log.Warn)
+	llm.SetDebugLogger(log.Debug)
 
 	// The slice we're processing is yesterday's by default; the date keys
 	// the persisted aggregates (NDJSON input overrides this from the data).
@@ -853,9 +854,13 @@ func run(cfg runConfig) {
 		explained = reporter.FactsOnly(anomalies)
 	}
 
+	// One line per model, key=value, so the day's cost can be pulled out
+	// of the log with a grep and multiplied by each deployment's price.
 	if cfg.llmOn {
-		usage := llm.TotalUsage()
-		log.Info("LLM usage: %d prompt tokens, %d completion tokens", usage.PromptTokens, usage.CompletionTokens)
+		for _, m := range llm.UsageByModel() {
+			log.Info("Token usage: model=%s prompt_tokens=%d completion_tokens=%d",
+				m.Model, m.PromptTokens, m.CompletionTokens)
+		}
 	}
 
 	// Persist this run's findings into the library (same SQLite file as the

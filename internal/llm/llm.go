@@ -54,6 +54,21 @@ func SetLogger(fn func(format string, args ...any)) {
 	logf = fn
 }
 
+// debugf is where every HTTP attempt is reported: request size, then
+// status or transport error with the elapsed time. A run that hangs for
+// an hour inside the SDK's retry loop looks identical in the log to one
+// stuck on a single dead request unless each attempt is visible.
+// Defaults to a no-op; main wires it to its DEBUG logger.
+var debugf = func(format string, args ...any) {}
+
+// SetDebugLogger routes the package's per-attempt request tracing to fn.
+func SetDebugLogger(fn func(format string, args ...any)) {
+	if fn == nil {
+		fn = func(string, ...any) {}
+	}
+	debugf = fn
+}
+
 // Complete sends a system+user prompt to the provider named by the model
 // prefix and decodes the JSON structured output (constrained by schema)
 // into out. schemaName labels the schema for providers that want a name.
@@ -184,14 +199,23 @@ func completeAzure(ctx context.Context, modelID, system, user, schemaName string
 //     the SDK's own capped exponential backoff) drives the wait.
 func rateLimitMiddleware(model string) func(*http.Request, func(*http.Request) (*http.Response, error)) (*http.Response, error) {
 	return func(req *http.Request, next func(*http.Request) (*http.Response, error)) (*http.Response, error) {
+		attempt, _ := strconv.Atoi(req.Header.Get("X-Stainless-Retry-Count"))
+		debugf("%s: attempt %d/%d: sending %d-byte request to %s", model, attempt+1, llmMaxRetries+1, req.ContentLength, req.URL)
+		start := time.Now()
 		resp, err := next(req)
+		elapsed := time.Since(start).Round(time.Second)
+		switch {
+		case err != nil:
+			debugf("%s: attempt %d/%d: failed after %s: %v", model, attempt+1, llmMaxRetries+1, elapsed, err)
+		case resp != nil:
+			debugf("%s: attempt %d/%d: HTTP %d after %s", model, attempt+1, llmMaxRetries+1, resp.StatusCode, elapsed)
+		}
 		if resp == nil || resp.StatusCode != http.StatusTooManyRequests {
 			return resp, err
 		}
 		if ms, perr := strconv.ParseFloat(resp.Header.Get("Retry-After-Ms"), 64); perr == nil && ms <= 0 {
 			resp.Header.Del("Retry-After-Ms")
 		}
-		attempt, _ := strconv.Atoi(req.Header.Get("X-Stainless-Retry-Count"))
 		if attempt >= llmMaxRetries {
 			logf("rate limited by %s: %s, retries exhausted (%d/%d)", model, retryAfterHint(resp), attempt, llmMaxRetries)
 		} else {
@@ -240,7 +264,7 @@ func completeChat(ctx context.Context, client openai.Client, provider, modelID, 
 	if err != nil {
 		return fmt.Errorf("%s/%s: %w", provider, modelID, err)
 	}
-	addUsage(resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
+	addUsage(provider+"/"+modelID, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
 	if len(resp.Choices) == 0 {
 		return fmt.Errorf("%s/%s: response had no choices", provider, modelID)
 	}
@@ -272,7 +296,7 @@ func completeAnthropic(ctx context.Context, modelID, system, user string, schema
 	if err != nil {
 		return fmt.Errorf("anthropic/%s: %w", modelID, err)
 	}
-	addUsage(resp.Usage.InputTokens, resp.Usage.OutputTokens)
+	addUsage("anthropic/"+modelID, resp.Usage.InputTokens, resp.Usage.OutputTokens)
 	var text strings.Builder
 	for _, block := range resp.Content {
 		if t, ok := block.AsAny().(anthropic.TextBlock); ok {
