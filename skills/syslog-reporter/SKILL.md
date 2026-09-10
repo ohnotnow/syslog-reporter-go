@@ -8,7 +8,7 @@ description: >
   digest email, syslog findings, muting a finding, or log trends across the
   estate.
 allowed-tools: "Bash"
-version: "1.0.0"
+version: "1.1.0"
 ---
 
 # syslog-reporter
@@ -60,9 +60,10 @@ are `YYYY-MM-DD`. Errors are JSON with one `error` string.
 Examples:
 
 ```bash
-# Today's findings
+# The latest run's findings: find its log_date first, then list that day
+curl -sS -H "Authorization: Bearer $SYSLOG_API_TOKEN" "$SYSLOG_API_URL/api/runs"
 curl -sS -H "Authorization: Bearer $SYSLOG_API_TOKEN" \
-  "$SYSLOG_API_URL/api/findings?since=$(date +%F)"
+  "$SYSLOG_API_URL/api/findings?since=2026-09-08&until=2026-09-08"
 
 # One finding
 curl -sS -H "Authorization: Bearer $SYSLOG_API_TOKEN" "$SYSLOG_API_URL/api/findings/1234"
@@ -158,6 +159,18 @@ Anomaly kinds carry `anomaly` instead of `issue`, with `host`, `program`,
 
 ## How to behave
 
+- **"Today" means the latest run.** Each daily run reads the previous
+  day's logs, so its `log_date` is yesterday, and the run may not have
+  happened yet when someone asks. For "today's issues", fetch `/api/runs`,
+  take the newest `log_date`, and list findings for that date. Say which
+  date you used.
+- **Prefer local files for charts and dashboards.** Titles, hosts and
+  log lines name the estate. When the user wants a chart or dashboard,
+  offer a self-contained local HTML file opened in their browser first.
+  An Artifact is a page hosted on Anthropic's servers, so before
+  publishing one say plainly that the data will leave this machine and
+  let the user decide; sharing it with colleagues on the same plan is
+  their call, not yours.
 - **Read before you mute.** Fetch the finding, tell the user which hosts
   and which program the mute will cover (one entry per host, program from
   the finding), and confirm before sending the POST. A mute changes what
