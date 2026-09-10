@@ -201,3 +201,31 @@ func TestMgmtEmailIsMultipartAlternative(t *testing.T) {
 		t.Error("management email must not carry an attachment")
 	}
 }
+
+// The management report reads daily runs only (srg-xiBoC.1): a digest run
+// in the window must not double-count the week's findings or votes.
+func TestGatherMgmtStatsIgnoresDigestRuns(t *testing.T) {
+	lib, agg := seedMgmtFixture(t)
+	before, err := GatherMgmtStats(lib, agg, day(2026, 6, 1), day(2026, 6, 4))
+	if err != nil {
+		t.Fatal(err)
+	}
+	issue := sampleIssuePayload().Issue
+	issue.Severity = "critical"
+	if err := CaptureRun(lib, day(2026, 6, 2), RunKindDigest, "smart/model", -1, -1,
+		&IssueList{Issues: []*Issue{&issue}}, nil, []*ExplainedAnomaly{sampleAnomaly()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := lib.RecordFeedback(issue.ID, nil, "worked", ""); err != nil {
+		t.Fatal(err)
+	}
+	after, err := GatherMgmtStats(lib, agg, day(2026, 6, 1), day(2026, 6, 4))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.TotalFindings != before.TotalFindings || after.AnomalyCount != before.AnomalyCount ||
+		after.SeverityCounts["critical"] != before.SeverityCounts["critical"] ||
+		after.FeedbackWorked != before.FeedbackWorked || after.TotalRaw != before.TotalRaw {
+		t.Errorf("digest run changed the numbers: before %+v after %+v", before, after)
+	}
+}

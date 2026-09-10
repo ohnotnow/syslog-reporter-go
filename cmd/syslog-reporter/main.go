@@ -907,7 +907,7 @@ func run(cfg runConfig) {
 		if lib, err := reporter.OpenLibraryStore(cfg.dbPath); err != nil {
 			log.Warn("opening findings library %s: %v", cfg.dbPath, err)
 		} else {
-			if err := reporter.CaptureRun(lib, logDate, captureModel,
+			if err := reporter.CaptureRun(lib, logDate, reporter.RunKindDaily, captureModel,
 				len(cfg.lines), len(filteredLines), issues, resolutions, explained); err != nil {
 				log.Warn("capturing findings: %v", err)
 			} else {

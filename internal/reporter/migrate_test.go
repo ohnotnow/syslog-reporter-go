@@ -315,8 +315,8 @@ INSERT INTO api_tokens (user_id, token_hash, token_prefix, created_at) VALUES (3
 		t.Fatalf("migrating open: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
-	if v := schemaVersion(t, db); v != 3 {
-		t.Errorf("schema version = %d, want 3", v)
+	if v, want := schemaVersion(t, db), migrations[len(migrations)-1].version; v != want {
+		t.Errorf("schema version = %d, want %d", v, want)
 	}
 	for _, table := range []string{"findings", "users"} {
 		var ddl string
@@ -356,5 +356,42 @@ INSERT INTO api_tokens (user_id, token_hash, token_prefix, created_at) VALUES (3
 	defer rows.Close()
 	if rows.Next() {
 		t.Error("foreign_key_check reported violations after the rebuild")
+	}
+}
+
+// Migration 4 (srg-xiBoC.1): a version-3 file gains runs.kind and every
+// run it already held reads back as a daily run.
+func TestMigrateV3FileGainsRunKind(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v3.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v3 := baselineSchema + apiTokensSchema + nonReusableIDsSchema + `
+CREATE TABLE schema_version (id INTEGER PRIMARY KEY CHECK (id = 1), version INTEGER NOT NULL DEFAULT 0);
+INSERT INTO schema_version (id, version) VALUES (1, 3);
+INSERT INTO runs (id, log_date, created_at, model) VALUES (1, '2026-06-01', '2026-06-02T06:00:00Z', 'test-model');
+`
+	if _, err := raw.Exec(v3); err != nil {
+		t.Fatalf("build v3 db: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	lib, err := OpenLibraryStore(path)
+	if err != nil {
+		t.Fatalf("migrating open: %v", err)
+	}
+	t.Cleanup(func() { lib.Close() })
+	if v, want := schemaVersion(t, lib.db), migrations[len(migrations)-1].version; v != want {
+		t.Errorf("schema version = %d, want %d", v, want)
+	}
+	runs, err := lib.ListRuns("", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 || runs[0].Kind != RunKindDaily {
+		t.Errorf("runs after migration = %+v, want one daily run", runs)
 	}
 }

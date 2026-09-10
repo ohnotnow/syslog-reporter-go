@@ -77,7 +77,7 @@ func GatherMgmtStats(lib *LibraryStore, agg *AggregateStore, from, to time.Time)
 	}
 	runs := map[string]runRow{}
 	rows, err := lib.db.Query(
-		"SELECT log_date, raw_lines, filtered_lines FROM runs WHERE log_date BETWEEN ? AND ?",
+		"SELECT log_date, raw_lines, filtered_lines FROM runs WHERE kind = 'daily' AND log_date BETWEEN ? AND ?",
 		fromISO, toISO)
 	if err != nil {
 		return nil, err
@@ -132,7 +132,7 @@ func GatherMgmtStats(lib *LibraryStore, agg *AggregateStore, from, to time.Time)
 	rows, err = lib.db.Query(
 		`SELECT r.log_date, COUNT(*) FROM findings f
 		 JOIN runs r ON r.id = f.run_id
-		 WHERE r.log_date BETWEEN ? AND ? GROUP BY r.log_date`,
+		 WHERE r.kind = 'daily' AND r.log_date BETWEEN ? AND ? GROUP BY r.log_date`,
 		fromISO, toISO)
 	if err != nil {
 		return nil, err
@@ -180,7 +180,7 @@ func GatherMgmtStats(lib *LibraryStore, agg *AggregateStore, from, to time.Time)
 	rows, err = lib.db.Query(
 		`SELECT f.kind, f.severity, COUNT(*) FROM findings f
 		 JOIN runs r ON r.id = f.run_id
-		 WHERE r.log_date BETWEEN ? AND ? GROUP BY f.kind, f.severity`,
+		 WHERE r.kind = 'daily' AND r.log_date BETWEEN ? AND ? GROUP BY f.kind, f.severity`,
 		fromISO, toISO)
 	if err != nil {
 		return nil, err
@@ -206,7 +206,7 @@ func GatherMgmtStats(lib *LibraryStore, agg *AggregateStore, from, to time.Time)
 	rows, err = lib.db.Query(
 		`SELECT f.service, COUNT(*) AS n FROM findings f
 		 JOIN runs r ON r.id = f.run_id
-		 WHERE r.log_date BETWEEN ? AND ? AND f.service <> ''
+		 WHERE r.kind = 'daily' AND r.log_date BETWEEN ? AND ? AND f.service <> ''
 		 GROUP BY f.service ORDER BY n DESC, f.service LIMIT 5`,
 		fromISO, toISO)
 	if err != nil {
@@ -229,7 +229,7 @@ func GatherMgmtStats(lib *LibraryStore, agg *AggregateStore, from, to time.Time)
 		`SELECT fb.verdict, COUNT(*) FROM feedback fb
 		 JOIN findings f ON f.id = fb.finding_id
 		 JOIN runs r ON r.id = f.run_id
-		 WHERE r.log_date BETWEEN ? AND ? GROUP BY fb.verdict`,
+		 WHERE r.kind = 'daily' AND r.log_date BETWEEN ? AND ? GROUP BY fb.verdict`,
 		fromISO, toISO)
 	if err != nil {
 		return nil, err

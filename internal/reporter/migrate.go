@@ -92,6 +92,7 @@ var migrations = []migration{
 	{1, "baseline schema", applyBaselineSchema},
 	{2, "api tokens", applyAPITokens},
 	{3, "non-reusable finding and user ids", applyNonReusableIDs},
+	{4, "run kind", applyRunKind},
 }
 
 const baselineSchema = `
@@ -159,26 +160,10 @@ func applyBaselineSchema(tx *sql.Tx) error {
 	// explicit ADD COLUMN: CREATE TABLE IF NOT EXISTS never alters an
 	// existing table. Rows from before the change keep NULL in both columns
 	// (meaning "not recorded", distinct from a genuine zero-line day).
-	rows, err := tx.Query("PRAGMA table_info(runs)")
+	have, err := tableColumns(tx, "runs")
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
-	have := map[string]bool{}
-	for rows.Next() {
-		var cid int
-		var name, colType string
-		var notNull, pk int
-		var dflt any
-		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
-			return err
-		}
-		have[name] = true
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	rows.Close()
 	for _, col := range []string{"raw_lines", "filtered_lines"} {
 		if have[col] {
 			continue
@@ -188,6 +173,29 @@ func applyBaselineSchema(tx *sql.Tx) error {
 		}
 	}
 	return nil
+}
+
+// tableColumns names the columns a table currently has, for the guarded
+// ADD COLUMN migrations (the ladder must be re-runnable: see
+// TestMigrateV1FileGainsAPITokens).
+func tableColumns(tx *sql.Tx, table string) (map[string]bool, error) {
+	rows, err := tx.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	have := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			return nil, err
+		}
+		have[name] = true
+	}
+	return have, rows.Err()
 }
 
 // runMigrations applies every migration newer than the file's stamped
@@ -315,5 +323,26 @@ DROP TABLE stash_api_tokens;
 
 func applyNonReusableIDs(tx *sql.Tx) error {
 	_, err := tx.Exec(nonReusableIDsSchema)
+	return err
+}
+
+// Migration 4 (ait srg-xiBoC.1): the library holds two kinds of run. A
+// daily run covers one day's dump; a digest run is the weekly roll-up of
+// the daily findings in a window, filed under the window's end date so
+// its findings get ids the email can print. Replace-on-rerun keys on
+// (log_date, kind), so re-running a digest never touches that day's
+// daily run and vice versa. Every existing row is a daily run.
+func applyRunKind(tx *sql.Tx) error {
+	have, err := tableColumns(tx, "runs")
+	if err != nil {
+		return err
+	}
+	if !have["kind"] {
+		if _, err := tx.Exec(
+			"ALTER TABLE runs ADD COLUMN kind TEXT NOT NULL DEFAULT 'daily'"); err != nil {
+			return err
+		}
+	}
+	_, err = tx.Exec("CREATE INDEX IF NOT EXISTS idx_runs_date_kind ON runs (log_date, kind)")
 	return err
 }

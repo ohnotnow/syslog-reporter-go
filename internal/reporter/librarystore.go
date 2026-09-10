@@ -53,12 +53,34 @@ type execer interface {
 // first, together with its findings, hosts and feedback. Re-running a day is
 // a testing/backfill operation; losing that day's votes is accepted, and
 // duplicate findings polluting the library forever would be worse.
+// Run kinds (migration 4, ait srg-xiBoC.1). A daily run covers one day's
+// dump; a digest run is the weekly roll-up filed under its window's end
+// date. Replace-on-rerun keys on (log_date, kind).
+const (
+	RunKindDaily  = "daily"
+	RunKindDigest = "digest"
+)
+
+// ErrBadRunKind rejects any run kind other than the two the library knows.
+var ErrBadRunKind = errors.New("run kind must be 'daily' or 'digest'")
+
+// CheckRunKindFilter validates a user-supplied run-kind filter: empty means
+// any, otherwise it must name a real kind.
+func CheckRunKindFilter(kind string) error {
+	if kind == "" || kind == RunKindDaily || kind == RunKindDigest {
+		return nil
+	}
+	return ErrBadRunKind
+}
+
+// BeginRun starts a DAILY run for logDate, replacing any earlier daily run
+// for that date. Digest runs only ever arrive through CaptureRun.
 func (s *LibraryStore) BeginRun(logDate time.Time, model string) (int64, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return 0, err
 	}
-	id, err := beginRun(tx, logDate, model)
+	id, err := beginRun(tx, logDate, RunKindDaily, model)
 	if err != nil {
 		tx.Rollback()
 		return 0, err
@@ -66,18 +88,22 @@ func (s *LibraryStore) BeginRun(logDate time.Time, model string) (int64, error) 
 	return id, tx.Commit()
 }
 
-func beginRun(q execer, logDate time.Time, model string) (int64, error) {
+func beginRun(q execer, logDate time.Time, kind, model string) (int64, error) {
+	if kind != RunKindDaily && kind != RunKindDigest {
+		return 0, ErrBadRunKind
+	}
 	iso := isoDate(logDate)
-	// Child-first deletes: foreign_keys is ON, so order matters.
+	// Child-first deletes: foreign_keys is ON, so order matters. Only the
+	// same kind's earlier run for the date is stale.
 	staleFindings := "(SELECT id FROM findings WHERE run_id IN " +
-		"(SELECT id FROM runs WHERE log_date = ?))"
+		"(SELECT id FROM runs WHERE log_date = ? AND kind = ?))"
 	for _, del := range []string{
 		"DELETE FROM feedback WHERE finding_id IN " + staleFindings,
 		"DELETE FROM finding_hosts WHERE finding_id IN " + staleFindings,
-		"DELETE FROM findings WHERE run_id IN (SELECT id FROM runs WHERE log_date = ?)",
-		"DELETE FROM runs WHERE log_date = ?",
+		"DELETE FROM findings WHERE run_id IN (SELECT id FROM runs WHERE log_date = ? AND kind = ?)",
+		"DELETE FROM runs WHERE log_date = ? AND kind = ?",
 	} {
-		if _, err := q.Exec(del, iso); err != nil {
+		if _, err := q.Exec(del, iso, kind); err != nil {
 			return 0, err
 		}
 	}
@@ -86,8 +112,8 @@ func beginRun(q execer, logDate time.Time, model string) (int64, error) {
 		modelVal = model
 	}
 	res, err := q.Exec(
-		"INSERT INTO runs (log_date, created_at, model) VALUES (?, ?, ?)",
-		iso, time.Now().UTC().Format(time.RFC3339), modelVal)
+		"INSERT INTO runs (log_date, kind, created_at, model) VALUES (?, ?, ?, ?)",
+		iso, kind, time.Now().UTC().Format(time.RFC3339), modelVal)
 	if err != nil {
 		return 0, err
 	}
@@ -102,11 +128,20 @@ func (s *LibraryStore) SetRunStats(runID int64, rawLines, filteredLines int) err
 	return setRunStats(s.db, runID, rawLines, filteredLines)
 }
 
+// A negative count means "not recorded" and stores NULL: a digest run has
+// no ingest funnel, and writing 0 would read as an empty dump.
 func setRunStats(q execer, runID int64, rawLines, filteredLines int) error {
 	_, err := q.Exec(
 		"UPDATE runs SET raw_lines = ?, filtered_lines = ? WHERE id = ?",
-		rawLines, filteredLines, runID)
+		nullableCount(rawLines), nullableCount(filteredLines), runID)
 	return err
+}
+
+func nullableCount(n int) any {
+	if n < 0 {
+		return nil
+	}
+	return n
 }
 
 // AddFinding persists one finding plus its per-host rows in one transaction
@@ -161,6 +196,7 @@ type FindingFilter struct {
 	Service  string
 	Severity string
 	Kind     string
+	RunKind  string // exact: RunKindDaily or RunKindDigest
 	Query    string
 	From     string
 	To       string
@@ -175,6 +211,7 @@ type FindingSummary struct {
 	ID        int64  `json:"id"`
 	RunID     int64  `json:"run_id"`
 	LogDate   string `json:"log_date"`
+	RunKind   string `json:"run_kind"` // daily or digest
 	Kind      string `json:"kind"`
 	Severity  string `json:"severity"` // '' for anomaly kinds
 	Title     string `json:"title"`
@@ -213,6 +250,9 @@ func (s *LibraryStore) SearchFindings(f FindingFilter) ([]*FindingSummary, error
 	if f.Kind != "" {
 		add("fnd.kind = ?", f.Kind)
 	}
+	if f.RunKind != "" {
+		add("r.kind = ?", f.RunKind)
+	}
 	if f.Query != "" {
 		add(`fnd.title LIKE ? ESCAPE '\'`, "%"+escapeLike(f.Query)+"%")
 	}
@@ -224,7 +264,7 @@ func (s *LibraryStore) SearchFindings(f FindingFilter) ([]*FindingSummary, error
 	}
 	args = append(args, f.Limit, f.Offset)
 	rows, err := s.db.Query(
-		"SELECT fnd.id, fnd.run_id, r.log_date, fnd.kind, COALESCE(fnd.severity, ''), "+
+		"SELECT fnd.id, fnd.run_id, r.log_date, r.kind, fnd.kind, COALESCE(fnd.severity, ''), "+
 			"fnd.title, COALESCE(fnd.service, ''), "+
 			"COALESCE((SELECT GROUP_CONCAT(fh.host, ', ') FROM finding_hosts fh "+
 			"WHERE fh.finding_id = fnd.id), ''), "+
@@ -241,7 +281,7 @@ func (s *LibraryStore) SearchFindings(f FindingFilter) ([]*FindingSummary, error
 	var out []*FindingSummary
 	for rows.Next() {
 		fs := &FindingSummary{}
-		if err := rows.Scan(&fs.ID, &fs.RunID, &fs.LogDate, &fs.Kind, &fs.Severity,
+		if err := rows.Scan(&fs.ID, &fs.RunID, &fs.LogDate, &fs.RunKind, &fs.Kind, &fs.Severity,
 			&fs.Title, &fs.Service, &fs.Hosts, &fs.Worked, &fs.DidntWork); err != nil {
 			return nil, err
 		}
@@ -258,7 +298,8 @@ type FindingDetail struct {
 	ID       int64             `json:"id"`
 	RunID    int64             `json:"run_id"`
 	LogDate  string            `json:"log_date"`
-	Model    string            `json:"model"` // '' when the run was --no-llm
+	RunKind  string            `json:"run_kind"` // daily or digest
+	Model    string            `json:"model"`    // '' when the run was --no-llm
 	Kind     string            `json:"kind"`
 	Severity string            `json:"severity"`
 	Title    string            `json:"title"`
@@ -268,19 +309,32 @@ type FindingDetail struct {
 	Anomaly  *ExplainedAnomaly `json:"anomaly,omitempty"`
 }
 
-// GetFinding loads one finding by id; a missing id returns sql.ErrNoRows.
-func (s *LibraryStore) GetFinding(id int64) (*FindingDetail, error) {
+// findingDetailSelect is the column list scanFindingDetail expects, over
+// "findings fnd JOIN runs r", with hostsExpr in the hosts column.
+func findingDetailSelect(hostsExpr string) string {
+	return "SELECT fnd.id, fnd.run_id, r.log_date, r.kind, COALESCE(r.model, ''), fnd.kind, " +
+		"COALESCE(fnd.severity, ''), fnd.title, COALESCE(fnd.service, ''), " +
+		hostsExpr + ", fnd.payload " +
+		"FROM findings fnd JOIN runs r ON fnd.run_id = r.id "
+}
+
+// findingHostsExpr is the comma-joined finding_hosts rows for the finding.
+// finding_hosts is indexed by host, not finding id, so this is a scan per
+// row: fine for one finding or a page, not for a whole window.
+const findingHostsExpr = "COALESCE((SELECT GROUP_CONCAT(fh.host, ',') FROM finding_hosts fh " +
+	"WHERE fh.finding_id = fnd.id), '')"
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+// scanFindingDetail decodes one findingDetailSelect row, payload included.
+func scanFindingDetail(row rowScanner) (*FindingDetail, error) {
 	d := &FindingDetail{}
 	var model sql.NullString
 	var hosts, payload string
-	err := s.db.QueryRow(
-		"SELECT fnd.id, fnd.run_id, r.log_date, COALESCE(r.model, ''), fnd.kind, "+
-			"COALESCE(fnd.severity, ''), fnd.title, COALESCE(fnd.service, ''), "+
-			"COALESCE((SELECT GROUP_CONCAT(fh.host, ',') FROM finding_hosts fh "+
-			"WHERE fh.finding_id = fnd.id), ''), fnd.payload "+
-			"FROM findings fnd JOIN runs r ON fnd.run_id = r.id WHERE fnd.id = ?", id).
-		Scan(&d.ID, &d.RunID, &d.LogDate, &model, &d.Kind, &d.Severity,
-			&d.Title, &d.Service, &hosts, &payload)
+	err := row.Scan(&d.ID, &d.RunID, &d.LogDate, &d.RunKind, &model, &d.Kind, &d.Severity,
+		&d.Title, &d.Service, &hosts, &payload)
 	if err != nil {
 		return nil, err
 	}
@@ -299,6 +353,36 @@ func (s *LibraryStore) GetFinding(id int64) (*FindingDetail, error) {
 		return nil, err
 	}
 	return d, nil
+}
+
+// GetFinding loads one finding by id; a missing id returns sql.ErrNoRows.
+func (s *LibraryStore) GetFinding(id int64) (*FindingDetail, error) {
+	return scanFindingDetail(s.db.QueryRow(findingDetailSelect(findingHostsExpr)+"WHERE fnd.id = ?", id))
+}
+
+// DailyFindings returns every finding of the DAILY runs whose log_date lies
+// in [from, to] (ISO dates, inclusive), oldest run first then by finding
+// id, payloads decoded. It is the digest's read (ait srg-xiBoC): digest
+// runs are excluded so a digest never feeds on an earlier digest. Hosts
+// is left empty: the digest keys on the payload's own host fields, and
+// the per-row finding_hosts scan would dominate a wide window.
+func (s *LibraryStore) DailyFindings(from, to string) ([]*FindingDetail, error) {
+	rows, err := s.db.Query(
+		findingDetailSelect("''")+"WHERE r.kind = ? AND r.log_date BETWEEN ? AND ? "+
+			"ORDER BY r.log_date, fnd.id", RunKindDaily, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*FindingDetail
+	for rows.Next() {
+		d, err := scanFindingDetail(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
 }
 
 // ErrBadVerdict rejects any verdict other than the two the schema allows.
@@ -510,6 +594,7 @@ func (s *LibraryStore) userWhere(cond string, arg any) (*User, error) {
 type RunSummary struct {
 	ID            int64  `json:"id"`
 	LogDate       string `json:"log_date"`
+	Kind          string `json:"kind"`  // daily or digest
 	Model         string `json:"model"` // '' for a --no-llm run
 	RawLines      *int   `json:"raw_lines"`
 	FilteredLines *int   `json:"filtered_lines"`
@@ -530,7 +615,7 @@ func (s *LibraryStore) ListRuns(from, to string) ([]*RunSummary, error) {
 		args = append(args, to)
 	}
 	rows, err := s.db.Query(
-		"SELECT r.id, r.log_date, COALESCE(r.model, ''), r.raw_lines, r.filtered_lines, "+
+		"SELECT r.id, r.log_date, r.kind, COALESCE(r.model, ''), r.raw_lines, r.filtered_lines, "+
 			"(SELECT COUNT(*) FROM findings f WHERE f.run_id = r.id) "+
 			"FROM runs r WHERE "+strings.Join(where, " AND ")+" ORDER BY r.log_date, r.id",
 		args...)
@@ -542,7 +627,7 @@ func (s *LibraryStore) ListRuns(from, to string) ([]*RunSummary, error) {
 	for rows.Next() {
 		rs := &RunSummary{}
 		var raw, filtered sql.NullInt64
-		if err := rows.Scan(&rs.ID, &rs.LogDate, &rs.Model, &raw, &filtered, &rs.Findings); err != nil {
+		if err := rows.Scan(&rs.ID, &rs.LogDate, &rs.Kind, &rs.Model, &raw, &filtered, &rs.Findings); err != nil {
 			return nil, err
 		}
 		if raw.Valid {

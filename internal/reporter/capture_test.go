@@ -46,7 +46,7 @@ func TestCaptureRunLLMShape(t *testing.T) {
 	resolutions := &ResolutionList{Resolutions: []*Resolution{sample.Resolution}}
 	anom := sampleAnomaly()
 
-	if err := CaptureRun(lib, day(2026, 6, 1), "openai/gpt-test", 41230, 812,
+	if err := CaptureRun(lib, day(2026, 6, 1), RunKindDaily, "openai/gpt-test", 41230, 812,
 		issues, resolutions, []*ExplainedAnomaly{anom}); err != nil {
 		t.Fatalf("capture: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestCaptureRunLLMShape(t *testing.T) {
 
 func TestCaptureRunNoLLMShape(t *testing.T) {
 	lib := newTestLibrary(t)
-	if err := CaptureRun(lib, day(2026, 6, 1), "", 500, 20,
+	if err := CaptureRun(lib, day(2026, 6, 1), RunKindDaily, "", 500, 20,
 		nil, nil, []*ExplainedAnomaly{sampleAnomaly()}); err != nil {
 		t.Fatalf("capture: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestCaptureRunUnmatchedResolutionIsNull(t *testing.T) {
 	orphan := &Resolution{Issue: "A different title entirely", RootCause: "n/a"}
 	resolutions := &ResolutionList{Resolutions: []*Resolution{orphan}}
 
-	if err := CaptureRun(lib, day(2026, 6, 1), "openai/gpt-test", 100, 5,
+	if err := CaptureRun(lib, day(2026, 6, 1), RunKindDaily, "openai/gpt-test", 100, 5,
 		issues, resolutions, nil); err != nil {
 		t.Fatalf("capture: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestCaptureRunSameDayTwiceLeavesOneRun(t *testing.T) {
 	lib := newTestLibrary(t)
 	anoms := []*ExplainedAnomaly{sampleAnomaly()}
 	for i := 0; i < 2; i++ {
-		if err := CaptureRun(lib, day(2026, 6, 1), "", 1000+i, 40+i, nil, nil, anoms); err != nil {
+		if err := CaptureRun(lib, day(2026, 6, 1), RunKindDaily, "", 1000+i, 40+i, nil, nil, anoms); err != nil {
 			t.Fatalf("capture %d: %v", i, err)
 		}
 	}
@@ -174,7 +174,7 @@ func TestCaptureRunFailurePreservesPreviousRun(t *testing.T) {
 	issue := sample.Issue
 	anom := sampleAnomaly()
 
-	if err := CaptureRun(lib, day(2026, 6, 1), "openai/gpt-test", 1000, 50,
+	if err := CaptureRun(lib, day(2026, 6, 1), RunKindDaily, "openai/gpt-test", 1000, 50,
 		&IssueList{Issues: []*Issue{&issue}}, nil,
 		[]*ExplainedAnomaly{anom}); err != nil {
 		t.Fatalf("first capture: %v", err)
@@ -194,7 +194,7 @@ func TestCaptureRunFailurePreservesPreviousRun(t *testing.T) {
 	poisoned := issue
 	poisoned.Issue = "poisoned"
 	survivor := sampleAnomaly()
-	err := CaptureRun(lib, day(2026, 6, 1), "openai/gpt-test", 2000, 75,
+	err := CaptureRun(lib, day(2026, 6, 1), RunKindDaily, "openai/gpt-test", 2000, 75,
 		&IssueList{Issues: []*Issue{&issue, &poisoned}}, nil,
 		[]*ExplainedAnomaly{survivor})
 	if err == nil {
@@ -269,7 +269,7 @@ func TestCaptureRunHandsBackFindingIdsAndKeepsThemOutOfPayloads(t *testing.T) {
 	if issue.ID != 0 || anom.ID != 0 {
 		t.Fatal("fixtures should start without ids")
 	}
-	if err := CaptureRun(lib, day(2026, 6, 1), "openai/gpt-test", 1, 1,
+	if err := CaptureRun(lib, day(2026, 6, 1), RunKindDaily, "openai/gpt-test", 1, 1,
 		&IssueList{Issues: []*Issue{&issue}}, nil, []*ExplainedAnomaly{anom}); err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +297,7 @@ func TestCaptureRunHandsBackFindingIdsAndKeepsThemOutOfPayloads(t *testing.T) {
 func TestCaptureRunRerunNeverReusesFindingIDs(t *testing.T) {
 	lib := newTestLibrary(t)
 	first := sampleAnomaly()
-	if err := CaptureRun(lib, day(2026, 6, 1), "", 1000, 40, nil, nil,
+	if err := CaptureRun(lib, day(2026, 6, 1), RunKindDaily, "", 1000, 40, nil, nil,
 		[]*ExplainedAnomaly{first}); err != nil {
 		t.Fatalf("first capture: %v", err)
 	}
@@ -305,7 +305,7 @@ func TestCaptureRunRerunNeverReusesFindingIDs(t *testing.T) {
 
 	second := sampleAnomaly()
 	second.Host = "db07.example.test"
-	if err := CaptureRun(lib, day(2026, 6, 1), "", 1001, 41, nil, nil,
+	if err := CaptureRun(lib, day(2026, 6, 1), RunKindDaily, "", 1001, 41, nil, nil,
 		[]*ExplainedAnomaly{second}); err != nil {
 		t.Fatalf("second capture: %v", err)
 	}
@@ -316,5 +316,115 @@ func TestCaptureRunRerunNeverReusesFindingIDs(t *testing.T) {
 		if _, err := lib.GetFinding(old); !errors.Is(err, sql.ErrNoRows) {
 			t.Errorf("retired id %d: err = %v, want sql.ErrNoRows", old, err)
 		}
+	}
+}
+
+// A daily run and a digest run may share a log date (srg-xiBoC.1): the
+// digest is filed under its window's end day. Re-capturing either kind
+// replaces only that kind's run, findings and feedback.
+func TestCaptureRunKindsReplaceIndependently(t *testing.T) {
+	lib := newTestLibrary(t)
+	date := day(2026, 6, 7)
+	daily := sampleIssuePayload().Issue
+	if err := CaptureRun(lib, date, RunKindDaily, "cheap/model", 100, 5,
+		&IssueList{Issues: []*Issue{&daily}}, nil, nil); err != nil {
+		t.Fatalf("daily capture: %v", err)
+	}
+	digest := sampleIssuePayload().Issue
+	digest.Issue = "Recurring: " + digest.Issue
+	if err := CaptureRun(lib, date, RunKindDigest, "smart/model", -1, -1,
+		&IssueList{Issues: []*Issue{&digest}}, nil, nil); err != nil {
+		t.Fatalf("digest capture: %v", err)
+	}
+	if err := lib.RecordFeedback(digest.ID, nil, "worked", "fixed for good"); err != nil {
+		t.Fatal(err)
+	}
+	if n := countRows(t, lib, "runs"); n != 2 {
+		t.Fatalf("runs = %d, want 2 (one per kind)", n)
+	}
+
+	// Re-capture the daily: the digest run, finding and vote survive.
+	if err := CaptureRun(lib, date, RunKindDaily, "cheap/model", 120, 6,
+		&IssueList{Issues: []*Issue{&daily}}, nil, nil); err != nil {
+		t.Fatalf("daily re-capture: %v", err)
+	}
+	got, err := lib.GetFinding(digest.ID)
+	if err != nil {
+		t.Fatalf("digest finding gone after daily re-capture: %v", err)
+	}
+	if got.RunKind != RunKindDigest || got.Model != "smart/model" {
+		t.Errorf("digest finding = kind %q model %q", got.RunKind, got.Model)
+	}
+	if n := countRows(t, lib, "feedback"); n != 1 {
+		t.Errorf("feedback rows = %d, want the digest vote kept", n)
+	}
+
+	// Re-capture the digest: the daily run survives, the old digest goes.
+	oldDigestID := digest.ID
+	if err := CaptureRun(lib, date, RunKindDigest, "smart/model", -1, -1,
+		&IssueList{Issues: []*Issue{&digest}}, nil, nil); err != nil {
+		t.Fatalf("digest re-capture: %v", err)
+	}
+	if _, err := lib.GetFinding(oldDigestID); err == nil {
+		t.Errorf("old digest finding %d still present", oldDigestID)
+	}
+	if _, err := lib.GetFinding(daily.ID); err != nil {
+		t.Errorf("daily finding lost on digest re-capture: %v", err)
+	}
+	if n := countRows(t, lib, "feedback"); n != 0 {
+		t.Errorf("feedback rows = %d, want the replaced digest's vote gone", n)
+	}
+
+	runs, err := lib.ListRuns("", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("runs = %+v", runs)
+	}
+	for _, r := range runs {
+		switch r.Kind {
+		case RunKindDaily:
+			if r.RawLines == nil || *r.RawLines != 120 {
+				t.Errorf("daily raw lines = %v, want 120", r.RawLines)
+			}
+		case RunKindDigest:
+			if r.RawLines != nil || r.FilteredLines != nil {
+				t.Errorf("digest stats = %v/%v, want NULL (not recorded)", r.RawLines, r.FilteredLines)
+			}
+		default:
+			t.Errorf("unexpected run kind %q", r.Kind)
+		}
+	}
+
+	summaries, err := lib.SearchFindings(FindingFilter{RunKind: RunKindDigest, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != 1 || summaries[0].RunKind != RunKindDigest || summaries[0].ID != digest.ID {
+		t.Errorf("digest search = %+v", summaries)
+	}
+	all, err := lib.SearchFindings(FindingFilter{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 {
+		t.Errorf("unfiltered search = %d rows, want both kinds", len(all))
+	}
+}
+
+func TestCaptureRunRejectsUnknownKind(t *testing.T) {
+	lib := newTestLibrary(t)
+	issue := sampleIssuePayload().Issue
+	err := CaptureRun(lib, day(2026, 6, 7), "weekly", "m", 1, 1,
+		&IssueList{Issues: []*Issue{&issue}}, nil, nil)
+	if !errors.Is(err, ErrBadRunKind) {
+		t.Fatalf("err = %v, want ErrBadRunKind", err)
+	}
+	if n := countRows(t, lib, "runs"); n != 0 {
+		t.Errorf("runs = %d, want nothing written", n)
+	}
+	if issue.ID != 0 {
+		t.Errorf("issue id = %d, want cleared", issue.ID)
 	}
 }

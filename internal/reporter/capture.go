@@ -17,7 +17,10 @@ package reporter
 
 import "time"
 
-func CaptureRun(lib *LibraryStore, logDate time.Time, model string,
+// kind is RunKindDaily for the daily pipeline or RunKindDigest for the
+// weekly digest (ait srg-xiBoC); replacement is per (date, kind). A
+// negative rawLines/filteredLines records NULL (the digest has no funnel).
+func CaptureRun(lib *LibraryStore, logDate time.Time, kind, model string,
 	rawLines, filteredLines int,
 	issues *IssueList, resolutions *ResolutionList, anomalies []*ExplainedAnomaly) (err error) {
 	// Ids are only real once the transaction lands. Every failure path,
@@ -42,7 +45,7 @@ func CaptureRun(lib *LibraryStore, logDate time.Time, model string,
 		return err
 	}
 	defer tx.Rollback()
-	runID, err := beginRun(tx, logDate, model)
+	runID, err := beginRun(tx, logDate, kind, model)
 	if err != nil {
 		return err
 	}

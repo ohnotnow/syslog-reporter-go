@@ -868,3 +868,50 @@ func TestDailyTotalsSumWindowsAndFilterExactly(t *testing.T) {
 		t.Errorf("host+program filter = %+v", rows)
 	}
 }
+
+// DailyFindings is the digest's read (srg-xiBoC.3): the window's daily
+// findings with payloads, oldest first, digest runs and outside days left
+// out.
+func TestDailyFindingsWindow(t *testing.T) {
+	lib := newTestLibrary(t)
+	capture := func(d time.Time, kind string, title string) {
+		t.Helper()
+		issue := sampleIssuePayload().Issue
+		issue.Issue = title
+		if err := CaptureRun(lib, d, kind, "m", 10, 1,
+			&IssueList{Issues: []*Issue{&issue}}, nil, []*ExplainedAnomaly{sampleAnomaly()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	capture(day(2026, 8, 31), RunKindDaily, "before the window")
+	capture(day(2026, 9, 2), RunKindDaily, "second day")
+	capture(day(2026, 9, 1), RunKindDaily, "first day")
+	capture(day(2026, 9, 3), RunKindDigest, "a digest, not a daily")
+	capture(day(2026, 9, 8), RunKindDaily, "after the window")
+
+	got, err := lib.DailyFindings("2026-09-01", "2026-09-07")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 4 {
+		t.Fatalf("findings = %d, want 2 days x (issue + anomaly)", len(got))
+	}
+	if got[0].LogDate != "2026-09-01" || got[0].Issue == nil || got[0].Issue.Issue.Issue != "first day" {
+		t.Errorf("first row = %+v, want the 1 Sep issue with payload", got[0])
+	}
+	if got[1].Anomaly == nil || got[1].Anomaly.Host != "hostC" {
+		t.Errorf("second row = %+v, want the 1 Sep anomaly with payload", got[1])
+	}
+	if got[2].LogDate != "2026-09-02" || got[3].LogDate != "2026-09-02" {
+		t.Errorf("rows 3-4 dates = %s/%s, want 2 Sep", got[2].LogDate, got[3].LogDate)
+	}
+	for _, f := range got {
+		if f.RunKind != RunKindDaily {
+			t.Errorf("finding %d run kind = %q", f.ID, f.RunKind)
+		}
+	}
+	empty, err := lib.DailyFindings("2027-01-01", "2027-01-07")
+	if err != nil || len(empty) != 0 {
+		t.Errorf("empty window = %v, %v", empty, err)
+	}
+}
