@@ -151,3 +151,40 @@ func TestAPIAggregatesRequireABoundedRange(t *testing.T) {
 		}
 	}
 }
+
+// run_kind filters the listing and every row names its run kind
+// (srg-xiBoC.2); an unknown value is a 400.
+func TestAPIFindingsRunKind(t *testing.T) {
+	f := newAPIServer(t, "none")
+	ts, lib, raw := f.ts, f.lib, f.raw
+	seedFindings(t, lib)
+	digest := &reporter.Issue{Issue: "Disk filling on /var all week", Severity: "high",
+		AffectedHost: []string{"hostA"}, AffectedService: "kernel"}
+	if err := reporter.CaptureRun(lib, day(2026, 6, 7), reporter.RunKindDigest, "smart/model", -1, -1,
+		&reporter.IssueList{Issues: []*reporter.Issue{digest}}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	var body struct {
+		Findings []reporter.FindingSummary `json:"findings"`
+	}
+	resp := apiRequest(t, http.MethodGet, ts.URL+"/api/findings", raw, "")
+	decodeJSON(t, resp, &body)
+	if len(body.Findings) != 3 || body.Findings[0].RunKind != "digest" || body.Findings[1].RunKind != "daily" {
+		t.Errorf("unfiltered rows = %+v", body.Findings)
+	}
+	resp = apiRequest(t, http.MethodGet, ts.URL+"/api/findings?run_kind=digest", raw, "")
+	decodeJSON(t, resp, &body)
+	if len(body.Findings) != 1 || body.Findings[0].ID != digest.ID {
+		t.Errorf("digest rows = %+v", body.Findings)
+	}
+	resp = apiRequest(t, http.MethodGet, ts.URL+"/api/findings?run_kind=daily", raw, "")
+	decodeJSON(t, resp, &body)
+	if len(body.Findings) != 2 {
+		t.Errorf("daily rows = %+v", body.Findings)
+	}
+	resp = apiRequest(t, http.MethodGet, ts.URL+"/api/findings?run_kind=weekly", raw, "")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("bad run_kind = %d, want 400", resp.StatusCode)
+	}
+}

@@ -37,6 +37,14 @@
         </select>
       </div>
       <div class="filter-field">
+        <label for="filter-run-kind">Run</label>
+        <select id="filter-run-kind" name="run_kind">
+          <option value="">Any</option>
+          <option value="daily"{{if eq .RunKind "daily"}} selected{{end}}>daily</option>
+          <option value="digest"{{if eq .RunKind "digest"}} selected{{end}}>weekly digest</option>
+        </select>
+      </div>
+      <div class="filter-field">
         <label for="filter-from">From</label>
         <input type="date" id="filter-from" name="from" value="{{.From}}">
       </div>
@@ -70,9 +78,9 @@
           <tbody>
             {{range .Data.Results}}
             <tr>
-              <td class="cell-date">{{.LogDate}}</td>
+              <td class="cell-date">{{.LogDate}}{{if eq .RunKind "digest"}} (digest){{end}}</td>
               <td><a href="/findings/{{.ID}}">{{.Title}}<span class="visually-hidden">
-                - {{.Service}} on {{.Hosts}}, {{.LogDate}}</span></a></td>
+                - {{.Service}} on {{.Hosts}}, {{.LogDate}}{{if eq .RunKind "digest"}} weekly digest{{end}}</span></a></td>
               <td>{{.Kind}}</td>
               <td{{if or (eq .Severity "critical") (eq .Severity "high")}} class="cell-severe"{{end}}>
                 {{if .Severity}}{{.Severity}}{{else}}-{{end}}</td>

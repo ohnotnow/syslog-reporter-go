@@ -85,11 +85,16 @@ func (s *Server) handleAPIFindings(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if err := reporter.CheckRunKindFilter(q.Get("run_kind")); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "run_kind must be daily or digest")
+		return
+	}
 	results, err := s.lib.SearchFindings(reporter.FindingFilter{
 		Host:     q.Get("host"),
 		Service:  q.Get("service"),
 		Severity: q.Get("severity"),
 		Kind:     q.Get("kind"),
+		RunKind:  q.Get("run_kind"),
 		Query:    q.Get("q"),
 		From:     q.Get("since"),
 		To:       q.Get("until"),

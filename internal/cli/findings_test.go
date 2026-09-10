@@ -282,3 +282,37 @@ func TestShowOmitsOSForRowsCapturedBeforeTheField(t *testing.T) {
 		t.Errorf("show should omit the OS line when the stored issue has none:\n%s", out.String())
 	}
 }
+
+// Digest findings (srg-xiBoC.2) are marked in the list, filterable with
+// --run-kind, and named as a digest by show; daily output is unchanged.
+func TestListAndShowMarkDigestRuns(t *testing.T) {
+	dbPath, issueID, _ := seedLibrary(t)
+	lib, err := reporter.OpenLibraryStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := &reporter.Issue{Issue: "Disk filling on /var all week", Severity: "high",
+		AffectedHost: []string{"hostA"}, AffectedService: "kernel",
+		TimestampFrequency: "Seen on 3 of 3 run days: Mon 1 Jun, Tue 2 Jun, Wed 3 Jun"}
+	if err := reporter.CaptureRun(lib, day(2026, 6, 3), reporter.RunKindDigest, "smart/model", -1, -1,
+		&reporter.IssueList{Issues: []*reporter.Issue{digest}}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	lib.Close()
+
+	assertLists(t, mustRun(t, dbPath, "list"), []string{"2026-06-03 (digest)", "2026-06-01  "}, nil)
+	assertLists(t, mustRun(t, dbPath, "list", "--run-kind", "digest"),
+		[]string{digest.Issue}, []string{"Disk filling on /var  "})
+	assertLists(t, mustRun(t, dbPath, "list", "--run-kind", "daily"),
+		[]string{"Chattier than its peers"}, []string{"(digest)"})
+	if _, err := run(t, dbPath, "list", "--run-kind", "weekly"); err == nil ||
+		!strings.Contains(err.Error(), "run kind") {
+		t.Errorf("invalid --run-kind error = %v", err)
+	}
+	if out := mustRun(t, dbPath, "show", strconv.FormatInt(digest.ID, 10)); !strings.Contains(out, "(issue, digest of 2026-06-03)") {
+		t.Errorf("digest show header:\n%s", out)
+	}
+	if out := mustRun(t, dbPath, "show", strconv.FormatInt(issueID, 10)); !strings.Contains(out, "(issue, run of 2026-06-01)") {
+		t.Errorf("daily show header:\n%s", out)
+	}
+}

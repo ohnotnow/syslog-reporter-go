@@ -44,18 +44,21 @@ are `YYYY-MM-DD`. Errors are JSON with one `error` string.
 | Method and path | Parameters | Purpose |
 | --- | --- | --- |
 | `GET /api/me` | none | Who the token belongs to |
-| `GET /api/findings` | `since`, `until`, `host`, `service`, `severity`, `kind`, `q`, `limit` (max 500), `offset` | List findings, newest first |
+| `GET /api/findings` | `since`, `until`, `host`, `service`, `severity`, `kind`, `run_kind`, `q`, `limit` (max 500), `offset` | List findings, newest first |
 | `GET /api/findings/{id}` | none | One finding in full, with feedback |
 | `POST /api/findings/{id}/mute` | `reason` (required), `expires` | Stop this finding appearing again |
 | `POST /api/findings/{id}/feedback` | `verdict` (`worked` or `didnt_work`), `comment` | Record whether the suggested fix worked |
-| `GET /api/runs` | `since`, `until` (default last 30 days) | One row per daily run: line counts and finding counts |
+| `GET /api/runs` | `since`, `until` (default last 30 days) | One row per run, daily and digest (`kind`): line counts and finding counts |
 | `GET /api/aggregates` | `since`, `until` (both required, at most 366 days apart), `host`, `program` | Per-day line counts by host and program |
 
 `host` and `service` on the findings list match any part of the name;
 `severity` is one of `critical`, `high`, `medium`, `low`; `kind` is
 `issue` (LLM-detected from log lines) or `peer`, `baseline`, `temporal`
-(statistical anomalies). `q` searches titles. On `/api/aggregates`,
-`host` and `program` are exact.
+(statistical anomalies). `run_kind` is `daily` (one day's run) or
+`digest` (the weekly digest: the findings that recurred across the
+week, filed under the week's last day with the digest's own
+resolutions; the number in the weekly email is one of these). `q`
+searches titles. On `/api/aggregates`, `host` and `program` are exact.
 
 Examples:
 
@@ -63,7 +66,11 @@ Examples:
 # The latest run's findings: find its log_date first, then list that day
 curl -sS -H "Authorization: Bearer $SYSLOG_API_TOKEN" "$SYSLOG_API_URL/api/runs"
 curl -sS -H "Authorization: Bearer $SYSLOG_API_TOKEN" \
-  "$SYSLOG_API_URL/api/findings?since=2026-09-08&until=2026-09-08"
+  "$SYSLOG_API_URL/api/findings?since=2026-09-08&until=2026-09-08&run_kind=daily"
+
+# This week's digest (the numbers in the Monday email)
+curl -sS -H "Authorization: Bearer $SYSLOG_API_TOKEN" \
+  "$SYSLOG_API_URL/api/findings?run_kind=digest&limit=50"
 
 # One finding
 curl -sS -H "Authorization: Bearer $SYSLOG_API_TOKEN" "$SYSLOG_API_URL/api/findings/1234"
@@ -90,8 +97,8 @@ curl -sS -H "Authorization: Bearer $SYSLOG_API_TOKEN" \
 ```json
 {
   "findings": [
-    {"id": 1234, "run_id": 88, "log_date": "2026-09-08", "kind": "issue",
-     "severity": "medium", "title": "No free DHCP leases",
+    {"id": 1234, "run_id": 88, "log_date": "2026-09-08", "run_kind": "daily",
+     "kind": "issue", "severity": "medium", "title": "No free DHCP leases",
      "service": "dhcpd", "hosts": "dhcp01.example.test, dhcp02.example.test",
      "worked": 0, "didnt_work": 0}
   ],
@@ -107,7 +114,7 @@ curl -sS -H "Authorization: Bearer $SYSLOG_API_TOKEN" \
 ```json
 {
   "finding": {
-    "id": 1234, "run_id": 88, "log_date": "2026-09-08", "model": "openai/gpt-5.6-luna",
+    "id": 1234, "run_id": 88, "log_date": "2026-09-08", "run_kind": "daily", "model": "openai/gpt-5.6-luna",
     "kind": "issue", "severity": "medium", "title": "No free DHCP leases",
     "service": "dhcpd", "hosts": ["dhcp01.example.test", "dhcp02.example.test"],
     "issue": {
@@ -146,7 +153,7 @@ Anomaly kinds carry `anomaly` instead of `issue`, with `host`, `program`,
 `GET /api/runs`:
 
 ```json
-{"runs": [{"id": 88, "log_date": "2026-09-08", "model": "openai/gpt-5.6-luna",
+{"runs": [{"id": 88, "log_date": "2026-09-08", "kind": "daily", "model": "openai/gpt-5.6-luna",
            "raw_lines": 2140033, "filtered_lines": 4120, "findings": 7}],
  "since": "2026-08-09", "until": "2026-09-08"}
 ```
@@ -159,11 +166,15 @@ Anomaly kinds carry `anomaly` instead of `issue`, with `host`, `program`,
 
 ## How to behave
 
-- **"Today" means the latest run.** Each daily run reads the previous
-  day's logs, so its `log_date` is yesterday, and the run may not have
-  happened yet when someone asks. For "today's issues", fetch `/api/runs`,
-  take the newest `log_date`, and list findings for that date. Say which
-  date you used.
+- **"Today" means the latest daily run.** Each daily run reads the
+  previous day's logs, so its `log_date` is yesterday, and the run may
+  not have happened yet when someone asks. For "today's issues", fetch
+  `/api/runs`, take the newest `log_date` among rows with `kind`
+  `daily`, and list findings for that date with `run_kind=daily`. Say
+  which date you used. The weekly digest is filed under the same
+  `log_date` as that week's last daily run, so without `run_kind` the
+  same problem shows twice with different ids; a number from the Monday
+  email is a digest finding (`run_kind=digest`).
 - **Prefer local files for charts and dashboards.** Titles, hosts and
   log lines name the estate. When the user wants a chart or dashboard,
   offer a self-contained local HTML file opened in their browser first.

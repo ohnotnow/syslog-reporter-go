@@ -33,6 +33,7 @@ type findingsFilters struct {
 	Service  string
 	Severity string
 	Kind     string
+	RunKind  string // "", daily or digest
 	From     string
 	To       string
 }
@@ -54,6 +55,7 @@ func (f findingsFilters) values(page int) string {
 	set("service", f.Service)
 	set("severity", f.Severity)
 	set("kind", f.Kind)
+	set("run_kind", f.RunKind)
 	set("from", f.From)
 	set("to", f.To)
 	if page > 1 {
@@ -85,8 +87,12 @@ func (s *Server) handleFindings(w http.ResponseWriter, r *http.Request) {
 		Service:  strings.TrimSpace(q.Get("service")),
 		Severity: q.Get("severity"),
 		Kind:     q.Get("kind"),
+		RunKind:  q.Get("run_kind"),
 		From:     q.Get("from"),
 		To:       q.Get("to"),
+	}
+	if reporter.CheckRunKindFilter(filters.RunKind) != nil {
+		filters.RunKind = ""
 	}
 	offset := (page - 1) * findingsPageSize
 	// One row beyond the page tells us whether a next page exists.
@@ -96,6 +102,7 @@ func (s *Server) handleFindings(w http.ResponseWriter, r *http.Request) {
 		Service:  filters.Service,
 		Severity: filters.Severity,
 		Kind:     filters.Kind,
+		RunKind:  filters.RunKind,
 		From:     filters.From,
 		To:       filters.To,
 		Limit:    findingsPageSize + 1,

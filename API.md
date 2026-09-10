@@ -90,13 +90,15 @@ confirm, never invent a reason).
 
 - `GET /api/me` - who this token is
 - `GET /api/findings` - findings, with the same filters as the CLI
-  (`host`, `service`, `severity`, `kind`, `q`, `since`, `until`,
-  `limit`, `offset`)
+  (`host`, `service`, `severity`, `kind`, `run_kind`, `q`, `since`,
+  `until`, `limit`, `offset`); every row carries `run_kind`, `daily` or
+  `digest` (the weekly digest's own findings, filed under the window's
+  end date)
 - `GET /api/findings/{id}` - one finding in full, with its feedback
 - `POST /api/findings/{id}/feedback` - `verdict` (worked / didnt-work)
   and an optional `comment`
 - `POST /api/findings/{id}/mute` - `reason`, optional `expires`
-- `GET /api/runs` - the daily runs over a date range
+- `GET /api/runs` - the runs over a date range, each with its `kind`
 - `GET /api/aggregates` - per-day line counts, for trend questions
 
 Every response is JSON and every error is `{"error": "..."}`. The full

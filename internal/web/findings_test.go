@@ -332,3 +332,29 @@ func TestFindingsPaginationLinks(t *testing.T) {
 		t.Error("page 2 of 2 should offer only a previous-page link")
 	}
 }
+
+// The web list marks digest rows and filters on run_kind; the detail page
+// names the digest in its breadcrumb (srg-xiBoC.2).
+func TestFindingsListMarksDigestRuns(t *testing.T) {
+	s := newTestServer(t, Config{Version: "test"})
+	seedFindings(t, s.lib)
+	digest := &reporter.Issue{Issue: "Disk filling on /var all week", Severity: "high",
+		AffectedHost: []string{"hostA"}, AffectedService: "kernel"}
+	if err := reporter.CaptureRun(s.lib, day(2026, 6, 7), reporter.RunKindDigest, "smart/model", -1, -1,
+		&reporter.IssueList{Issues: []*reporter.Issue{digest}}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	page := get(t, s, "/").Body.String()
+	if !strings.Contains(page, "2026-06-07 (digest)") || !strings.Contains(page, "<td class=\"cell-date\">2026-06-01</td>") {
+		t.Errorf("list does not mark the digest row (and only it):\n%s", page)
+	}
+	filtered := get(t, s, "/?run_kind=daily").Body.String()
+	if strings.Contains(filtered, "(digest)") || !strings.Contains(filtered, "Chattier than its peers") {
+		t.Errorf("run_kind=daily filter:\n%s", filtered)
+	}
+	detail := get(t, s, fmt.Sprintf("/findings/%d", digest.ID)).Body.String()
+	if !strings.Contains(detail, "weekly digest of 2026-06-07") {
+		t.Errorf("digest detail breadcrumb:\n%s", detail)
+	}
+}

@@ -42,7 +42,7 @@ const findingsUsage = "usage: syslog-reporter findings <list|show|feedback> [opt
 const findingsHelp = `Query the findings library and record fix outcomes from the terminal.
 ` + findingsUsage + `
 
-  list      list findings; filter by --host, --service, --severity, --kind,
+  list      list findings; filter by --host, --service, --severity, --kind, --run-kind,
             --since/--until, --search; --json for scripting
   show      full detail for one finding, including its suggested resolution
   feedback  record a worked / didnt-work verdict with an optional --comment
@@ -96,6 +96,7 @@ func runList(defaultDB string, args []string, out io.Writer) error {
 	service := fs.String("service", "", "Filter by service (matches any part of the name)")
 	severity := fs.String("severity", "", "Filter by severity: critical, high, medium, low")
 	kind := fs.String("kind", "", "Filter by kind: issue, peer, baseline, temporal")
+	runKind := fs.String("run-kind", "", "Filter by run kind: daily, digest (default: both)")
 	since := fs.String("since", "", "Only runs on or after this date (YYYY-MM-DD)")
 	until := fs.String("until", "", "Only runs on or before this date (YYYY-MM-DD)")
 	search := fs.String("search", "", "Title search (matches any part of the title)")
@@ -104,6 +105,9 @@ func runList(defaultDB string, args []string, out io.Writer) error {
 	if extra := ParseFlagsAnywhere(fs, args); len(extra) > 0 {
 		return fmt.Errorf("findings list takes no positional arguments (got %s)",
 			strings.Join(extra, " "))
+	}
+	if err := reporter.CheckRunKindFilter(*runKind); err != nil {
+		return fmt.Errorf("--run-kind: %w", err)
 	}
 	lib, err := openLibrary(*dbPath)
 	if err != nil {
@@ -115,6 +119,7 @@ func runList(defaultDB string, args []string, out io.Writer) error {
 		Service:  *service,
 		Severity: *severity,
 		Kind:     *kind,
+		RunKind:  *runKind,
 		Query:    *search,
 		From:     *since,
 		To:       *until,
@@ -138,7 +143,7 @@ func runList(defaultDB string, args []string, out io.Writer) error {
 			severity = "-"
 		}
 		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\tworked %d / didnt %d\n",
-			r.ID, r.LogDate, r.Kind, severity, r.Service, r.Hosts, r.Title,
+			r.ID, runDateLabel(r.LogDate, r.RunKind), r.Kind, severity, r.Service, r.Hosts, r.Title,
 			r.Worked, r.DidntWork)
 	}
 	return tw.Flush()
@@ -177,10 +182,28 @@ func runShow(defaultDB string, args []string, out io.Writer) error {
 	return nil
 }
 
+// runDateLabel is the list's date column: bare for a daily run, marked for
+// a weekly digest so daily output stays byte-for-byte as it was.
+func runDateLabel(logDate, runKind string) string {
+	if runKind == reporter.RunKindDigest {
+		return logDate + " (digest)"
+	}
+	return logDate
+}
+
+// runNoun names the run a finding came from: "run" for a daily run,
+// "digest" for the weekly digest filed under that date.
+func runNoun(runKind string) string {
+	if runKind == reporter.RunKindDigest {
+		return "digest"
+	}
+	return "run"
+}
+
 // writeDetail prints one finding as plain text, in the same field order as
 // the web page and the emailed report (models.go ToMarkdown).
 func writeDetail(out io.Writer, d *reporter.FindingDetail) {
-	fmt.Fprintf(out, "#%d  %s  (%s, run of %s)\n\n", d.ID, d.Title, d.Kind, d.LogDate)
+	fmt.Fprintf(out, "#%d  %s  (%s, %s of %s)\n\n", d.ID, d.Title, d.Kind, runNoun(d.RunKind), d.LogDate)
 	if d.Issue != nil {
 		i := d.Issue
 		fmt.Fprintf(out, "Severity: %s   Service: %s   When: %s\n\n",

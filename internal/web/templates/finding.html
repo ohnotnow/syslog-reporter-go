@@ -2,7 +2,7 @@
 {{define "content"}}
     <article class="article">
     <nav class="crumbs" aria-label="Breadcrumb">
-      <a href="/">Findings</a> <span aria-hidden="true">/</span> {{.Data.Finding.LogDate}}
+      <a href="/">Findings</a> <span aria-hidden="true">/</span> {{if eq .Data.Finding.RunKind "digest"}}weekly digest of {{end}}{{.Data.Finding.LogDate}}
     </nav>
     <h1>{{.Data.Finding.Title}}</h1>
     {{with .Data.Finding}}
