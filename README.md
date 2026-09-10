@@ -59,6 +59,32 @@ By default the web UI listens on localhost only with no login; for a
 shared box there is a local-accounts mode (`syslog-reporter user add`)
 and optional TLS.
 
+## The weekly digest
+
+A daily email gets skimmed and archived. The intended shape is quiet
+daily runs and one email a week: `digest` reads the findings library over
+the last seven days, groups the daily findings that recur (the same
+service on the same hosts; the same host and program behaving oddly),
+ranks them by how many days they were seen, and has the digest model
+write fresh resolutions that know the thing has been going on all week.
+Under that list sit the week's worst one-offs: critical or high issues
+that happened on a single day, with the advice the daily run already
+wrote. Days with no run are called out, so a stalled cron is visible.
+
+```bash
+# the last 7 days, emailed to the team; the smart model, once a week
+SYSLOG_DIGEST_MODEL=anthropic/claude-fable-5-1 ./syslog-reporter digest --send-email
+
+# missed a Monday? widen the window, nothing else to reset
+./syslog-reporter digest --days 14 --send-email
+```
+
+The digest is filed in the library as a run of its own, so the finding
+numbers in the email are the digest's: `findings show`, the API, feedback
+and `syslog-mute` all work on them. `scripts/daily-run.sh --digest` runs
+it after the day's run; the crontab in [GETTING_STARTED.md](GETTING_STARTED.md)
+does the rest.
+
 ## The sysadmin API
 
 The same `serve` process exposes a small JSON API under `/api/`, for

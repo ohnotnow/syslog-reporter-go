@@ -137,7 +137,9 @@ resolutions and explanations people actually read
 (`SYSLOG_ISSUE_MODEL`). `eval --scan-model` and `--issue-model` try a
 combination without touching your `.env`; the stage variables win over
 `--model`, so set both flags to force a single model when a split is
-configured.
+configured. The weekly digest has its own variable, `SYSLOG_DIGEST_MODEL`
+(section 4), so the daily runs can stay cheap while the one email people
+read gets the strongest model.
 
 ## 3. Make it yours
 
@@ -237,9 +239,10 @@ It does the following:
    `.env` and opens it in your editor: fill in the model and key, the
    SMTP relay and recipients, and the ELK credentials. An existing
    `.env` is left alone.
-5. Writes `/etc/cron.d/syslog-reporter`: `daily-run.sh` at 07:30, retried
-   on the half hour until it goes out, logging to `daily-run.log` in the
-   state directory. It asks for a `MAILTO` address.
+5. Writes `/etc/cron.d/syslog-reporter`: `daily-run.sh --no-email` at
+   07:30 every day, retried on the half hour, and `daily-run.sh --digest`
+   on Mondays, logging to `daily-run.log` in the state directory. It asks
+   for a `MAILTO` address.
 6. Asks whether to run `backfill.sh` now: the last fortnight through
    `--no-llm` (free).
 7. Asks whether to install the findings web UI as a systemd service
@@ -256,10 +259,34 @@ REPORTER=./syslog-reporter ELK_DUMP=./tools/elk_dump.py WORK_DIR=. \
 ```
 
 `daily-run.sh` fetches yesterday's dump with `elk_dump.py`, runs the
-pipeline, emails the report and leaves a `syslog-<day>.sent` marker in
-the dumps directory; every later attempt that day exits quietly. A
-non-zero exit means that attempt did not send the report. Pass a date to
-re-run a specific day by hand.
+pipeline and leaves a `syslog-<day>.sent` marker in the dumps directory;
+every later attempt that day exits quietly. A non-zero exit means that
+attempt did not finish. Pass a date to re-run a specific day by hand.
+
+**One email a week, not seven.** The crontab `install.sh` writes is the
+weekly shape: every day runs and files its findings without emailing
+anyone (`--no-email`), and on Monday the run is followed by the weekly
+digest (`--digest`), which replaces that day's report:
+
+```cron
+30 7-17 * * 0,2-6 syslog-reporter /usr/local/bin/daily-run.sh --no-email >> /var/lib/syslog-reporter/daily-run.log 2>&1
+30 7-17 * * 1     syslog-reporter /usr/local/bin/daily-run.sh --digest   >> /var/lib/syslog-reporter/daily-run.log 2>&1
+```
+
+The digest is the findings that kept recurring over the last seven
+days, ranked by how many days they were seen, with resolutions written
+fresh by `SYSLOG_DIGEST_MODEL`. So the `.env` holds cheap models for the
+quiet daily runs (`SYSLOG_LOGSCAN_MODEL`, `SYSLOG_ISSUE_MODEL`) and the
+best you have for the digest, and the expensive model runs once a week
+over a short list. A daily email is one line with no options.
+
+**Missed a Monday?** The digest keeps no state; its window simply ends
+yesterday. Run it by hand with a wider window and the week is covered:
+
+```bash
+cd /var/lib/syslog-reporter
+sudo -u syslog-reporter syslog-reporter digest --days 14 --send-email
+```
 
 **No ELK?** Slice yesterday's log however suits your estate and cron the
 binary directly:

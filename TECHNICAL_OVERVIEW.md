@@ -32,8 +32,9 @@ implementation replaced it outright and maintains no compatibility with it.
 ```
 cmd/syslog-reporter/        CLI entry point; explicit command dispatch (run,
                             eval, serve, user, token, findings,
-                            mgmt-report, self-update) from one registry -
-                            no default mode
+                            mgmt-report, digest, self-update) from one
+                            registry - no default mode; digest.go is the
+                            weekly digest command
 internal/selfupdate/        Version/RepoURL (ldflags-stamped), the --version
                             latest-release check, and the self-update command
 internal/reporter/
@@ -52,7 +53,10 @@ internal/reporter/
   logcontext.go             LogIndex: per-host surrounding-line windows for
                             the resolution writer (the grep -C analogue)
   llmagents.go prompts/     the four LLM agents + embedded system prompts
-  report.go                 both report layouts (digest + full attachment)
+  report.go                 both daily report layouts (digest + full attachment)
+  digest.go                 weekly digest: cross-day grouping and ranking of
+                            library findings, the LLM adapters
+  digestreport.go           the weekly digest's email body and attachment
   emailer.go                SMTP send: digest body + markdown attachment
   capture.go                files one run's findings into the library
   librarystore.go           the findings library: runs/findings/feedback/users
@@ -273,6 +277,14 @@ again, so a mute line copied from an old email either hits the finding
 it named or gets a 404, never a different finding that inherited the
 number.
 
+Since migration 4 a run has a `kind`: `daily` (one day's dump) or
+`digest` (the weekly digest, filed under its window's end date so its
+findings get ids the email can print). Replace-on-rerun keys on
+(log_date, kind), so re-running Monday's digest never touches Sunday's
+daily run. Every reader that joins runs knows the kind: `mgmt-report`
+counts daily runs only, the findings list/show/API/web show it and
+filter on it (`--run-kind`, `run_kind`).
+
 Capture semantics worth knowing:
 
 - Idempotent per day: re-running a date REPLACES that day's run, findings
@@ -458,6 +470,60 @@ against the users table, falling back to the anonymous vote; an explicit
 `--user` must match a users-table row (unknown is an error, never a
 silent anonymous fallback). All findings subcommands take `--db`.
 
+### The weekly digest
+
+`digest` is the intended delivery (foundation: "a weekly Monday digest
+email"; ant ADR srg-WtzbG has the design and the rejected paths). It is
+a reader of the library, not a log pipeline:
+
+```
+DailyFindings(from, to)  every daily finding in the window, payloads decoded
+        |
+BuildDigest              group issues by (service, sorted host set) and
+                         anomalies by (host, program); count distinct days;
+                         rank by days seen (ties: severity, then names);
+                         note the window days with no daily run
+        |
+top N groups             recurring (seen on 2+ days): --max-issues (10);
+        |                worst one-offs (single-day critical/high, by
+        |                severity then host count): --max-one-offs (5), which
+        |                keep the daily run's own resolution - no model call;
+        |                anomalies: --max-anomalies (5)
+        |                DigestIssue: the latest day's record with the
+        |                recurrence sentence ("Seen on 5 of 7 run days: ...")
+        |                DigestAnomaly: the group as an Anomaly, same sentence
+ResolutionAgent + AnomalyExplainer   the digest model, batched requests,
+        |                no log context (the dumps are not re-read)
+CaptureRun(kind digest)  filed under the window's end date -> finding ids
+        |
+DigestReport             digest_body.md (top groups + prose) and
+        |                digest_attachment.md (every group)
+EmailAgent (--send-email)   subject "Syslog weekly digest - <period>"
+```
+
+Keys are the stable fields only; titles are LLM prose that drifts day to
+day and are never a key (two groups sharing a title get the first host
+appended, because every downstream pairing is by title). The email has
+two issue lists because they answer two questions: "what kept coming
+back" (ranked by days seen) and "what was bad even once" (owner,
+2026-09-10: a once-weekly backup failing on ten hosts is not less
+important for happening on one day). Single-day medium and low groups
+are attachment-only. With a single run day nothing could recur, so
+everything counts as recurring and there are no one-offs. The window is `--days` (default 7) ending
+yesterday, and nothing records when a digest last ran: a missed Monday
+is `--days 14` by hand. The model is `SYSLOG_DIGEST_MODEL`, then
+`SYSLOG_ISSUE_MODEL`, then `--model`; `--no-llm` renders facts only,
+`--no-store` skips capture (no ids, no mute lines). An empty window
+still renders, captures and emails: "no run was recorded for any day"
+is the stalled-cron alarm. `scripts/daily-run.sh --digest` runs it after
+the day's run in place of the day's email; `--no-email` is the quiet
+weekday mode.
+
+Known limits: only the anomalies each daily run explained (the top 15,
+`DefaultMaxExplain`) reach the library, so anomaly recurrence is over
+those; feedback votes do not retire digest entries (the email is the
+product, nobody has to log in).
+
 ### The management report
 
 `mgmt-report` renders a periodic summary for senior IT management as a
@@ -491,7 +557,7 @@ The first argument is always a command: `run` (the daily batch report),
 `eval` (model comparison), `serve` (web UI), `user` (local accounts:
 add/list/passwd/remove), `token` (sysadmin API bearer tokens:
 create/list/revoke), `findings` (list/show/feedback), `mgmt-report`
-(management summary) and `self-update`. A bare invocation or an unknown
+(management summary), `digest` (the weekly digest) and `self-update`. A bare invocation or an unknown
 command prints the command list and exits non-zero; there is no default
 mode. `--help`, `--version`, the bare words `help <command>` and
 `version`, all work at top level.
@@ -531,6 +597,25 @@ logfile          positional: path to the syslog file; omit (or pass --) to
                  to see what your ignore rules are letting through when
                  tuning the filter for your estate
 --debug          extra progress detail on stderr
+```
+
+The `digest` flags:
+
+```
+--days            window length in days, ending yesterday (default 7)
+--model           fallback model (default SYSLOG_DEFAULT_MODEL);
+                  SYSLOG_DIGEST_MODEL, then SYSLOG_ISSUE_MODEL, win over it
+--max-issues      recurring issue groups given resolutions and shown in
+                  the email (default 10); the rest are in the attachment
+--max-one-offs    single-day critical/high groups shown after them with
+                  the daily run's own advice, no model call (default 5)
+--max-anomalies   recurring anomaly groups explained and shown (default 5)
+--send-email      email it; --recipients as for run (SYSLOG_SMTP_RECIPIENTS)
+--db              SQLite path (default SYSLOG_DB_PATH); must exist
+--out-dir         directory for digest_body.md / digest_attachment.md
+--no-llm          facts only, no model calls
+--no-store        don't file the digest run (no finding ids in the email)
+--debug
 ```
 
 `eval` evaluates the configured model combination through the real noise
@@ -574,6 +659,11 @@ Read from the environment or a `.env` beside the working directory
   that follows the output format and keeps the tone professional. When the
   two stages use different models the report footer and the findings
   library record both, as `<issue model> (scan: <scan model>)`
+- `SYSLOG_DIGEST_MODEL` model for the weekly `digest`: the resolutions
+  and explanations of the findings that recurred all week. Falls back to
+  `SYSLOG_ISSUE_MODEL`, then `--model`. The intended shape is cheap
+  models in the two variables above for the quiet daily runs and the
+  strongest model here, run once a week over a short pre-ranked list
 - `SYSLOG_CONTEXT_LINES` same-host log lines shown to the resolution
   writer either side of each issue's example entry (default 5; 0 turns
   the context windows off); `--context-lines` overrides it per run
@@ -596,7 +686,8 @@ Read from the environment or a `.env` beside the working directory
   email is a text+HTML alternative pair - the plain part is the digest
   markdown verbatim, the HTML part its on-brand rendering - with both
   markdown files attached (`email_body.md`, `email_attachment.md`) for
-  copy/paste or feeding to an agent. The relay is greeted with the
+  copy/paste or feeding to an agent; the weekly digest is the same shape
+  with `digest_body.md` and `digest_attachment.md`. The relay is greeted with the
   machine's hostname (never `localhost`, which strict relays bounce);
   `SYSLOG_SMTP_HELO` overrides that for a box whose hostname is a short
   name and a relay that insists on a FQDN. STARTTLS is used when the

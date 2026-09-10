@@ -29,8 +29,9 @@ as unknown.
 ```
 cmd/syslog-reporter/        CLI entry point; explicit command dispatch (run,
                             eval, serve, user, token, findings,
-                            mgmt-report, self-update) from one registry -
-                            no default mode
+                            mgmt-report, digest, self-update) from one
+                            registry - no default mode; digest.go is the
+                            weekly digest command
 internal/selfupdate/        Version/RepoURL, --version latest-release check,
                             and the self-update command
 internal/reporter/
@@ -55,6 +56,12 @@ internal/reporter/
   knownsmute.go             mute-by-finding-id: derive host+program entries
                             from a finding, append them to the TOML atomically
   mgmtreport.go             management summary (HTML + plain text)
+  digest.go                 weekly digest: BuildDigest groups library
+                            findings across days (issues by service + host
+                            set, anomalies by host + program), ranks by
+                            days seen; DigestIssue/DigestAnomaly feed the
+                            existing LLM agents
+  digestreport.go           the weekly digest's email body + attachment
 internal/web/               serve mode: findings UI, auth seam, hot-reload TLS,
                             and the bearer-token JSON API under /api/
                             (apiauth.go, api.go, apiwrite.go)
@@ -160,6 +167,22 @@ SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.
   back to `--model`. When they differ, the footer and the library's run
   model read `<issue model> (scan: <scan model>)` via reporter.ModelLabel.
 
+- The weekly digest (`digest`, epic srg-xiBoC, ant ADR srg-WtzbG) is the
+  intended delivery: quiet daily runs on cheap models, one email a week.
+  It reads the library only (no dump, no log scan, no "last digest"
+  state; the window is `--days` ending yesterday, a missed Monday is
+  `--days 14` by hand), files itself as a run of kind `digest` under the
+  window's end date (migration 4; replace-on-rerun keys on date + kind;
+  mgmt-report counts daily runs only), and its finding ids are what the
+  email prints. Model: `SYSLOG_DIGEST_MODEL` > `SYSLOG_ISSUE_MODEL` >
+  `--model`. On digest day the digest REPLACES the daily email
+  (daily-run.sh `--digest`; `--no-email` for the other days). Keys are
+  service + sorted host set and host + program, never titles (LLM prose).
+  Two issue lists, deliberately: recurring (2+ days, top 10, smart model)
+  and worst one-offs (single-day critical/high, top 5, the daily run's
+  own resolution, no model call); single-day medium/low are attachment
+  only. Caps are small on purpose (owner 2026-09-10: a scrollbar in the
+  email client means nobody reads it).
 - `eval` follows the same model env defaults as `run`, with additional
   `--scan-model` / `--issue-model` flags that win over their stage env vars.
   Stage env vars still win over `--model`. It evaluates detection, dedupe
