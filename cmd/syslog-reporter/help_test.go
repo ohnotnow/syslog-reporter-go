@@ -30,6 +30,14 @@ func TestRunHelpNamesModelAndSMTPVars(t *testing.T) {
 	}
 }
 
+func TestDigestHelpNamesItsModelVar(t *testing.T) {
+	for _, name := range []string{"SYSLOG_DIGEST_MODEL", "SYSLOG_ISSUE_MODEL", "SYSLOG_SMTP_RECIPIENTS"} {
+		if !strings.Contains(digestHelpEnv, name) {
+			t.Errorf("digest help missing %s", name)
+		}
+	}
+}
+
 func TestMgmtHelpNamesItsRecipientsVar(t *testing.T) {
 	if !strings.Contains(mgmtHelpEnv, "SYSLOG_MGMT_RECIPIENTS") {
 		t.Error("mgmt-report help missing SYSLOG_MGMT_RECIPIENTS")

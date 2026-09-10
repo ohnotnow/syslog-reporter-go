@@ -28,6 +28,7 @@ var commands = []command{
 	{"token", "Manage sysadmin API bearer tokens (create, list, revoke)", cmdToken},
 	{"findings", "List, show and record feedback on findings from the terminal", cmdFindings},
 	{"mgmt-report", "Render the management summary (HTML file plus plain text)", cmdMgmtReport},
+	{"digest", "Email the weekly digest of recurring findings from the library", cmdDigest},
 	{"self-update", "Replace this binary with the latest GitHub release", cmdSelfUpdate},
 }
 
@@ -66,6 +67,11 @@ func cmdFindings(args []string) int {
 
 func cmdMgmtReport(args []string) int {
 	runMgmtReport(args)
+	return 0
+}
+
+func cmdDigest(args []string) int {
+	runDigest(args)
 	return 0
 }
 

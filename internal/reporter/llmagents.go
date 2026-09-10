@@ -238,6 +238,12 @@ func NewResolutionAgent(issues *IssueList, contexts []LogContext, model string, 
 // retry redoes one batch rather than the day.
 const resolutionBatchSize = 12
 
+// explainBatchSize caps the anomalies per explainer request, for the same
+// reason. It equals DefaultMaxExplain so a daily run at the default cap
+// still makes exactly one request; the weekly digest, or a raised cap,
+// gets the protection (ait srg-xiBoC.5).
+const explainBatchSize = 15
+
 // DefaultMaxResolveIssues is the default SYSLOG_MAX_RESOLVE_ISSUES: the
 // most issues one run hands to the resolution writer. The writer runs on
 // the expensive model and its output tokens are most of a day's bill, so
@@ -386,22 +392,39 @@ func explainerPayload(anomalies []Anomaly) string {
 	return strings.Join(lines, "\n")
 }
 
-func (a *AnomalyExplainerAgent) Run(ctx context.Context) ([]*ExplainedAnomaly, error) {
+// batches splits the MaxExplain-capped anomalies into per-request chunks
+// of at most explainBatchSize, in order.
+func (a *AnomalyExplainerAgent) batches() [][]Anomaly {
 	top := a.Anomalies
 	if len(top) > a.MaxExplain {
 		top = top[:a.MaxExplain]
 	}
-	if len(top) == 0 {
+	var out [][]Anomaly
+	for i := 0; i < len(top); i += explainBatchSize {
+		out = append(out, top[i:min(i+explainBatchSize, len(top))])
+	}
+	return out
+}
+
+func (a *AnomalyExplainerAgent) Run(ctx context.Context) ([]*ExplainedAnomaly, error) {
+	batches := a.batches()
+	if len(batches) == 0 {
 		return nil, nil
 	}
 	system := strings.TrimSuffix(anomalyExplanationPromptRaw, "\n")
-	var got AnomalyExplanationList
-	err := llm.Complete(ctx, a.Model, system, explainerPayload(top),
-		"AnomalyExplanationList", anomalyExplanationListSchema(), &got)
-	if err != nil {
-		return nil, err
+	var top []Anomaly
+	var explanations []*AnomalyExplanation
+	for _, batch := range batches {
+		var got AnomalyExplanationList
+		err := llm.Complete(ctx, a.Model, system, explainerPayload(batch),
+			"AnomalyExplanationList", anomalyExplanationListSchema(), &got)
+		if err != nil {
+			return nil, err
+		}
+		top = append(top, batch...)
+		explanations = append(explanations, got.Explanations...)
 	}
-	return mergeExplanations(top, got.Explanations), nil
+	return mergeExplanations(top, explanations), nil
 }
 
 // mergeExplanations pairs each anomaly with its explanation by

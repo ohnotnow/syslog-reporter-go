@@ -54,6 +54,23 @@ const mgmtHelpEnv = `environment:
   SYSLOG_DB_PATH                       SQLite file to read (--db overrides)
 `
 
+const digestHelpIntro = `Email the weekly digest: the findings that kept recurring across the
+window's daily runs, ranked by how many days they were seen, with fresh
+resolutions from the digest model. Reads the library only - no dump, no
+stored state; a missed week is recovered with a bigger --days.
+usage: syslog-reporter digest [flags]
+flags:
+`
+
+const digestHelpEnv = `environment:
+  SYSLOG_DIGEST_MODEL                  the digest's model (then SYSLOG_ISSUE_MODEL,
+                                       then --model / SYSLOG_DEFAULT_MODEL)
+  SYSLOG_REASONING_EFFORT, SYSLOG_REDACT  as for run
+  OPENAI_API_KEY / ANTHROPIC_API_KEY / AZURE_OPENAI_ENDPOINT + _API_KEY
+  SYSLOG_SMTP_SERVER, SYSLOG_SMTP_SENDER, SYSLOG_SMTP_RECIPIENTS  as for run
+  SYSLOG_DB_PATH                       SQLite file to read (--db overrides)
+`
+
 const userHelp = `Manage local-auth accounts for serve mode (auth mode local).
 usage: syslog-reporter user add <username> <email> [--password-stdin] [--db <path>]
        syslog-reporter user list [--db <path>]

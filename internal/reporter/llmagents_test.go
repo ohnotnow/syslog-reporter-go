@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -346,6 +347,42 @@ func TestResolutionRunConcatenatesBatches(t *testing.T) {
 		}
 		if r.Investigate != "ls" {
 			t.Errorf("investigate not trimmed: %q", r.Investigate)
+		}
+	}
+}
+
+// The explainer batches like the resolution writer (srg-xiBoC.5): the
+// MaxExplain cap applies first, then chunks of explainBatchSize in order.
+func TestAnomalyExplainerBatches(t *testing.T) {
+	mk := func(n int) []Anomaly {
+		var out []Anomaly
+		for i := 0; i < n; i++ {
+			out = append(out, peerFixture(fmt.Sprintf("host%02d.example.test", i), "sshd", 5))
+		}
+		return out
+	}
+	cases := []struct {
+		anomalies, max int
+		want           []int
+	}{
+		{0, 15, nil},
+		{15, 15, []int{15}},
+		{40, 40, []int{15, 15, 10}},
+		{20, 15, []int{15}},
+	}
+	for _, tc := range cases {
+		agent := NewAnomalyExplainer(mk(tc.anomalies), "test/model")
+		agent.MaxExplain = tc.max
+		batches := agent.batches()
+		var got []int
+		for _, b := range batches {
+			got = append(got, len(b))
+		}
+		if !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%d anomalies at cap %d: batch sizes %v, want %v", tc.anomalies, tc.max, got, tc.want)
+		}
+		if len(batches) > 1 && batches[1][0].Host() != "host15.example.test" {
+			t.Errorf("second batch starts at %s, want host15 (order kept)", batches[1][0].Host())
 		}
 	}
 }

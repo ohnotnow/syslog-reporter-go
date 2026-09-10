@@ -219,9 +219,15 @@ func headingID(id int64) string {
 // runs). The deterministic facts still render in the report; the advice
 // fields say no explanation was generated.
 func FactsOnly(anomalies []Anomaly) []*ExplainedAnomaly {
+	return FactsOnlyN(anomalies, DefaultMaxExplain)
+}
+
+// FactsOnlyN is FactsOnly with the caller's own cap (the weekly digest
+// has already chosen how many groups it wants).
+func FactsOnlyN(anomalies []Anomaly, n int) []*ExplainedAnomaly {
 	top := anomalies
-	if len(top) > DefaultMaxExplain {
-		top = top[:DefaultMaxExplain]
+	if len(top) > n {
+		top = top[:n]
 	}
 	return mergeExplanations(top, nil)
 }

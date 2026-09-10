@@ -132,7 +132,14 @@ func (r *ReportAgent) Run() string {
 // muteFooter explains the syslog-mute lines, once, when any rendered
 // finding carried one.
 func (r *ReportAgent) muteFooter(issues *IssueList, anomalies []*ExplainedAnomaly) string {
-	if r.RepoURL == "" {
+	return muteFooterFor(r.RepoURL, issues, anomalies)
+}
+
+// muteFooterFor is the one-line pointer to the syslog-mute setup, shown by
+// both email layouts whenever a mute line was printed (some finding has an
+// id). Empty repoURL suppresses it.
+func muteFooterFor(repoURL string, issues *IssueList, anomalies []*ExplainedAnomaly) string {
+	if repoURL == "" {
 		return ""
 	}
 	any := false
@@ -145,7 +152,7 @@ func (r *ReportAgent) muteFooter(issues *IssueList, anomalies []*ExplainedAnomal
 	if !any {
 		return ""
 	}
-	return "_syslog-mute is a shell function; see " + r.RepoURL +
+	return "_syslog-mute is a shell function; see " + repoURL +
 		"/blob/master/README.md#the-sysadmin-api to set it up._\n"
 }
 
@@ -219,20 +226,7 @@ func (r *ReportAgent) emailBodyN(topIssues, topAnomalies int) string {
 			b.WriteString("**Example:**\n\n```\n" + i.ExampleLogEntry + "\n```\n\n")
 		}
 		if res, ok := resolutions[i.Issue]; ok {
-			b.WriteString("**Likely cause:** " + res.RootCause + "\n\n")
-			b.WriteString("**Have a look:**\n\n")
-			b.WriteString("```\n" + res.Investigate + "\n```\n\n")
-			if res.LookFor != "" {
-				b.WriteString("**What to look for:** " + res.LookFor + "\n\n")
-			}
-			b.WriteString("**Try:**\n\n```\n")
-			for _, c := range res.FixCommands {
-				b.WriteString(c + "\n")
-			}
-			b.WriteString("```\n")
-			if res.Notes != "" {
-				b.WriteString("\n_Note: " + res.Notes + "_\n")
-			}
+			writeResolutionBrief(&b, res)
 		} else {
 			b.WriteString("👉 " + i.RecommendedAction + "\n")
 		}
@@ -243,18 +237,7 @@ func (r *ReportAgent) emailBodyN(topIssues, topAnomalies int) string {
 		fmt.Fprintf(&b, "## Unusual activity (top %d)\n\n", len(anomalies))
 		b.WriteString("Hosts behaving unlike their peers or their own recent normal - worth a glance.\n\n")
 		for _, a := range anomalies {
-			fmt.Fprintf(&b, "### %s / %s%s\n\n", a.Host, a.Program, headingID(a.ID))
-			fmt.Fprintf(&b, "_%s_ (%s)\n\n", a.Headline, a.OSFamily)
-			b.WriteString(a.Detail + "\n\n")
-			b.WriteString(a.LikelyCauses + "\n\n")
-			if len(a.SuggestedCommands) > 0 {
-				b.WriteString("```\n")
-				for _, c := range a.SuggestedCommands {
-					b.WriteString(c + "\n")
-				}
-				b.WriteString("```\n")
-			}
-			b.WriteString(muteParagraph(a.ID) + "\n")
+			writeAnomalyBrief(&b, a)
 		}
 	}
 
@@ -278,6 +261,43 @@ func (r *ReportAgent) emailBodyN(topIssues, topAnomalies int) string {
 		b.WriteString("\n" + footer)
 	}
 	return b.String()
+}
+
+// writeResolutionBrief is the resolution as the short email shows it,
+// shared by the daily digest and the weekly digest layouts.
+func writeResolutionBrief(b *strings.Builder, res *Resolution) {
+	b.WriteString("**Likely cause:** " + res.RootCause + "\n\n")
+	b.WriteString("**Have a look:**\n\n")
+	b.WriteString("```\n" + res.Investigate + "\n```\n\n")
+	if res.LookFor != "" {
+		b.WriteString("**What to look for:** " + res.LookFor + "\n\n")
+	}
+	b.WriteString("**Try:**\n\n```\n")
+	for _, c := range res.FixCommands {
+		b.WriteString(c + "\n")
+	}
+	b.WriteString("```\n")
+	if res.Notes != "" {
+		b.WriteString("\n_Note: " + res.Notes + "_\n")
+	}
+}
+
+// writeAnomalyBrief is one anomaly as the short email shows it. Shared by
+// both email layouts (the weekly digest's Detail carries its recurrence
+// sentence).
+func writeAnomalyBrief(b *strings.Builder, a *ExplainedAnomaly) {
+	fmt.Fprintf(b, "### %s / %s%s\n\n", a.Host, a.Program, headingID(a.ID))
+	fmt.Fprintf(b, "_%s_ (%s)\n\n", a.Headline, a.OSFamily)
+	b.WriteString(a.Detail + "\n\n")
+	b.WriteString(a.LikelyCauses + "\n\n")
+	if len(a.SuggestedCommands) > 0 {
+		b.WriteString("```\n")
+		for _, c := range a.SuggestedCommands {
+			b.WriteString(c + "\n")
+		}
+		b.WriteString("```\n")
+	}
+	b.WriteString(muteParagraph(a.ID) + "\n")
 }
 
 func plural(n int, one, many string) string {
