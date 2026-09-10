@@ -165,14 +165,24 @@ if [ -t 0 ]; then
 fi
 cron_file=/etc/cron.d/syslog-reporter
 [ -d /etc/cron.d ] || die "/etc/cron.d is missing - install cron (cronie on RHEL) and re-run"
+# An existing schedule is the operator's: a re-run refreshes the binary
+# and helpers, never the crontab. The weekly shape below is for a new
+# install; to move an older daily-email install to it, edit the file.
+if [ -e "$cron_file" ]; then
+    echo "kept existing $cron_file (delete it and re-run for the weekly-digest schedule)"
+else
 {
-    echo "# syslog-reporter: yesterday's report to the team, first try at 07:30,"
-    echo "# retried on the half hour until it goes out (daily-run.sh keeps a .sent marker)"
+    echo "# syslog-reporter: run and file every day, first try at 07:30 and retried"
+    echo "# on the half hour (daily-run.sh keeps a .sent marker); on Mondays email the"
+    echo "# weekly digest of recurring findings instead of a daily report. For a daily"
+    echo "# email instead, use one line with no options: 30 7-17 * * * ... daily-run.sh"
     if [ -n "$mailto" ]; then echo "MAILTO=$mailto"; fi
-    echo "30 7-17 * * * $SERVICE_USER $BIN_DIR/daily-run.sh >> $WORK_DIR/daily-run.log 2>&1"
+    echo "30 7-17 * * 0,2-6 $SERVICE_USER $BIN_DIR/daily-run.sh --no-email >> $WORK_DIR/daily-run.log 2>&1"
+    echo "30 7-17 * * 1     $SERVICE_USER $BIN_DIR/daily-run.sh --digest >> $WORK_DIR/daily-run.log 2>&1"
 } > "$cron_file"
 chmod 644 "$cron_file"
 echo "wrote $cron_file"
+fi
 
 step "history"
 if ask "run backfill.sh for the last $BACKFILL_DAYS days now (free, no LLM)?" y; then
@@ -200,5 +210,6 @@ else
 fi
 
 echo
-echo "done. The next attempt at 07:30 sends yesterday's report; to send one now:"
+echo "done. Cron runs yesterday's logs at 07:30 each day and emails the weekly digest"
+echo "on Mondays ($cron_file has the schedule); to see a day's report now:"
 echo "  sudo -u $SERVICE_USER $BIN_DIR/daily-run.sh"

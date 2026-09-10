@@ -39,6 +39,11 @@ OPENAI_API_KEY=sk-...
 # back to SYSLOG_DEFAULT_MODEL when its variable is unset.
 #SYSLOG_LOGSCAN_MODEL=openai/gpt-5.6-luna
 #SYSLOG_ISSUE_MODEL=anthropic/claude-fable-5-1
+# The weekly digest's model (daily-run.sh --digest): the smart one, run
+# once a week over the findings that kept recurring. Falls back to
+# SYSLOG_ISSUE_MODEL, then SYSLOG_DEFAULT_MODEL. The usual shape is cheap
+# models above for the quiet daily runs and the best you have here.
+#SYSLOG_DIGEST_MODEL=anthropic/claude-fable-5-1
 # Optional: how many same-host log lines either side of each issue's
 # example the resolution writer sees (default 5; 0 sends the issues alone).
 #SYSLOG_CONTEXT_LINES=5
