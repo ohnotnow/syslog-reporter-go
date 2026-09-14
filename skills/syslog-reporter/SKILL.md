@@ -2,13 +2,14 @@
 name: syslog-reporter
 description: >
   Query and act on the daily syslog digest from Claude Code: list today's
-  issues, look at one finding by number, mute a known oddity, record whether
-  a fix worked, or pull trend data for questions like "how noisy was this
+  issues, look at one finding by number, mute a known oddity (on some hosts,
+  or just one message), see what is muted, undo a mute, record whether a
+  fix worked, or pull trend data for questions like "how noisy was this
   month". Use whenever someone mentions the syslog report, the syslog
-  digest email, syslog findings, muting a finding, or log trends across the
-  estate.
+  digest email, syslog findings, muting or unmuting a finding, or log
+  trends across the estate.
 allowed-tools: "Bash"
-version: "1.1.0"
+version: "1.2.0"
 ---
 
 # syslog-reporter
@@ -46,7 +47,10 @@ are `YYYY-MM-DD`. Errors are JSON with one `error` string.
 | `GET /api/me` | none | Who the token belongs to |
 | `GET /api/findings` | `since`, `until`, `host`, `service`, `severity`, `kind`, `run_kind`, `q`, `limit` (max 500), `offset` | List findings, newest first |
 | `GET /api/findings/{id}` | none | One finding in full, with feedback |
-| `POST /api/findings/{id}/mute` | `reason` (required), `expires` | Stop this finding appearing again |
+| `POST /api/findings/{id}/mute` | `reason` (required), `expires`, `host` (repeatable), `match` | Stop this finding appearing again; returns the entries with ids |
+| `GET /api/knowns` | `host`, `finding_id`, `all` | What is muted, with who and from which finding |
+| `DELETE /api/knowns/{id}` | none | Remove one mute entry by its entry id |
+| `DELETE /api/findings/{id}/mute` | none | Remove every entry this finding's mutes created |
 | `POST /api/findings/{id}/feedback` | `verdict` (`worked` or `didnt_work`), `comment` | Record whether the suggested fix worked |
 | `GET /api/runs` | `since`, `until` (default last 30 days) | One row per run, daily and digest (`kind`): line counts and finding counts |
 | `GET /api/aggregates` | `since`, `until` (both required, at most 366 days apart), `host`, `program` | Per-day line counts by host and program |
@@ -59,6 +63,15 @@ are `YYYY-MM-DD`. Errors are JSON with one `error` string.
 week, filed under the week's last day with the digest's own
 resolutions; the number in the weekly email is one of these). `q`
 searches titles. On `/api/aggregates`, `host` and `program` are exact.
+
+On the mute: `host` narrows the mute to some of the finding's hosts (each
+must be a host the finding lists, or the whole call is a 400 and nothing
+is written; absent means all of them). `match` is a regex (Go RE2) on
+the message: with it, only matching lines from that program on those
+hosts are dropped; without it, every line from that program on those
+hosts is dropped. The server compiles the regex first; one that does not
+compile is a 400 with the compiler's message. Entry ids (from the mute
+response or `/api/knowns`) are not finding ids.
 
 Examples:
 
@@ -75,10 +88,25 @@ curl -sS -H "Authorization: Bearer $SYSLOG_API_TOKEN" \
 # One finding
 curl -sS -H "Authorization: Bearer $SYSLOG_API_TOKEN" "$SYSLOG_API_URL/api/findings/1234"
 
-# Mute it (host and program come from the finding; you only give the reason)
+# Mute it everywhere it was seen (program comes from the finding; you give the reason)
 curl -sS -X POST -H "Authorization: Bearer $SYSLOG_API_TOKEN" \
   --data-urlencode "reason=dhcpd has no pool on this box by design" \
   "$SYSLOG_API_URL/api/findings/1234/mute"
+
+# Mute one message on two of its hosts
+curl -sS -X POST -H "Authorization: Bearer $SYSLOG_API_TOKEN" \
+  --data-urlencode "reason=pool-less by design" \
+  --data-urlencode "host=dhcp01.example.test" --data-urlencode "host=dhcp02.example.test" \
+  --data-urlencode "match=no free leases" \
+  "$SYSLOG_API_URL/api/findings/1234/mute"
+
+# What is muted, and what finding 1234's mutes created
+curl -sS -H "Authorization: Bearer $SYSLOG_API_TOKEN" "$SYSLOG_API_URL/api/knowns"
+curl -sS -H "Authorization: Bearer $SYSLOG_API_TOKEN" "$SYSLOG_API_URL/api/knowns?finding_id=1234"
+
+# Unmute: one entry by its entry id, or everything finding 1234 muted
+curl -sS -X DELETE -H "Authorization: Bearer $SYSLOG_API_TOKEN" "$SYSLOG_API_URL/api/knowns/37"
+curl -sS -X DELETE -H "Authorization: Bearer $SYSLOG_API_TOKEN" "$SYSLOG_API_URL/api/findings/1234/mute"
 
 # Feedback
 curl -sS -X POST -H "Authorization: Bearer $SYSLOG_API_TOKEN" \
@@ -140,15 +168,26 @@ Anomaly kinds carry `anomaly` instead of `issue`, with `host`, `program`,
 `kind`, `headline`, `detail`, `os_family`, `example_line`,
 `likely_causes`, `investigation_steps` and `suggested_commands`.
 
-`POST /api/findings/{id}/mute` returns 201 with the entries written:
+`POST /api/findings/{id}/mute` returns 201 with the entries written, one
+per host. `GET /api/knowns` returns `{"entries": [...]}` in the same
+shape, oldest first:
 
 ```json
 {"entries": [
-  {"host": "dhcp01.example.test", "program": "dhcpd",
-   "reason": "dhcpd has no pool on this box by design (finding 1234, muted by jbloggs via API)",
-   "added": "2026-09-08", "expires": null}
+  {"id": 37, "host": "dhcp01.example.test", "program": "dhcpd", "match": "no free leases",
+   "reason": "pool-less by design", "added": "2026-09-08", "expires": null,
+   "source": "api", "finding_id": 1234, "created_by": "jbloggs", "token_prefix": "5210c8e0"}
 ]}
 ```
+
+`source` is `api` (made through this API) or `cli` (made on the server by
+hand; `created_by` and `finding_id` are then null). An empty `match`
+means every line of that program on that host is dropped.
+
+`DELETE /api/knowns/{id}` returns `{"deleted": 1, "id": 37}`, or 404.
+`DELETE /api/findings/{id}/mute` returns `{"deleted": 2, "ids": [37, 38]}`;
+`deleted` is 0 when there was nothing left to undo (that is fine, not an
+error). 404 means the finding itself does not exist.
 
 `GET /api/runs`:
 
@@ -182,14 +221,38 @@ Anomaly kinds carry `anomaly` instead of `issue`, with `host`, `program`,
   publishing one say plainly that the data will leave this machine and
   let the user decide; sharing it with colleagues on the same plan is
   their call, not yours.
-- **Read before you mute.** Fetch the finding, tell the user which hosts
-  and which program the mute will cover (one entry per host, program from
-  the finding), and confirm before sending the POST. A mute changes what
-  everyone's report shows from tomorrow.
+- **Show your working before you mute.** Fetch the finding. Then, in
+  one message, state: the hosts the mute will cover (all of the
+  finding's, or the ones the user named), the program, and EITHER the
+  regex you intend, quoted, with one line from the finding it would
+  match, OR that no regex is set and every line from that program on
+  those hosts will stop appearing. Ask "does that match what you
+  meant?" and wait for a yes. Never send the POST in the same turn you
+  propose it. A mute changes what everyone's report shows from tomorrow.
+- **Prefer a regex when the user means one message.** "The no free
+  leases one" is one message; a program-only mute would also hide every
+  other dhcpd line on those hosts. Build the regex from the finding's
+  `example_log_entry`: take the distinctive words, escape regex
+  metacharacters, leave out pids, addresses, MACs and timestamps. Keep it
+  as specific as the user's words. Never propose `.*` alone or a single
+  common word like `error`. If the user really wants the whole program
+  gone, that is their call; say what it hides.
+- **Narrow with `host` when the user names hosts.** Send one `host`
+  parameter per host, exactly as the finding lists them. Do not
+  mute-all-then-delete.
 - **The reason is the user's, in their words.** Never invent one. If they
   have not said why, ask.
 - **"Mute the dhcp one on that host" is three steps**: list, pick the
   matching finding, confirm its id with the user, then mute that id.
+- **Unmuting.** "Unmute entry 37" is one DELETE on `/api/knowns/37`.
+  "Undo everything I muted for 1234" is DELETE on
+  `/api/findings/1234/mute`. "Unmute the dhcp one, but only on srv1 and
+  srv2" is: list `/api/knowns?finding_id=1234`, pick the entries whose
+  `host` matches, show them, confirm, then DELETE each by its entry id.
+  Never guess an entry id; list first. Quote the ids you removed.
+- **Mutes are on the record.** `/api/knowns` shows every entry with the
+  username and token prefix that made it. When someone asks "why is X
+  quiet?", that is where to look.
 - **Never invent finding ids.** Quote ids back in replies so the user can
   check them against the email.
 - **Feedback needs a verdict the user actually gave.** Do not record
@@ -209,8 +272,9 @@ Anomaly kinds carry `anomaly` instead of `issue`, with `host`, `program`,
 | Status | Meaning | What to tell the user |
 | --- | --- | --- |
 | 401 | Missing, revoked or expired token | Check `SYSLOG_API_TOKEN`; ask an admin for a new token |
-| 400 | Bad parameter (date format, reason too long, bad verdict) | Fix the request; the `error` string says which |
+| 400 | Bad parameter (date format, reason too long, bad verdict, a `host` not on the finding, a `match` that does not compile) | Fix the request; the `error` string says which |
 | 404 | No such finding | Check the id against the email |
-| 409 | Already muted | Nothing to do; the entry exists |
+| 409 | Already muted | An identical entry (same hosts, program and match) exists; `/api/knowns?finding_id=` shows it |
+| 404 (on DELETE) | No such entry or finding | Check the entry id against `/api/knowns` |
 | 422 | Program cannot be derived | Mute it on the server by hand |
 | 429 | Daily mute cap | Wait; the `Retry-After` header says how long |
