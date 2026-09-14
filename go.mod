@@ -9,7 +9,7 @@ require (
 	github.com/openai/openai-go/v3 v3.54.0
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/yuin/goldmark v1.8.2
-	golang.org/x/crypto v0.55.0
+	golang.org/x/crypto v0.56.0
 	golang.org/x/term v0.45.0
 	modernc.org/sqlite v1.57.0
 )
