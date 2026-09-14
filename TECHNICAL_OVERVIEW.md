@@ -22,7 +22,8 @@ implementation replaced it outright and maintains no compatibility with it.
   `net/http` with Go 1.22+ pattern routing, `html/template`, `go:embed`)
 - modernc.org/sqlite (pure Go, no CGO, cross-compiles cleanly)
 - Official provider SDKs: openai-go and anthropic-sdk-go
-- pelletier/go-toml (known-knowns file), joho/godotenv (.env loading)
+- pelletier/go-toml (only the one-shot `knowns import` of the old
+  known-knowns file), joho/godotenv (.env loading)
 - Web UI: htmx, vendored and pinned (no CDN); alexedwards/scs for
   sessions; x/crypto bcrypt and x/term for local accounts
 - Tests use the stdlib `testing` package only
@@ -42,7 +43,9 @@ internal/reporter/
                             thousands, compactFloat), pinned by test vectors
   filters_data.go           the noise filter rule list (edit per estate)
   filter.go                 LogFilter: deterministic noise removal
-  knowns.go                 known-knowns TOML suppression
+  knowns.go                 known-knowns suppression semantics (host glob +
+                            program glob / match regex, expiry by slice date)
+  knownsstore.go            known_knowns table: add, list, delete, load
   anomaly.go                line parsing, robust z-scores, peer detector,
                             anomaly combining
   store.go                  SQLite daily-aggregate store
@@ -114,7 +117,9 @@ Anomaly detection runs on the RAW log, upstream of the filter, so it can see
 the high-volume programs the denylist removes. Everything else runs on the
 filtered log.
 
-Operator-acknowledged "known knowns" (a gitignored TOML file, format in
+Operator-acknowledged "known knowns" (the `known_knowns` table in the
+shared database, migration 5; managed with the `knowns` command on the box
+or the sysadmin API's mute endpoints, see
 [GETTING_STARTED.md](GETTING_STARTED.md#3-make-it-yours))
 apply in two places: the filter drops lines host-aware (a `match` entry
 drops the lines its regex matches, a `program` entry drops every line from
@@ -387,17 +392,28 @@ Routes (`api.go`, `apiwrite.go`); every response is JSON, every error is
 - `POST /api/findings/{id}/feedback` - `verdict`, `comment`; the token's
   user is the voter
 - `POST /api/findings/{id}/mute` - `reason` (one line, 200 characters),
-  optional `expires`. `DeriveKnownEntries` (`knownsmute.go`) turns the
-  finding into one host+program entry per affected host: an anomaly names
-  both directly; an issue's program is parsed from its example log line,
-  falling back to `affected_service` only when that already looks like a
-  program token, else 422. `AppendKnownEntries` writes them to the
-  known-knowns TOML (`serve --known-knowns` / `SYSLOG_KNOWN_KNOWNS`, the
-  file `run` reads) via temp file and rename, re-parsing before the
-  rename, and skips entries already active (all skipped is a 409). The
-  reason is stamped `(finding N, muted by <user> via API)`. A per-token
-  fixed-window cap (`SYSLOG_API_MUTE_LIMIT` per 24 hours, default 20)
-  answers 429 with `Retry-After`
+  optional `expires`, optional `host` (repeatable; each must be one of
+  the finding's own hosts, else 400: a client can narrow the mute, never
+  widen it) and optional `match` (a regex, compiled with the filter's
+  own compiler before anything is written; a bad one is a 400 carrying
+  the compile error). `DeriveKnownEntries` (`knownsmute.go`) turns the
+  finding into one host+program entry per (selected) host: an anomaly
+  names both directly; an issue's program is parsed from its example log
+  line, falling back to `affected_service` only when that already looks
+  like a program token, else 422. With `match` the entry carries both
+  program and match, so the anomaly is muted and only matching lines
+  drop. `AddKnownEntries` writes them to the `known_knowns` table with
+  the caller's username, token prefix and the finding id as provenance,
+  skipping an identical (host, program, match) already active for that
+  finding (all skipped is a 409). The 201 body returns the rows with
+  their ids. A per-token fixed-window cap (`SYSLOG_API_MUTE_LIMIT` per
+  24 hours, default 20) answers 429 with `Retry-After`
+- `GET /api/knowns` - every known-knowns row with provenance, by id;
+  active only unless `all=1`; `host` (exact) and `finding_id` narrow it
+- `DELETE /api/knowns/{id}` - remove one row (404 if none)
+- `DELETE /api/findings/{id}/mute` - remove every row that finding's
+  mutes created; 404 only for a missing finding, `deleted: 0` when there
+  was nothing to undo. Deletes never count against the mute cap
 - `GET /api/runs` - `ListRuns` over a date range (default last 30 days)
   with per-run finding counts
 - `GET /api/aggregates` - `DailyTotals`: the aggregates table summed
@@ -556,7 +572,8 @@ between them.
 The first argument is always a command: `run` (the daily batch report),
 `eval` (model comparison), `serve` (web UI), `user` (local accounts:
 add/list/passwd/remove), `token` (sysadmin API bearer tokens:
-create/list/revoke), `findings` (list/show/feedback), `mgmt-report`
+create/list/revoke), `knowns` (known-knowns suppressions:
+list/add/remove/import), `findings` (list/show/feedback), `mgmt-report`
 (management summary), `digest` (the weekly digest) and `self-update`. A bare invocation or an unknown
 command prints the command list and exits non-zero; there is no default
 mode. `--help`, `--version`, the bare words `help <command>` and
@@ -583,11 +600,11 @@ logfile          positional: path to the syslog file; omit (or pass --) to
 --date           ISO date (YYYY-MM-DD) the log slice covers, keying the
                  aggregate store. Defaults to yesterday, or for NDJSON input
                  to the date found in the data
---db             SQLite aggregate-store path (default syslog_aggregates.db)
---known-knowns   path to the known-knowns TOML (default known_knowns.toml;
-                 a missing file just means none)
---no-store       don't persist aggregates or run the history-based
-                 detectors (peer comparison still runs)
+--db             SQLite store path (default syslog_aggregates.db); also
+                 where the known-knowns are read from
+--no-store       don't persist aggregates, run the history-based
+                 detectors or capture findings (known-knowns are still
+                 read; peer comparison still runs)
 --no-llm         skip every LLM stage so the run costs nothing
 --send-email     email the report; --recipients takes a comma-separated
                  list (falls back to SYSLOG_SMTP_RECIPIENTS)
@@ -705,11 +722,6 @@ Read from the environment or a `.env` beside the working directory
 - `SYSLOG_BLANKET_IGNORE` comma-separated substrings appended to the filter
   at runtime - the home for estate-identifying entries (hostnames, internal
   IPs) so the committed filter stays estate-neutral
-- `SYSLOG_KNOWN_KNOWNS` path to the known-knowns TOML (default
-  `known_knowns.toml`; CLI `--known-knowns` overrides on both `run` and
-  `serve`; missing file means none; format in GETTING_STARTED.md). The
-  sysadmin API's mute endpoint appends to this file, so `serve` must see
-  the same path `run` reads
 - `SYSLOG_API_MUTE_LIMIT` mutes allowed per API token per 24 hours
   (default 20, must be at least 1; no flag). A leaked token or a looping
   script cannot silence the estate in one go

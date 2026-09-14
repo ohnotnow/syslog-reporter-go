@@ -29,8 +29,9 @@ curl -sS -H "Authorization: Bearer $SYSLOG_API_TOKEN" "$SYSLOG_API_URL/api/me"
 The daily email prints a `syslog-mute 1234 "reason"` line under each
 finding. That is a shell function, not a command in the binary; paste
 one of these into your shell profile. A mute takes only a reason: the
-server works out the host and program from the finding and appends the
-entry to the known-knowns file.
+server works out the hosts and program from the finding and stores one
+known-knowns entry per host. (Narrowing to some hosts, or to one message
+with a regex, is what the Claude skill is for; the function stays simple.)
 
 ```bash
 # bash / zsh (~/.bashrc or ~/.zshrc)
@@ -74,17 +75,20 @@ function syslog-mute($id, $reason) {
 }
 ```
 
-Mutes made this way record who made them and which finding they came
-from, and each token gets twenty a day (`SYSLOG_API_MUTE_LIMIT`).
+Mutes made this way record who made them, via which token, and which
+finding they came from, and each token gets twenty a day
+(`SYSLOG_API_MUTE_LIMIT`). Deleting a mute is never capped.
 
 ## From Claude Code
 
 Copy [skills/syslog-reporter](skills/syslog-reporter) into
 `~/.claude/skills/` and ask in plain words: "what did the syslog report
-find today?", "look at finding 1234", "mute the dhcp one on dhcp01, it
-has no pool by design". The skill carries the endpoint list, the JSON
-shapes and the etiquette (read a finding before muting it, always
-confirm, never invent a reason).
+find today?", "look at finding 1234", "mute the no-free-leases message
+on dhcp01 and dhcp02, they have no pool by design", "what is muted?",
+"sorry, unmute that". The skill carries the endpoint list, the JSON
+shapes and the etiquette (read a finding before muting it, state the
+hosts and the regex it intends and wait for a yes, never invent a
+reason, never guess an id).
 
 ## Endpoints
 
@@ -97,7 +101,15 @@ confirm, never invent a reason).
 - `GET /api/findings/{id}` - one finding in full, with its feedback
 - `POST /api/findings/{id}/feedback` - `verdict` (worked / didnt-work)
   and an optional `comment`
-- `POST /api/findings/{id}/mute` - `reason`, optional `expires`
+- `POST /api/findings/{id}/mute` - `reason`, optional `expires`,
+  optional `host` (repeatable, must be hosts of the finding), optional
+  `match` (a regex: drop only matching lines instead of all of the
+  program's); returns the entries with their ids
+- `GET /api/knowns` - what is muted, with who and from which finding
+  (`host`, `finding_id`, `all=1` to include lapsed entries)
+- `DELETE /api/knowns/{id}` - remove one entry
+- `DELETE /api/findings/{id}/mute` - remove everything a finding's mutes
+  created
 - `GET /api/runs` - the runs over a date range, each with its `kind`
 - `GET /api/aggregates` - per-day line counts, for trend questions
 

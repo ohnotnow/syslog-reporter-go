@@ -169,49 +169,51 @@ raw socket held open for an instrument. Once they have been eye-rolled
 at, they should stop appearing in every report. That is what the
 known-knowns file is for.
 
-It is a TOML file called `known_knowns.toml` in the working directory
-(`/var/lib/syslog-reporter` when you deploy with the helper scripts). Point
-somewhere else with `--known-knowns` or `SYSLOG_KNOWN_KNOWNS`.
+They live in the shared SQLite database, next to the history and the
+findings library, and you manage them with the `knowns` command on the
+box:
 
-```toml
-[[known]]
-host = "dhcp01.example.test"    # glob: "dhcp01.example.test", "lab*", or "*"
-program = "dhcpd"               # glob; drops dhcpd's lines on the host and
-                                # mutes its unusual-activity entries
-reason = "no pool on this box by design, the leases warning is expected"
-added = 2026-09-08
-
-[[known]]
-host = "*"
-match = "port 1234"             # regex on the message; drops only matching lines
-reason = "microscope controller keeps a raw socket open"
-added = 2026-09-08
-expires = 2027-01-31            # entry lapses after this log-slice date
+```bash
+./syslog-reporter knowns add --host dhcp01.example.test --program dhcpd \
+    --reason "no pool on this box by design, the leases warning is expected"
+./syslog-reporter knowns add --host '*' --match 'port 1234' --expires 2027-01-31 \
+    --reason "microscope controller keeps a raw socket open"
+./syslog-reporter knowns list          # what is muted, by whom, from which finding
+./syslog-reporter knowns remove 2      # by the id list shows
 ```
 
 Field by field:
 
-- `host` (required) - a glob matched against the hostname as it appears in
-  the log.
-- `program` - a glob matched against the syslog program token (`dhcpd` in
-  `dhcpd[712]: ...`). Drops every line from that program on the host and
-  mutes that host/program pair in the unusual-activity section.
-- `match` - a regular expression (Go RE2 syntax) applied to the message
-  after the hostname. Drops only the lines it matches.
-- `reason` (required) - why, in your words. It is shown in the report
+- `--host` (required) - a glob matched against the hostname as it appears
+  in the log: `dhcp01.example.test`, `lab*`, or `*`.
+- `--program` - a glob matched against the syslog program token (`dhcpd`
+  in `dhcpd[712]: ...`). Drops every line from that program on the host
+  and mutes that host/program pair in the unusual-activity section.
+- `--match` - a regular expression (Go RE2 syntax) applied to the message
+  after the hostname. Drops only the lines it matches. With `--program`
+  as well, the pair's anomalies are muted but only matching lines drop.
+- `--reason` (required) - why, in your words. It is shown in the report
   footer when the entry fires.
-- `added` - a date, for your own bookkeeping.
-- `expires` - a date after which the entry stops applying. Judged against
-  the date of the log slice being processed, not today.
+- `--expires` - a date after which the entry stops applying. Judged
+  against the date of the log slice being processed, not today.
 
-Every entry needs a `reason` and at least one of `program` or `match`.
-
-The report footer lists which entries fired and how many have lapsed. A
-regex that does not compile fails the run at startup.
+Every entry needs a reason and at least one of `--program` or `--match`.
+A regex that does not compile is refused on the spot. The report footer
+lists which entries fired and how many have lapsed.
 
 Once the daily email is going out, each finding in it carries a
-`syslog-mute` line that adds a known-knowns entry from your own shell.
-[API.md](API.md) covers that.
+`syslog-mute` line that adds a known-knowns entry from your own shell,
+and from Claude Code you can mute one message on a couple of hosts, list
+what is muted, and undo a mute. [API.md](API.md) covers that. Every
+entry records who made it and, for mutes, which token and finding.
+
+**Upgrading from a release before the database table?** Your entries
+were in `known_knowns.toml`. Import them once and the file is no longer
+read:
+
+```bash
+./syslog-reporter knowns import known_knowns.toml
+```
 
 ## 4. Make it daily
 
@@ -358,8 +360,8 @@ sudo -u syslog-reporter syslog-reporter findings feedback 42 worked --comment "c
 `SYSLOG_MGMT_RECIPIENTS`, a separate list from the daily digest.
 
 **From your own machine.** The `serve` process also exposes a small JSON
-API for Claude Code or plain curl. [API.md](API.md) has the tokens and
-the `syslog-mute` shell function.
+API for Claude Code or plain curl: query findings, mute and unmute.
+[API.md](API.md) has the tokens and the `syslog-mute` shell function.
 
 `syslog-reporter self-update` replaces the binary with the latest
 release.
@@ -377,7 +379,7 @@ cd /var/lib/syslog-reporter
 sudo -u syslog-reporter sqlite3 syslog_aggregates.db ".backup /var/backups/syslog-reporter.db"
 ```
 
-Worth keeping alongside it: the `.env` and `known_knowns.toml`, which are
-the only other things in that directory you cannot regenerate. "Backing
+Worth keeping alongside it: the `.env`, the only other thing in that
+directory you cannot regenerate (the known-knowns are in the database). "Backing
 up the database" in [TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md) has
 the detail.

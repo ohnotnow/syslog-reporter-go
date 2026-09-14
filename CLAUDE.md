@@ -29,9 +29,11 @@ as unknown.
 ```
 cmd/syslog-reporter/        CLI entry point; explicit command dispatch (run,
                             eval, serve, user, token, findings,
-                            mgmt-report, digest, self-update) from one
-                            registry - no default mode; digest.go is the
-                            weekly digest command
+                            knowns, mgmt-report, digest, self-update) from
+                            one registry - no default mode; digest.go is
+                            the weekly digest command, knowns.go the
+                            on-box known-knowns command (list/add/remove
+                            and the one-shot TOML import)
 internal/selfupdate/        Version/RepoURL, --version latest-release check,
                             and the self-update command
 internal/reporter/
@@ -39,7 +41,9 @@ internal/reporter/
                             thousands, compactFloat), pinned by tests
   filters_data.go           the noise filter rule list (edit per estate)
   filter.go                 LogFilter (deterministic noise removal)
-  knowns.go                 known-knowns TOML suppression
+  knowns.go                 known-knowns suppression semantics
+  knownsstore.go            known_knowns table (migration 5): add, list,
+                            delete, load; the only store of suppressions
   anomaly.go                ParseLine / RobustZ / peer detector / CombineAnomalies
   store.go                  SQLite daily-aggregate store
   baseline.go temporal.go   history-based detectors
@@ -54,7 +58,8 @@ internal/reporter/
   librarystore.go           findings library store (runs/findings/feedback/users)
   apitokens.go              sysadmin API bearer tokens (sha256 + 8-char prefix)
   knownsmute.go             mute-by-finding-id: derive host+program entries
-                            from a finding, append them to the TOML atomically
+                            from a finding (optional host subset and match
+                            regex), ready for the store
   mgmtreport.go             management summary (HTML + plain text)
   digest.go                 weekly digest: BuildDigest groups library
                             findings across days (issues by service + host
@@ -153,6 +158,16 @@ SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.
   refuse - plain HTTP on a LAN is a supported case (owner stance).
 - `--dump-filtered` prints the post-filter lines and exits - the
   documented filter-tuning aid (owner decision 2026-08-28).
+- Known-knowns live in the `known_knowns` table (migration 5, ant ADR
+  srg-gzXn6, owner decision 2026-09-14), never a file: the run reads
+  them from the db even with `--no-store`, `eval` reads them when the
+  db exists. Host plus program mutes the lot, host plus match mutes
+  matching lines, expiry is judged against the slice date. The API mute
+  may narrow to the finding's own hosts and add a regex (compiled
+  server-side); the earlier "no regex over the API" was a spike-era
+  caution about hand-rolled curl escaping, not a rule - do not
+  reintroduce it. Every row carries source, created_by, token_prefix
+  and finding_id.
 - Sample dumps (syslog-*.ndjson.gz) and the aggregate db are gitignored
   and local-only; they carry real estate hostnames, so they must never be
   committed, quoted in tests, or pasted into notes. Test fixtures use

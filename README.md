@@ -90,7 +90,8 @@ does the rest.
 The same `serve` process exposes a small JSON API under `/api/`, for
 querying and acting on findings from Claude Code or plain curl.
 [API.md](API.md) has the tokens, the `syslog-mute` shell function the
-daily email refers to, and the endpoints.
+daily email refers to, and the endpoints, including muting one message
+on chosen hosts, listing what is muted and undoing a mute.
 
 ## The management report
 
