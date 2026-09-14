@@ -9,7 +9,7 @@ description: >
   digest email, syslog findings, muting or unmuting a finding, or log
   trends across the estate.
 allowed-tools: "Bash"
-version: "1.2.0"
+version: "1.3.0"
 ---
 
 # syslog-reporter
@@ -202,6 +202,23 @@ error). 404 means the finding itself does not exist.
 ```json
 {"rows": [{"date": "2026-09-01", "host": "web01.example.test", "program": "sshd", "count": 812}]}
 ```
+
+## How to present what comes back
+
+- **Read the JSON yourself.** Run the curl, read the response, and answer
+  in your own words. Do not write Python, jq or awk to reformat it; an
+  improvised one-liner is the most likely thing to break in front of
+  someone. If a response is too long to read, narrow it with the filters
+  and `limit` rather than post-processing it. `python3 -m json.tool` is
+  the most you should ever pipe through.
+- **Short answers are prose or bullets.** Up to about eight items, name
+  them in a sentence or a bullet list: id, severity, title, host. This
+  reads well aloud and survives a terminal scrollback.
+- **Only long, uniform data gets a table.** A markdown table is for
+  twenty findings or a month of per-day counts, where the reader will
+  scan rather than listen. Say how many rows there are before the table.
+- **Quote ids, hosts and programs exactly** as the API returned them, so
+  the user can check them against the email and the web UI.
 
 ## How to behave
 
