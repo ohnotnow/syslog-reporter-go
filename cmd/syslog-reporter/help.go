@@ -71,45 +71,60 @@ const digestHelpEnv = `environment:
 `
 
 const userHelp = `Manage local-auth accounts for serve mode (auth mode local).
-usage: syslog-reporter user add <username> <email> [--password-stdin] [--db <path>]
-       syslog-reporter user list [--db <path>]
-       syslog-reporter user passwd <username> [--password-stdin] [--db <path>]
-       syslog-reporter user remove <username> [--db <path>]
+
+usage: syslog-reporter user <add|list|passwd|remove> [flags]
+
+  add <username> <email>   create an account; --password-stdin for scripts
+  list                     every account
+  passwd <username>        change a password; --password-stdin for scripts
+  remove <username>        delete an account (its votes become anonymous)
+
 Passwords are prompted for twice without echo, or read from stdin with
---password-stdin for scripted use; never accepted as an argument.
-Removing a user keeps their feedback votes as anonymous votes.
+--password-stdin; they are never accepted as an argument.
+
 The store must already exist (a report run creates it); --db and
-SYSLOG_DB_PATH name it exactly as in the other commands.
+SYSLOG_DB_PATH name it as in the other commands.
 `
 
 const tokenHelp = `Manage bearer tokens for the sysadmin API served by serve mode.
-usage: syslog-reporter token create <username> [--expires YYYY-MM-DD] [--db <path>]
-       syslog-reporter token list [--db <path>]
-       syslog-reporter token revoke <prefix> [--db <path>]
+
+usage: syslog-reporter token <create|list|revoke> [flags]
+
+  create <username>   mint a token for an existing user ('user add');
+                      optional --expires YYYY-MM-DD
+  list                each token's 8-character prefix, owner, last use
+                      and expiry
+  revoke <prefix>     stop a token by that prefix
+
 create prints the new token once, alone on stdout, and never again; the
-store keeps only a hash. The user must already exist ('user add').
-list shows each token's 8-character prefix, owner, last use and expiry.
-revoke takes that prefix. Several live tokens per user are fine: one per
+store keeps only a hash. Several live tokens per user are fine: one per
 machine means a leak costs one token, not the person.
+
 The store must already exist (a report run creates it); --db and
-SYSLOG_DB_PATH name it exactly as in the other commands.
+SYSLOG_DB_PATH name it as in the other commands.
 `
 
 const knownsHelp = `Manage known-knowns: estate oddities the daily run suppresses.
-usage: syslog-reporter knowns list [--all] [--db <path>]
-       syslog-reporter knowns add --host GLOB (--program GLOB | --match REGEX) --reason TEXT [--expires YYYY-MM-DD] [--db <path>]
-       syslog-reporter knowns remove <id> [--db <path>]
-       syslog-reporter knowns import <known_knowns.toml> [--db <path>]
-host plus program mutes the lot (that program's lines on the host, and its
-anomalies); host plus match drops only the lines the regex matches; both
-together mute the anomaly and drop only matching lines. A bad regex is
-refused here, not on the next run. list hides lapsed entries unless --all.
-import reads the pre-database TOML file once, adds every [[known]] entry
-and leaves the file alone; it does not dedupe, so import a file once.
-Mutes from a finding are made through the sysadmin API (see API.md); this
-command is for the box.
-The store must already exist (a report run creates it); --db and
-SYSLOG_DB_PATH name it exactly as in the other commands.
+
+usage: syslog-reporter knowns <list|add|remove|import> [flags]
+
+  list                  what is muted; --all includes lapsed entries
+  add                   a free-form entry: --host GLOB, then --program GLOB
+                        and/or --match REGEX, --reason TEXT, and an optional
+                        --expires YYYY-MM-DD
+  remove <id>           delete one entry by the id list shows
+  import <file.toml>    read the pre-database known_knowns.toml once and add
+                        every [[known]] entry (leaves the file alone; does
+                        not dedupe, so import a file once)
+
+Host plus program mutes the lot: that program's lines on the host, and
+its anomalies. Host plus match drops only the lines the regex matches.
+Both together mute the anomaly and drop only matching lines. A bad regex
+is refused here, not on the next run.
+
+Mutes from a finding are made through the sysadmin API (API.md); this
+command is for the box. The store must already exist (a report run
+creates it); --db and SYSLOG_DB_PATH name it as in the other commands.
 `
 
 // setUsage wires a FlagSet's --help output: intro, the flag list, then the

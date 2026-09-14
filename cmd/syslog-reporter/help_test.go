@@ -43,3 +43,21 @@ func TestMgmtHelpNamesItsRecipientsVar(t *testing.T) {
 		t.Error("mgmt-report help missing SYSLOG_MGMT_RECIPIENTS")
 	}
 }
+
+// The subcommand help texts are read on a terminal (ait srg-ml8x3): every
+// line fits 80 columns and the sections are separated by blank lines.
+func TestSubcommandHelpFitsATerminal(t *testing.T) {
+	for name, text := range map[string]string{"user": userHelp, "token": tokenHelp, "knowns": knownsHelp} {
+		for i, line := range strings.Split(text, "\n") {
+			if len(line) > 79 {
+				t.Errorf("%s help line %d is %d columns: %q", name, i+1, len(line), line)
+			}
+		}
+		if strings.Count(text, "\n\n") < 3 {
+			t.Errorf("%s help needs blank lines between intro, usage, subcommands and prose", name)
+		}
+		if !strings.Contains(text, "usage: syslog-reporter "+name+" <") {
+			t.Errorf("%s help is missing the one-line usage", name)
+		}
+	}
+}
