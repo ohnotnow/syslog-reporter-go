@@ -167,10 +167,7 @@ func runDigest(args []string) {
 				fatal("explaining recurring anomalies: %v", err)
 			}
 		}
-		for _, m := range llm.UsageByModel() {
-			log.Info("Token usage: model=%s prompt_tokens=%d completion_tokens=%d",
-				m.Model, m.PromptTokens, m.CompletionTokens)
-		}
+		logTokenUsage(log, "analysis")
 	}
 	// The one-offs keep the resolution the daily run already wrote; it
 	// rides in the same list so capture and the layouts pair it by title.

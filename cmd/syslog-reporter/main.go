@@ -55,6 +55,20 @@ func (l *logger) Debug(format string, args ...any) {
 	}
 }
 
+// logTokenUsage prints one line per model for the stage just finished,
+// key=value so the day's cost can be pulled out of the log with a grep and
+// multiplied by each deployment's price, then zeroes the counter so the
+// next stage's lines are its own. "initial processing" is the log scan
+// (issue detection and deduplication); "analysis" is the resolution
+// writer and anomaly explainer.
+func logTokenUsage(log *logger, stage string) {
+	for _, m := range llm.UsageByModel() {
+		log.Info("Token usage (%s): model=%s prompt_tokens=%d completion_tokens=%d",
+			stage, m.Model, m.PromptTokens, m.CompletionTokens)
+	}
+	llm.ResetUsage()
+}
+
 func fatal(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "syslog-reporter: %s\n", fmt.Sprintf(format, args...))
 	os.Exit(1)
@@ -766,6 +780,7 @@ func run(cfg runConfig) {
 			fatal("consolidating issues: %v", err)
 		}
 		log.Debug("Consolidated to %d issues", len(issues.Issues))
+		logTokenUsage(log, "initial processing")
 
 		// The resolution writer runs on the expensive model, so a storm
 		// day is capped to its most severe issues; the rest still reach
@@ -885,13 +900,8 @@ func run(cfg runConfig) {
 		explained = reporter.FactsOnly(anomalies)
 	}
 
-	// One line per model, key=value, so the day's cost can be pulled out
-	// of the log with a grep and multiplied by each deployment's price.
 	if cfg.llmOn {
-		for _, m := range llm.UsageByModel() {
-			log.Info("Token usage: model=%s prompt_tokens=%d completion_tokens=%d",
-				m.Model, m.PromptTokens, m.CompletionTokens)
-		}
+		logTokenUsage(log, "analysis")
 	}
 
 	// Persist this run's findings into the library (same SQLite file as the

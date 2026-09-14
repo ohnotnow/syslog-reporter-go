@@ -3,7 +3,7 @@ package llm
 // Token accounting: every Complete call adds the SDK-reported usage to a
 // process-wide total, kept per model so a run split across two
 // deployments can be costed against each one's price. A run logs one
-// line per model after its LLM stages; eval snapshots the total between
+// line per model after each LLM stage and resets; eval snapshots the total between
 // stages.
 
 import (
