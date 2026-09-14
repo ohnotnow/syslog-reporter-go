@@ -4,7 +4,7 @@ go 1.27.0
 
 require (
 	github.com/alexedwards/scs/v2 v2.9.0
-	github.com/anthropics/anthropic-sdk-go v1.68.0
+	github.com/anthropics/anthropic-sdk-go v1.71.0
 	github.com/joho/godotenv v1.5.1
 	github.com/openai/openai-go/v3 v3.54.0
 	github.com/pelletier/go-toml/v2 v2.4.3
