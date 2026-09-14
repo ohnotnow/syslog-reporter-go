@@ -1,36 +1,34 @@
 package reporter
 
 // Operator-maintained "known knowns": estate oddities the team has already
-// eye-rolled at and no longer wants in every report. Entries live in a TOML
-// file, gitignored by default because the content is inherently
-// estate-identifying.
+// eye-rolled at and no longer wants in every report. Entries live in the
+// known_knowns table of the shared database (migration 5, ant ADR
+// srg-gzXn6; knownsstore.go reads and writes them):
 //
-//	[[known]]
-//	host = "blah"              # glob pattern: "blah", "lab*", or "*"
-//	match = "port 1234"        # optional: regex on the message; drops only matching lines
-//	program = "kernel"         # optional: glob; drops the program's lines on the host
-//	                           #   AND mutes its (host, program) anomalies
-//	reason = "microscope attached for the optics experiment"
-//	added = 2026-08-27
-//	expires = 2030-09-01       # optional: entry lapses after this slice date
+//	host     glob pattern: "blah", "lab*", or "*"
+//	match    optional: regex on the message; drops only matching lines
+//	program  optional: glob; drops the program's lines on the host
+//	         AND mutes its (host, program) anomalies
+//	reason   why, in the operator's words
+//	added    the day the entry was made
+//	expires  optional: entry lapses after this slice date
 //
 // Each entry needs a reason and at least one of match / program. Host plus
 // program mutes the lot; host plus match mutes specific lines (ant ADR
-// srg-zX4An, owner decision 2026-09-08). Expiry is
-// judged against the date of the log slice being processed, not the wall
-// clock, so historical backfills behave historically.
+// srg-zX4An, owner decision 2026-09-08). Expiry is judged against the date
+// of the log slice being processed, not the wall clock, so historical
+// backfills behave historically. Entries are created by the API's mute
+// endpoint (from a finding) or the knowns CLI (free-form, on the box).
 
 import (
 	"fmt"
-	"os"
 	"path"
 	"regexp"
 	"time"
-
-	"github.com/pelletier/go-toml/v2"
 )
 
 type KnownEntry struct {
+	ID      int64 // database row id; 0 for an entry not yet stored
 	Host    string
 	Reason  string
 	Match   string
@@ -38,6 +36,12 @@ type KnownEntry struct {
 	Added   *time.Time
 	Expires *time.Time
 	Hits    int
+
+	// Provenance (migration 5): who created the entry and from what.
+	Source      string // KnownSourceAPI or KnownSourceCLI
+	CreatedBy   string // username for API entries; "" for CLI
+	TokenPrefix string // api_tokens prefix for API entries; "" for CLI
+	FindingID   *int64 // the finding a mute derived from; nil for free-form
 
 	matchRe *regexp.Regexp
 }
@@ -86,59 +90,6 @@ func NewKnownKnowns(entries []*KnownEntry, logDate time.Time) *KnownKnowns {
 		}
 	}
 	return k
-}
-
-// rawKnownsFile mirrors the TOML shape. Dates are toml.LocalDate so bare
-// TOML dates (2026-08-27, no time part) parse without a time component.
-type rawKnownsFile struct {
-	Known []rawKnownEntry `toml:"known"`
-}
-
-type rawKnownEntry struct {
-	Host    string          `toml:"host"`
-	Reason  string          `toml:"reason"`
-	Match   string          `toml:"match"`
-	Program string          `toml:"program"`
-	Added   *toml.LocalDate `toml:"added"`
-	Expires *toml.LocalDate `toml:"expires"`
-}
-
-func localDateToTime(d *toml.LocalDate) *time.Time {
-	if d == nil {
-		return nil
-	}
-	t := time.Date(d.Year, time.Month(d.Month), d.Day, 0, 0, 0, 0, time.UTC)
-	return &t
-}
-
-// LoadKnownKnowns reads the TOML file at tomlPath; a missing file just means
-// no known knowns. Malformed entries fail loudly by design.
-func LoadKnownKnowns(tomlPath string, logDate time.Time) (*KnownKnowns, error) {
-	data, err := os.ReadFile(tomlPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return NewKnownKnowns(nil, logDate), nil
-		}
-		return nil, err
-	}
-	var raw rawKnownsFile
-	if err := toml.Unmarshal(data, &raw); err != nil {
-		return nil, fmt.Errorf("%s: %w", tomlPath, err)
-	}
-	var entries []*KnownEntry
-	for _, r := range raw.Known {
-		if r.Host == "" || r.Reason == "" {
-			return nil, fmt.Errorf(
-				"known-known entry %+v in %s needs both 'host' and 'reason'", r, tomlPath)
-		}
-		e, err := newKnownEntry(r.Host, r.Reason, r.Match, r.Program,
-			localDateToTime(r.Added), localDateToTime(r.Expires))
-		if err != nil {
-			return nil, err
-		}
-		entries = append(entries, e)
-	}
-	return NewKnownKnowns(entries, logDate), nil
 }
 
 // LineIgnored reports whether an active entry drops this line from host. A

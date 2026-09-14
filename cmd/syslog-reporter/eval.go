@@ -48,7 +48,8 @@ not evaluated. No cost is computed: multiply the token counts by your
 own price sheet. Environment: the provider keys, SYSLOG_REASONING_EFFORT,
 SYSLOG_REDACT and SYSLOG_CONTEXT_LINES apply exactly as in 'run'
 (OPENAI_API_KEY, ANTHROPIC_API_KEY, AZURE_OPENAI_ENDPOINT + _API_KEY), as do
-the filter's SYSLOG_BLANKET_IGNORE and SYSLOG_KNOWN_KNOWNS.
+the filter's SYSLOG_BLANKET_IGNORE; known-knowns come from SYSLOG_DB_PATH when
+that file exists.
 `
 
 type evalConfig struct {
@@ -140,11 +141,16 @@ func runEval(args []string) {
 	// day fed to the model by accident is an eye-watering bill, and a fair
 	// model comparison wants the input production would actually send
 	// (owner decision 2026-08-29). Known-knowns expiry is judged against
-	// the wall clock; eval input has no slice date.
-	knowns, err := reporter.LoadKnownKnowns(
-		getenvDefault("SYSLOG_KNOWN_KNOWNS", "known_knowns.toml"), time.Now())
-	if err != nil {
-		fatal("%v", err)
+	// the wall clock; eval input has no slice date. They come from the
+	// shared db when it exists; a fresh checkout with no db just has none,
+	// so eval never creates a database.
+	dbPath := getenvDefault("SYSLOG_DB_PATH", "syslog_aggregates.db")
+	knowns := reporter.NewKnownKnowns(nil, time.Now())
+	if reporter.RequireDatabase(dbPath) == nil {
+		var err error
+		if knowns, err = loadKnowns(dbPath, time.Now()); err != nil {
+			fatal("%v", err)
+		}
 	}
 	rawCount := len(lines)
 	var logIndex *reporter.LogIndex // raw lines, for context windows; nil when disabled

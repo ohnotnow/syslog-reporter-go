@@ -51,10 +51,6 @@ type Config struct {
 	// without the override the flag would be derived (wrongly, for the
 	// browser) from the built-in TLS setting alone (srg-so8ja.9).
 	SecureCookies bool
-	// KnownsPath (--known-knowns / SYSLOG_KNOWN_KNOWNS) is the known-knowns
-	// TOML the API's mute endpoint appends to: the same file the daily run
-	// reads, resolved the same way (ait srg-Kj5Q8.6).
-	KnownsPath string
 	// MuteLimit (SYSLOG_API_MUTE_LIMIT, default 20) caps mutes per token per
 	// 24 hours, so a leaked token or a looping script cannot silence the
 	// estate in one go.
@@ -84,7 +80,6 @@ func ConfigFromEnv() (Config, error) {
 		DBPath:        getenvDefault("SYSLOG_DB_PATH", "syslog_aggregates.db"),
 		AuthMode:      getenvDefault("SYSLOG_AUTH_MODE", "none"),
 		SecureCookies: secure,
-		KnownsPath:    getenvDefault("SYSLOG_KNOWN_KNOWNS", "known_knowns.toml"),
 		MuteLimit:     muteLimit,
 	}, nil
 }
@@ -278,9 +273,6 @@ func New(cfg Config, auth Authenticator, lib *reporter.LibraryStore) (*Server, e
 	if cfg.MuteLimit < 1 {
 		cfg.MuteLimit = defaultMuteLimit
 	}
-	if cfg.KnownsPath == "" {
-		cfg.KnownsPath = "known_knowns.toml"
-	}
 	s := &Server{cfg: cfg, auth: auth, lib: lib, mux: http.NewServeMux(),
 		csrf:  http.NewCrossOriginProtection(),
 		mutes: newWindowCounter(cfg.MuteLimit, 24*time.Hour)}
@@ -295,6 +287,9 @@ func New(cfg Config, auth Authenticator, lib *reporter.LibraryStore) (*Server, e
 	s.mux.HandleFunc("GET /api/aggregates", s.handleAPIAggregates)
 	s.mux.HandleFunc("POST /api/findings/{id}/mute", s.handleAPIMute)
 	s.mux.HandleFunc("POST /api/findings/{id}/feedback", s.handleAPIFeedback)
+	s.mux.HandleFunc("GET /api/knowns", s.handleAPIKnowns)
+	s.mux.HandleFunc("DELETE /api/knowns/{id}", s.handleAPIUnmuteEntry)
+	s.mux.HandleFunc("DELETE /api/findings/{id}/mute", s.handleAPIUnmuteFinding)
 	auth.Routes(s.mux)
 	return s, nil
 }

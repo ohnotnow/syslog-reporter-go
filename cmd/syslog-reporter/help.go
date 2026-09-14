@@ -19,7 +19,8 @@ const runHelpEnv = `environment (full reference in TECHNICAL_OVERVIEW.md):
   model:  SYSLOG_DEFAULT_MODEL, SYSLOG_LOGSCAN_MODEL, SYSLOG_ISSUE_MODEL,
           SYSLOG_REASONING_EFFORT, SYSLOG_REDACT, SYSLOG_CONTEXT_LINES,
           OPENAI_API_KEY / ANTHROPIC_API_KEY / AZURE_OPENAI_ENDPOINT + _API_KEY
-  store:  SYSLOG_DB_PATH, SYSLOG_DB_KEEP_DAYS, SYSLOG_KNOWN_KNOWNS, SYSLOG_BLANKET_IGNORE
+  store:  SYSLOG_DB_PATH (aggregates, findings, known-knowns), SYSLOG_DB_KEEP_DAYS,
+          SYSLOG_BLANKET_IGNORE
   email:  SYSLOG_SMTP_SERVER, SYSLOG_SMTP_SENDER, SYSLOG_SMTP_RECIPIENTS
 `
 
@@ -35,8 +36,6 @@ const serveHelpEnv = `environment fallbacks, for systemd units and the like:
                              (the pair hot-reloads, no restart on renewal)
   SYSLOG_WEB_SECURE_COOKIES  --secure-cookies (1/true/yes/on)
   SYSLOG_DB_PATH             --db       (default syslog_aggregates.db)
-  SYSLOG_KNOWN_KNOWNS        --known-knowns (default known_knowns.toml); the
-                             sysadmin API's mute endpoint appends to it
   SYSLOG_API_MUTE_LIMIT      mutes allowed per API token per 24 hours
                              (default 20, no flag)
 `
@@ -92,6 +91,23 @@ store keeps only a hash. The user must already exist ('user add').
 list shows each token's 8-character prefix, owner, last use and expiry.
 revoke takes that prefix. Several live tokens per user are fine: one per
 machine means a leak costs one token, not the person.
+The store must already exist (a report run creates it); --db and
+SYSLOG_DB_PATH name it exactly as in the other commands.
+`
+
+const knownsHelp = `Manage known-knowns: estate oddities the daily run suppresses.
+usage: syslog-reporter knowns list [--all] [--db <path>]
+       syslog-reporter knowns add --host GLOB (--program GLOB | --match REGEX) --reason TEXT [--expires YYYY-MM-DD] [--db <path>]
+       syslog-reporter knowns remove <id> [--db <path>]
+       syslog-reporter knowns import <known_knowns.toml> [--db <path>]
+host plus program mutes the lot (that program's lines on the host, and its
+anomalies); host plus match drops only the lines the regex matches; both
+together mute the anomaly and drop only matching lines. A bad regex is
+refused here, not on the next run. list hides lapsed entries unless --all.
+import reads the pre-database TOML file once, adds every [[known]] entry
+and leaves the file alone; it does not dedupe, so import a file once.
+Mutes from a finding are made through the sysadmin API (see API.md); this
+command is for the box.
 The store must already exist (a report run creates it); --db and
 SYSLOG_DB_PATH name it exactly as in the other commands.
 `

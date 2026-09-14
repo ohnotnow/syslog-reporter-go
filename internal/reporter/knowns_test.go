@@ -1,10 +1,8 @@
 package reporter
 
-// Tests for the known-knowns TOML suppression file.
+// Tests for the known-knowns suppression semantics (storage: knownsstore_test.go).
 
 import (
-	"os"
-	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -135,70 +133,6 @@ func TestKnownsHitsAreCountedPerEntry(t *testing.T) {
 	}
 	if hit := kk.HitEntries(); len(hit) != 1 || hit[0] != entry {
 		t.Errorf("hit entries = %#v", hit)
-	}
-}
-
-const knownsDoc = `
-[[known]]
-host = "scopebox"
-match = "port 1234"
-reason = "microscope attached for the optics experiment"
-added = 2026-08-27
-expires = 2030-09-01
-
-[[known]]
-host = "*"
-program = "kernel"
-reason = "fleet-wide igmp eye-roll"
-`
-
-func loadKnownsDoc(t *testing.T, doc string, logDate time.Time) (*KnownKnowns, error) {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "known_knowns.toml")
-	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	return LoadKnownKnowns(path, logDate)
-}
-
-func TestKnownsFileParsesEntriesAndTomlDates(t *testing.T) {
-	kk, err := loadKnownsDoc(t, knownsDoc, sliceDate)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(kk.Active) != 2 {
-		t.Fatalf("active = %d, want 2", len(kk.Active))
-	}
-	want := day(2030, 9, 1)
-	if kk.Active[0].Expires == nil || !kk.Active[0].Expires.Equal(want) {
-		t.Errorf("expires = %v, want %v", kk.Active[0].Expires, want)
-	}
-}
-
-func TestKnownsFileEntriesLapseBySliceDate(t *testing.T) {
-	kk, err := loadKnownsDoc(t, knownsDoc, day(2030, 9, 2))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(kk.Active) != 1 || len(kk.Expired) != 1 {
-		t.Errorf("active = %d, expired = %d", len(kk.Active), len(kk.Expired))
-	}
-}
-
-func TestKnownsMissingFileMeansNoEntries(t *testing.T) {
-	kk, err := LoadKnownKnowns("does-not-exist.toml", sliceDate)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(kk.Active) != 0 || len(kk.Expired) != 0 {
-		t.Errorf("expected no entries, got %+v", kk)
-	}
-}
-
-func TestKnownsEntryWithoutReasonIsRejected(t *testing.T) {
-	_, err := loadKnownsDoc(t, "[[known]]\nhost = \"scopebox\"\nmatch = \"port 1234\"\n", sliceDate)
-	if err == nil {
-		t.Error("expected an error for an entry without a reason")
 	}
 }
 

@@ -93,6 +93,7 @@ var migrations = []migration{
 	{2, "api tokens", applyAPITokens},
 	{3, "non-reusable finding and user ids", applyNonReusableIDs},
 	{4, "run kind", applyRunKind},
+	{5, "known knowns", applyKnownKnowns},
 }
 
 const baselineSchema = `
@@ -344,5 +345,32 @@ func applyRunKind(tx *sql.Tx) error {
 		}
 	}
 	_, err = tx.Exec("CREATE INDEX IF NOT EXISTS idx_runs_date_kind ON runs (log_date, kind)")
+	return err
+}
+
+// Migration 5 (ait srg-CvFSr.1, ant ADR srg-gzXn6): known-knowns move from
+// the TOML file into the database. Same fields as a TOML entry plus
+// provenance. No foreign key on finding_id: a re-run replaces that day's
+// findings and a mute must outlive the finding that prompted it.
+const knownKnownsSchema = `
+CREATE TABLE IF NOT EXISTS known_knowns (
+    id           INTEGER PRIMARY KEY,
+    host         TEXT NOT NULL,            -- glob
+    program      TEXT NOT NULL DEFAULT '', -- glob; '' = none
+    match        TEXT NOT NULL DEFAULT '', -- regex; '' = none
+    reason       TEXT NOT NULL,
+    added        TEXT NOT NULL,            -- YYYY-MM-DD
+    expires      TEXT,                     -- YYYY-MM-DD or NULL
+    source       TEXT NOT NULL,            -- 'api' | 'cli'
+    created_by   TEXT,                     -- username; NULL for cli
+    token_prefix TEXT,                     -- api_tokens.token_prefix; NULL for cli
+    finding_id   INTEGER,                  -- findings.id; NULL for free-form
+    created_at   TEXT NOT NULL             -- RFC3339 UTC
+);
+CREATE INDEX IF NOT EXISTS idx_known_knowns_finding ON known_knowns (finding_id);
+`
+
+func applyKnownKnowns(tx *sql.Tx) error {
+	_, err := tx.Exec(knownKnownsSchema)
 	return err
 }

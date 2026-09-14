@@ -10,6 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/ohnotnow/syslog-reporter-go/internal/reporter"
 )
 
 func TestBareInvocationPrintsCommandListAndFails(t *testing.T) {
@@ -84,7 +87,7 @@ func TestTopLevelHelpAndVersion(t *testing.T) {
 // using --dump-filtered, which exits after the deterministic filter stage.
 func TestRunCommandOwnsTheBatchPath(t *testing.T) {
 	t.Setenv("SYSLOG_BLANKET_IGNORE", "")
-	t.Setenv("SYSLOG_KNOWN_KNOWNS", filepath.Join(t.TempDir(), "absent.toml"))
+	t.Setenv("SYSLOG_DB_PATH", filepath.Join(t.TempDir(), "run.db"))
 	logPath := filepath.Join(t.TempDir(), "sample.log")
 	line := "Jan 12 03:04:05 web01.example.test badservice[123]: catastrophic widget failure\n"
 	if err := os.WriteFile(logPath, []byte(line), 0o600); err != nil {
@@ -118,7 +121,7 @@ func TestRunCommandOwnsTheBatchPath(t *testing.T) {
 // for the report file drops.
 func TestRunWritesReportFilesToOutDir(t *testing.T) {
 	t.Setenv("SYSLOG_BLANKET_IGNORE", "")
-	t.Setenv("SYSLOG_KNOWN_KNOWNS", filepath.Join(t.TempDir(), "absent.toml"))
+	t.Setenv("SYSLOG_DB_PATH", filepath.Join(t.TempDir(), "run.db"))
 	logPath := filepath.Join(t.TempDir(), "sample.log")
 	line := "Jan 12 03:04:05 web01.example.test badservice[123]: catastrophic widget failure\n"
 	if err := os.WriteFile(logPath, []byte(line), 0o600); err != nil {
@@ -147,5 +150,58 @@ func TestRunWritesReportFilesToOutDir(t *testing.T) {
 		if _, err := os.Stat(name); err == nil {
 			t.Errorf("%s also appeared in the working directory", name)
 		}
+	}
+}
+
+// Known-knowns come from the shared db (migration 5). A --no-store run
+// still reads them, and writes nothing back.
+func TestRunNoStoreStillReadsKnownKnownsFromTheDatabase(t *testing.T) {
+	t.Setenv("SYSLOG_BLANKET_IGNORE", "")
+	dbPath := filepath.Join(t.TempDir(), "run.db")
+	t.Setenv("SYSLOG_DB_PATH", dbPath)
+	lib, err := reporter.OpenLibraryStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lib.AddKnownEntries([]reporter.KnownEntryInput{{
+		Host: "web01.example.test", Program: "badservice", Reason: "known widget",
+		Added: time.Now(), Source: reporter.KnownSourceCLI}}); err != nil {
+		t.Fatal(err)
+	}
+	lib.Close()
+	logPath := filepath.Join(t.TempDir(), "sample.log")
+	lines := "Jan 12 03:04:05 web01.example.test badservice[123]: catastrophic widget failure\n" +
+		"Jan 12 03:04:06 web02.example.test badservice[124]: catastrophic widget failure\n"
+	if err := os.WriteFile(logPath, []byte(lines), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	code := dispatch([]string{"run", logPath, "--no-store", "--dump-filtered"}, io.Discard, io.Discard)
+	w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(r)
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if strings.Contains(string(out), "web01") || !strings.Contains(string(out), "web02") {
+		t.Errorf("known-known not applied from the db, dump:\n%s", out)
+	}
+	lib, err = reporter.OpenLibraryStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lib.Close()
+	runs, err := lib.ListRuns("2000-01-01", "2100-01-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 0 {
+		t.Errorf("--no-store wrote %d run rows", len(runs))
 	}
 }

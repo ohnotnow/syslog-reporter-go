@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -206,4 +207,42 @@ func (s *Server) handleAPIAggregates(w http.ResponseWriter, r *http.Request) {
 		rows = []*reporter.DailyTotal{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"rows": rows})
+}
+
+// GET /api/knowns?host=&finding_id=&all=1 - every known-knowns entry with
+// its provenance, by id. Active only (judged against today UTC) unless
+// all=1. host is exact; finding_id narrows to one mute's entries.
+func (s *Server) handleAPIKnowns(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	var findingID *int64
+	if raw := q.Get("finding_id"); raw != "" {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, "finding_id must be an integer")
+			return
+		}
+		findingID = &id
+	}
+	entries, err := s.lib.ListKnownEntries()
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "server error")
+		return
+	}
+	kk := reporter.NewKnownKnowns(entries, time.Now().UTC().Truncate(24*time.Hour))
+	entries = kk.Active
+	if q.Get("all") == "1" {
+		entries = append(entries, kk.Expired...)
+		sort.Slice(entries, func(i, j int) bool { return entries[i].ID < entries[j].ID })
+	}
+	out := []muteEntry{}
+	for _, e := range entries {
+		if h := q.Get("host"); h != "" && e.Host != h {
+			continue
+		}
+		if findingID != nil && (e.FindingID == nil || *e.FindingID != *findingID) {
+			continue
+		}
+		out = append(out, newMuteEntry(e))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"entries": out})
 }

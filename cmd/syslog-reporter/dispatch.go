@@ -26,6 +26,7 @@ var commands = []command{
 	{"serve", "Serve the findings library web UI (default 127.0.0.1:7373)", cmdServe},
 	{"user", "Manage local-auth accounts (add, list, passwd, remove)", cmdUser},
 	{"token", "Manage sysadmin API bearer tokens (create, list, revoke)", cmdToken},
+	{"knowns", "List, add, remove and import known-knowns suppressions", cmdKnowns},
 	{"findings", "List, show and record feedback on findings from the terminal", cmdFindings},
 	{"mgmt-report", "Render the management summary (HTML file plus plain text)", cmdMgmtReport},
 	{"digest", "Email the weekly digest of recurring findings from the library", cmdDigest},
@@ -54,6 +55,11 @@ func cmdUser(args []string) int {
 
 func cmdToken(args []string) int {
 	runToken(args)
+	return 0
+}
+
+func cmdKnowns(args []string) int {
+	runKnowns(args)
 	return 0
 }
 

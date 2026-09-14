@@ -242,8 +242,6 @@ func runServe(args []string) {
 	fs.StringVar(&cfg.KeyFile, "tls-key", cfg.KeyFile, "TLS private key")
 	fs.BoolVar(&cfg.SecureCookies, "secure-cookies", cfg.SecureCookies,
 		"Force the Secure cookie flag on, for TLS terminated at a reverse proxy")
-	fs.StringVar(&cfg.KnownsPath, "known-knowns", cfg.KnownsPath,
-		"Known-knowns TOML the API's mute endpoint appends to (the file 'run' reads)")
 	debug := fs.Bool("debug", false, "Log every request (method, path, status, duration)")
 	fs.Parse(args)
 	if fs.NArg() > 0 {
@@ -505,7 +503,6 @@ func userAdd(dbPath, username, email, password string) error {
 func runBatch(cliArgs []string) {
 	defaultModel := getenvDefault("SYSLOG_DEFAULT_MODEL", "openai/gpt-5.6-luna")
 	defaultDBPath := getenvDefault("SYSLOG_DB_PATH", "syslog_aggregates.db")
-	defaultKnownsPath := getenvDefault("SYSLOG_KNOWN_KNOWNS", "known_knowns.toml")
 	keepDays, err := strconv.Atoi(getenvDefault("SYSLOG_DB_KEEP_DAYS", "90"))
 	if err != nil {
 		fatal("SYSLOG_DB_KEEP_DAYS must be an integer: %v", err)
@@ -537,10 +534,9 @@ func runBatch(cliArgs []string) {
 	dateStr := fs.String("date", "",
 		"ISO date (YYYY-MM-DD) the log slice covers, for the aggregate store. Defaults to yesterday.")
 	dbPath := fs.String("db", defaultDBPath, "SQLite aggregate store path")
-	knownsPath := fs.String("known-knowns", defaultKnownsPath,
-		"TOML file of operator-acknowledged oddities to suppress (missing file just means none)")
 	noStore := fs.Bool("no-store", false,
-		"Don't persist aggregates or run the history-based detectors (peer comparison still runs)")
+		"Don't persist aggregates, run the history-based detectors or capture findings "+
+			"(known-knowns are still read from the db; peer comparison still runs)")
 	noLLM := fs.Bool("no-llm", false,
 		"Skip every LLM stage (issue detection, dedupe, resolutions, anomaly "+
 			"explanations) so the run costs nothing")
@@ -666,7 +662,6 @@ func runBatch(cliArgs []string) {
 		keepDays:     keepDays,
 		llmOn:        !*noLLM,
 		hostOS:       hostOS,
-		knownsPath:   *knownsPath,
 		dumpOnly:     *dumpFiltered,
 		contextLines: *contextLines,
 		maxResolve:   *maxResolve,
@@ -709,7 +704,6 @@ type runConfig struct {
 	keepDays     int
 	llmOn        bool
 	hostOS       map[string]string
-	knownsPath   string
 	dumpOnly     bool
 	contextLines int // same-host lines either side of each issue's example; 0 = none
 	maxResolve   int // most issues sent to the resolution writer; 0 = all
@@ -735,13 +729,16 @@ func run(cfg runConfig) {
 	// it's the microscope"): dropped from the issue path and muted on the
 	// anomaly path, with a footer line in the report so suppression stays
 	// visible. Expiry is judged against the slice date, so backfills of
-	// historical days behave historically.
-	knowns, err := reporter.LoadKnownKnowns(cfg.knownsPath, logDate)
+	// historical days behave historically. They live in the shared db
+	// (migration 5), so this is the run's first touch of it: --no-store
+	// still reads them, it only skips the writes. Opening creates a
+	// missing file, as the aggregate store always has.
+	knowns, err := loadKnowns(cfg.dbPath, logDate)
 	if err != nil {
 		fatal("%v", err)
 	}
 	log.Info("Known knowns: %d active, %d expired (%s)",
-		len(knowns.Active), len(knowns.Expired), cfg.knownsPath)
+		len(knowns.Active), len(knowns.Expired), cfg.dbPath)
 
 	log.Info("Filtering log file")
 	logFilter := reporter.NewLogFilter(cfg.lines, knowns)
@@ -990,4 +987,15 @@ func run(cfg runConfig) {
 		}
 		log.Info("Skipping email")
 	}
+}
+
+// loadKnowns opens the library store just long enough to read the
+// known-knowns for logDate.
+func loadKnowns(dbPath string, logDate time.Time) (*reporter.KnownKnowns, error) {
+	lib, err := reporter.OpenLibraryStore(dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("opening %s for known-knowns: %w", dbPath, err)
+	}
+	defer lib.Close()
+	return lib.LoadKnownKnowns(logDate)
 }
