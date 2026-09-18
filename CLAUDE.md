@@ -31,19 +31,25 @@ cmd/syslog-reporter/        CLI entry point; explicit command dispatch (run,
                             eval, serve, user, token, findings,
                             knowns, mgmt-report, digest, self-update) from
                             one registry - no default mode; digest.go is
-                            the weekly digest command, knowns.go the
-                            on-box known-knowns command (list/add/remove
-                            and the one-shot TOML import)
+                            the weekly digest command; knowns.go, seed.go,
+                            hits.go and discover.go the on-box known-knowns
+                            command (list/add/remove/seed/hits/discover and
+                            the one-shot TOML import), since.go the --since
+                            flag value (1h, 3d, 2w or a date)
 internal/selfupdate/        Version/RepoURL, --version latest-release check,
                             and the self-update command
 internal/reporter/
   lineformat.go             line parsing + number formatting helpers (splitWS,
                             thousands, compactFloat), pinned by tests
-  filters_data.go           the noise filter rule list (edit per estate)
+  filters_data.go           the normalise rules (rewrite-to-canonical, compiled in)
+  noiserules.go             the bundled drop rules: embedded noise-rules.txt and
+                            its parser; 'knowns seed' loads them into known_knowns
   filter.go                 LogFilter (deterministic noise removal)
   knowns.go                 known-knowns suppression semantics
   knownsstore.go            known_knowns table (migration 5): add, list,
                             delete, load; the only store of suppressions
+  template.go               message templating for the noise finder (mask,
+                            Template, TemplateRegex)
   anomaly.go                ParseLine / RobustZ / peer detector / CombineAnomalies
   store.go                  SQLite daily-aggregate store
   baseline.go temporal.go   history-based detectors
@@ -74,6 +80,8 @@ skills/syslog-reporter/     Claude Code skill for the API; the team's only
                             "client" (curl + this file), see README
 internal/cli/               findings subcommands + ParseFlagsAnywhere
 internal/llm/               provider seam: litellm-style prefix -> official SDK
+internal/jev/               stdlib client for TypeSafe's Jev; only knowns
+                            discover uses it
 tools/elk_dump.py           ELK NDJSON dumper (stdlib-only python3; runs on
                             whichever box can read the log store)
 scripts/                    end-user bash wrappers: backfill.sh (bootstrap N
@@ -166,8 +174,18 @@ SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.
   may narrow to the finding's own hosts and add a regex (compiled
   server-side); the earlier "no regex over the API" was a spike-era
   caution about hand-rolled curl escaping, not a rule - do not
-  reintroduce it. Every row carries source, created_by, token_prefix
-  and finding_id.
+  reintroduce it. Every row carries source, created_by, token_prefix,
+  finding_id and created_at. Sources are api, cli, bundled and jev (ant
+  ADR srg-uHwCr, owner decision 2026-09-18): the bundled noise rules
+  that used to be compiled in now ship as internal/reporter/noise-rules.txt
+  and `knowns seed` loads them (idempotent, never deletes); SYSLOG_BLANKET_IGNORE
+  is gone. The email body shows one count line for known-knowns, the
+  attachment the per-entry list with bundled folded into one item;
+  `knowns hits <dump>` shows what an entry caught. `knowns discover` is
+  the Jev-scored noise finder (auto-add, `--preview` asks on a terminal).
+  A Jev gate before the issue detector is deferred, NOT rejected: it will
+  be built when the trigger in ant ADR srg-FGSKN fires. TypeSafe's terms
+  forbid publishing benchmarks; the evaluation numbers stay in ant.
 - Sample dumps (syslog-*.ndjson.gz) and the aggregate db are gitignored
   and local-only; they carry real estate hostnames, so they must never be
   committed, quoted in tests, or pasted into notes. Test fixtures use

@@ -154,13 +154,26 @@ post-filter lines and exits:
 ./syslog-reporter run yesterday.log --dump-filtered | less
 ```
 
-**Drop your own routine chatter.** `SYSLOG_BLANKET_IGNORE` is a
-comma-separated list of substrings appended to the built-in noise
-filter. It is the home for estate-identifying entries (hostnames,
-internal IPs):
+**Load the noise rules.** The routine-chatter rules that every estate
+shares (cron announcements, USB enumeration, DHCP lease traffic and the
+like) ship inside the binary and live in the same database table as your
+own suppressions. Load them once the database exists (the first run
+creates it; `install.sh`'s backfill does this for you) and again after an
+upgrade, which only adds rules that are new:
 
 ```bash
-SYSLOG_BLANKET_IGNORE="backup-agent heartbeat,10.20.30."
+./syslog-reporter knowns seed          # the bundled rules
+./syslog-reporter knowns seed my.txt   # an edited copy, same format
+```
+
+A run against a database with no rules says so in its log. Rules you
+never want are removed like any other entry (`knowns remove <id>`), and
+seeding never puts them back. Estate-identifying chatter (your hostnames,
+your internal IPs) belongs in your own entries, not in the shipped file:
+
+```bash
+./syslog-reporter knowns add --host '*' --match 'backup-agent heartbeat' \
+    --reason "the backup agent's heartbeat"
 ```
 
 **Ignore things you already know about.** Some oddities are expected,
@@ -192,14 +205,57 @@ Field by field:
 - `--match` - a regular expression (Go RE2 syntax) applied to the message
   after the hostname. Drops only the lines it matches. With `--program`
   as well, the pair's anomalies are muted but only matching lines drop.
-- `--reason` (required) - why, in your words. It is shown in the report
-  footer when the entry fires.
+- `--reason` (required) - why, in your words. It is shown in the
+  attachment's Known Knowns section when the entry fires.
 - `--expires` - a date after which the entry stops applying. Judged
   against the date of the log slice being processed, not today.
 
 Every entry needs a reason and at least one of `--program` or `--match`.
-A regex that does not compile is refused on the spot. The report footer
-lists which entries fired and how many have lapsed.
+A regex that does not compile is refused on the spot. The email body
+says how many lines the known-knowns dropped; the attachment lists which
+entries fired and how many have lapsed, with the bundled rules folded
+into one line.
+
+**See what a rule actually caught.** A count cannot tell you that a regex
+meant for one chatty message is also eating a real error. `knowns hits`
+re-runs the filter over a day's dump and shows, newest entries first,
+which of them fired and how much:
+
+```bash
+./syslog-reporter knowns hits dumps/syslog-2026-09-17.ndjson.gz --since 1h   # what I just added
+./syslog-reporter knowns hits dumps/syslog-2026-09-17.ndjson.gz --source jev # what the noise finder added
+./syslog-reporter knowns hits dumps/syslog-2026-09-17.ndjson.gz --id 137     # one entry, grouped by message
+./syslog-reporter knowns hits dumps/syslog-2026-09-17.ndjson.gz --id 137 --raw | less
+```
+
+`--since` takes `1h`, `36h`, `3d`, `2w` or a date and goes by when the
+entry was created. The bundled rules are hidden unless you pass `--all`.
+The grouped view puts the most common message first; an over-matching
+rule shows itself as the odd shape at the bottom of the list. The command
+reads the dump and the database and writes nothing.
+
+**Find new noise.** `knowns discover` reads the last month of kept dumps,
+collapses what survives the filter into message shapes, asks TypeSafe's
+Jev model (a classifier that returns a probability, not text) whether
+each shape deserves an admin's attention, and adds the routine, recurring
+ones as entries with source `jev`. It needs `TYPESAFE_API_KEY` in the
+`.env`; a month of an estate this size costs pence.
+
+```bash
+./syslog-reporter knowns discover --preview   # show the candidates, then ask y/n
+./syslog-reporter knowns discover             # add them without asking
+```
+
+`--preview` asks only when you are at a terminal; from cron or a script
+it prints the candidates and adds nothing, so it doubles as a dry run.
+The defaults add a shape only when its score is under 0.1 and it appeared
+on at least three days (`--threshold`, `--min-days`, `--min-lines`).
+Whatever it adds, look at it with `knowns hits ... --source jev` the next
+morning. A monthly cron line:
+
+```cron
+15 6 1 * * syslog-reporter cd /var/lib/syslog-reporter && /usr/local/bin/syslog-reporter knowns discover >> /var/lib/syslog-reporter/daily-run.log 2>&1
+```
 
 Once the daily email is going out, each finding in it carries a
 `syslog-mute` line that adds a known-knowns entry from your own shell,
@@ -246,7 +302,8 @@ It does the following:
    on Mondays, logging to `daily-run.log` in the state directory. It asks
    for a `MAILTO` address.
 6. Asks whether to run `backfill.sh` now: the last fortnight through
-   `--no-llm` (free).
+   `--no-llm` (free), then loads the bundled noise rules into the new
+   database with `knowns seed`.
 7. Asks whether to install the findings web UI as a systemd service
    (section 5).
 

@@ -192,6 +192,17 @@ else
     echo "skipped - run it later with: sudo -u $SERVICE_USER backfill.sh"
 fi
 
+# The bundled noise rules live in the database (knowns seed is idempotent,
+# so re-running the installer after an upgrade only adds new ones). The
+# database exists only after a run, so this waits for the backfill.
+step "noise rules"
+if [ -e "$WORK_DIR/syslog_aggregates.db" ]; then
+    runuser -u "$SERVICE_USER" -- sh -c "cd '$WORK_DIR' && '$BIN_DIR/syslog-reporter' knowns seed" ||
+        echo "seeding the noise rules failed - re-run: sudo -u $SERVICE_USER sh -c 'cd $WORK_DIR && syslog-reporter knowns seed'" >&2
+else
+    echo "no database yet - after the first run: sudo -u $SERVICE_USER sh -c 'cd $WORK_DIR && syslog-reporter knowns seed'"
+fi
+
 step "web UI"
 if ask "install the findings web UI as a systemd service (127.0.0.1:7373)?" n; then
     command -v systemctl >/dev/null || die "systemctl not found"

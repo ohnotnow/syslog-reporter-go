@@ -58,6 +58,10 @@ OPENAI_API_KEY=sk-...
 # A courtesy for hiding estate identity, NOT PII/compliance redaction;
 # if your logs need that, stick to --no-llm.
 #SYSLOG_REDACT=example.ac.uk,10.20.
+# Optional: TypeSafe (Jev) key for 'knowns discover', the noise finder.
+# Nothing else reads it. SYSLOG_JEV_MODEL pins a model id (default
+# jev-latest).
+#TYPESAFE_API_KEY=
 
 # Where elk_dump.py fetches yesterday's logs from. ELK_API_KEY works
 # instead of username/password; ELK_INSECURE=1 skips TLS verification

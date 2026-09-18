@@ -32,20 +32,29 @@ implementation replaced it outright and maintains no compatibility with it.
 
 ```
 cmd/syslog-reporter/        CLI entry point; explicit command dispatch (run,
-                            eval, serve, user, token, findings,
+                            eval, serve, user, token, findings, knowns,
                             mgmt-report, digest, self-update) from one
                             registry - no default mode; digest.go is the
-                            weekly digest command
+                            weekly digest command; knowns.go, seed.go,
+                            hits.go and discover.go the on-box
+                            known-knowns command; since.go the --since
+                            flag value
 internal/selfupdate/        Version/RepoURL (ldflags-stamped), the --version
                             latest-release check, and the self-update command
 internal/reporter/
   lineformat.go             line parsing + number formatting helpers (splitWS,
                             thousands, compactFloat), pinned by test vectors
-  filters_data.go           the noise filter rule list (edit per estate)
-  filter.go                 LogFilter: deterministic noise removal
+  filters_data.go           the normalise rules (rewrite-to-canonical, compiled in)
+  noiserules.go             the bundled drop rules: embedded noise-rules.txt
+                            and its parser, loaded by 'knowns seed'
+  template.go               message templating for the noise finder: mask
+                            the varying parts, turn a shape into a regex
+  filter.go                 LogFilter: known-knowns, normalise, dedupe
   knowns.go                 known-knowns suppression semantics (host glob +
                             program glob / match regex, expiry by slice date)
   knownsstore.go            known_knowns table: add, list, delete, load
+internal/jev/               stdlib client for TypeSafe's System One API
+                            (Jev), used only by 'knowns discover'
   anomaly.go                line parsing, robust z-scores, peer detector,
                             anomaly combining
   store.go                  SQLite daily-aggregate store
@@ -114,8 +123,11 @@ raw log lines
 ```
 
 Anomaly detection runs on the RAW log, upstream of the filter, so it can see
-the high-volume programs the denylist removes. Everything else runs on the
-filtered log.
+the high-volume programs the filter removes. Everything else runs on the
+filtered log. The filter is three passes: known-knowns (every row of the
+`known_knowns` table, which since ant ADR srg-uHwCr includes the bundled
+noise rules that used to be compiled in), the normalise rules (rewrite a
+line to a canonical form so variants dedupe), and the dedupe cap.
 
 Operator-acknowledged "known knowns" (the `known_knowns` table in the
 shared database, migration 5; managed with the `knowns` command on the box
@@ -124,9 +136,20 @@ or the sysadmin API's mute endpoints, see
 apply in two places: the filter drops lines host-aware (a `match` entry
 drops the lines its regex matches, a `program` entry drops every line from
 that program), and matching (host, program) anomalies are muted before the
-explainer spends LLM money. Suppression stays visible: the report footer lists which entries fired and
-flags lapsed ones. Expiry compares against the slice date, not the wall
-clock, so backfills behave historically.
+explainer spends LLM money. The email body carries one line with the
+lines dropped and entries fired; the attachment lists the entries (the
+bundled rules folded into one item) and flags lapsed ones; `knowns hits`
+over a dump shows what each entry caught. Expiry compares against the
+slice date, not the wall clock, so backfills behave historically.
+
+Every row has a `source`: `api` (the mute endpoint), `cli` (`knowns add`
+or the TOML import), `bundled` (`knowns seed`, from the embedded
+noise-rules.txt; idempotent, never deletes) or `jev` (`knowns discover`,
+the noise finder: template a window of kept dumps, score each shape with
+Jev, add the routine recurring ones; `--preview` asks first on a
+terminal and only prints elsewhere). The evaluation behind the finder,
+and why a Jev gate before the issue detector is deferred rather than
+rejected, is ant ADR srg-FGSKN.
 
 ## Anomaly detection
 
@@ -573,7 +596,7 @@ The first argument is always a command: `run` (the daily batch report),
 `eval` (model comparison), `serve` (web UI), `user` (local accounts:
 add/list/passwd/remove), `token` (sysadmin API bearer tokens:
 create/list/revoke), `knowns` (known-knowns suppressions:
-list/add/remove/import), `findings` (list/show/feedback), `mgmt-report`
+list/add/remove/seed/hits/discover/import), `findings` (list/show/feedback), `mgmt-report`
 (management summary), `digest` (the weekly digest) and `self-update`. A bare invocation or an unknown
 command prints the command list and exits non-zero; there is no default
 mode. `--help`, `--version`, the bare words `help <command>` and
@@ -719,9 +742,10 @@ Read from the environment or a `.env` beside the working directory
   sidecar, so back up with `sqlite3 <file> ".backup <dest>"`; see
   "Backing up the database" under the findings library section
 - `SYSLOG_DB_KEEP_DAYS` store retention, pruned each run (default 90)
-- `SYSLOG_BLANKET_IGNORE` comma-separated substrings appended to the filter
-  at runtime - the home for estate-identifying entries (hostnames, internal
-  IPs) so the committed filter stays estate-neutral
+- `TYPESAFE_API_KEY` the Jev key, read only by `knowns discover`;
+  `SYSLOG_JEV_MODEL` pins a model id (default `jev-latest`). A run that
+  still has `SYSLOG_BLANKET_IGNORE` set warns that it is no longer read;
+  each entry becomes a `knowns add --host '*' --match ...`
 - `SYSLOG_API_MUTE_LIMIT` mutes allowed per API token per 24 hours
   (default 20, must be at least 1; no flag). A leaked token or a looping
   script cannot silence the estate in one go

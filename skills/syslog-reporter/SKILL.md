@@ -180,8 +180,13 @@ shape, oldest first:
 ]}
 ```
 
-`source` is `api` (made through this API) or `cli` (made on the server by
-hand; `created_by` and `finding_id` are then null). An empty `match`
+`source` is `api` (made through this API), `cli` (made on the server by
+hand; `created_by` and `finding_id` are then null), `bundled` (the noise
+rules shipped with the binary, loaded by `knowns seed` on the server) or
+`jev` (added by the `knowns discover` noise finder on the server). "What
+did entry 37 actually catch?" is not an API question: it is
+`syslog-reporter knowns hits <dump> --id 37` on the server, which the
+admin runs themselves. An empty `match`
 means every line of that program on that host is dropped.
 
 `DELETE /api/knowns/{id}` returns `{"deleted": 1, "id": 37}`, or 404.
