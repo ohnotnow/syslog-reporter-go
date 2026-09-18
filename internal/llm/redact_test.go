@@ -28,7 +28,7 @@ func TestReplaceFoldCaseInsensitiveAndCounted(t *testing.T) {
 func TestSetRedactionsTrimsAndDropsEmpties(t *testing.T) {
 	SetRedactions([]string{" example.ac.uk ", "", "  ", "10.20."})
 	t.Cleanup(func() { SetRedactions(nil) })
-	if got := redactUser("ping 10.20.1.9 at example.ac.uk and Example.AC.UK"); strings.Contains(got, "example.ac.uk") ||
+	if got := Redact("ping 10.20.1.9 at example.ac.uk and Example.AC.UK"); strings.Contains(got, "example.ac.uk") ||
 		strings.Contains(got, "Example.AC.UK") || strings.Contains(got, "10.20.1") {
 		t.Errorf("values survived redaction: %q", got)
 	}

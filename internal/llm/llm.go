@@ -75,7 +75,7 @@ func SetDebugLogger(fn func(format string, args ...any)) {
 func Complete(ctx context.Context, model, system, user, schemaName string, schema map[string]any, out any) error {
 	// Redaction sits here so every provider path is covered and no future
 	// agent can forget it (SYSLOG_REDACT; ant ADR srg-Mzvjf).
-	user = redactUser(user)
+	user = Redact(user)
 	provider, modelID, ok := strings.Cut(model, "/")
 	if !ok {
 		return fmt.Errorf("model %q has no provider prefix; use the litellm format, e.g. openai/%s", model, model)

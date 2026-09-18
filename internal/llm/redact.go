@@ -37,10 +37,11 @@ func SetRedactions(values []string) {
 	redactMu.Unlock()
 }
 
-// redactUser applies the list to one outbound user message and reports the
-// count on stderr (count only, never the values - the whole point is that
-// they stay out of anything durable).
-func redactUser(user string) string {
+// Redact applies the list to one outbound message and reports the count
+// on stderr (count only, never the values - the whole point is that they
+// stay out of anything durable). Complete calls it on every provider-bound
+// user message; internal/jev calls it on every outbound state.
+func Redact(user string) string {
 	redactMu.RLock()
 	list := redactList
 	redactMu.RUnlock()
