@@ -3,8 +3,8 @@ package main
 // The knowns command (ait srg-CvFSr.3, ant ADR srg-gzXn6): the on-box side
 // of known-knowns. Free-form entries (host globs, regexes) that never
 // appeared as a finding, listing what is muted, removing an entry, and the
-// one-shot import of the old TOML file. Mutes from a finding go through
-// the API instead.
+// one-shot import of the old TOML file, and seeding the bundled noise
+// rules (seed.go). Mutes from a finding go through the API instead.
 
 import (
 	"flag"
@@ -22,7 +22,7 @@ import (
 )
 
 func runKnowns(args []string) {
-	const usage = "usage: syslog-reporter knowns <list|add|remove|import> [args] (see 'knowns --help')"
+	const usage = "usage: syslog-reporter knowns <list|add|remove|seed|hits|discover|import> [args] (see 'knowns --help')"
 	if len(args) == 0 {
 		fatal(usage)
 	}
@@ -35,6 +35,12 @@ func runKnowns(args []string) {
 		runKnownsAdd(args[1:])
 	case "remove":
 		runKnownsRemove(args[1:])
+	case "seed":
+		runKnownsSeed(args[1:])
+	case "hits":
+		runKnownsHits(args[1:])
+	case "discover":
+		runKnownsDiscover(args[1:])
 	case "import":
 		runKnownsImport(args[1:])
 	default:

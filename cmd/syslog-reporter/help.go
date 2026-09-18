@@ -19,8 +19,7 @@ const runHelpEnv = `environment (full reference in TECHNICAL_OVERVIEW.md):
   model:  SYSLOG_DEFAULT_MODEL, SYSLOG_LOGSCAN_MODEL, SYSLOG_ISSUE_MODEL,
           SYSLOG_REASONING_EFFORT, SYSLOG_REDACT, SYSLOG_CONTEXT_LINES,
           OPENAI_API_KEY / ANTHROPIC_API_KEY / AZURE_OPENAI_ENDPOINT + _API_KEY
-  store:  SYSLOG_DB_PATH (aggregates, findings, known-knowns), SYSLOG_DB_KEEP_DAYS,
-          SYSLOG_BLANKET_IGNORE
+  store:  SYSLOG_DB_PATH (aggregates, findings, known-knowns), SYSLOG_DB_KEEP_DAYS
   email:  SYSLOG_SMTP_SERVER, SYSLOG_SMTP_SENDER, SYSLOG_SMTP_RECIPIENTS
 `
 
@@ -106,13 +105,31 @@ SYSLOG_DB_PATH name it as in the other commands.
 
 const knownsHelp = `Manage known-knowns: estate oddities the daily run suppresses.
 
-usage: syslog-reporter knowns <list|add|remove|import> [flags]
+usage: syslog-reporter knowns <list|add|remove|seed|hits|discover|import>
 
   list                  what is muted; --all includes lapsed entries
   add                   a free-form entry: --host GLOB, then --program GLOB
                         and/or --match REGEX, --reason TEXT, and an optional
                         --expires YYYY-MM-DD
   remove <id>           delete one entry by the id list shows
+  seed [file]           load the bundled noise rules (or a file in the same
+                        format) as host * entries with source 'bundled';
+                        skips rules already present, never deletes, safe to
+                        re-run after an upgrade
+  hits <dump>           what the entries caught on that day's dump, newest
+                        entries first: --since 1h|3d|2w|YYYY-MM-DD (by when
+                        the entry was created), --source api|cli|jev|bundled,
+                        --all to include the bundled rules; --id N shows one
+                        entry's catch grouped by message, --raw the lines.
+                        Reads the dump and the db, writes nothing
+  discover              the Jev noise finder: template the last --days (30)
+                        dumps in --dump-dir ($WORK_DIR/dumps), score each
+                        message shape with Jev (TYPESAFE_API_KEY), and add
+                        the routine, recurring ones as host * entries with
+                        source 'jev' (--threshold 0.1, --min-days 3,
+                        --min-lines 1). --preview prints them and asks y/n
+                        on a terminal; off a terminal it only prints.
+                        Review the result with hits --source jev
   import <file.toml>    read the pre-database known_knowns.toml once and add
                         every [[known]] entry (leaves the file alone; does
                         not dedupe, so import a file once)

@@ -26,7 +26,7 @@ var commands = []command{
 	{"serve", "Serve the findings library web UI (default 127.0.0.1:7373)", cmdServe},
 	{"user", "Manage local-auth accounts (add, list, passwd, remove)", cmdUser},
 	{"token", "Manage sysadmin API bearer tokens (create, list, revoke)", cmdToken},
-	{"knowns", "List, add, remove and import known-knowns suppressions", cmdKnowns},
+	{"knowns", "Known-knowns: list, add, remove, seed, hits, discover (Jev noise finder), import", cmdKnowns},
 	{"findings", "List, show and record feedback on findings from the terminal", cmdFindings},
 	{"mgmt-report", "Render the management summary (HTML file plus plain text)", cmdMgmtReport},
 	{"digest", "Email the weekly digest of recurring findings from the library", cmdDigest},
