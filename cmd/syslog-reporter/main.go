@@ -594,8 +594,7 @@ func runBatch(cliArgs []string) {
 			fatal("%v", err)
 		}
 	}
-	isNDJSON := *format == "ndjson" ||
-		(*format == "auto" && (strings.HasSuffix(path, ".ndjson") || strings.HasSuffix(path, ".ndjson.gz")))
+	isNDJSON := *format == "ndjson" || (*format == "auto" && isNDJSONPath(path))
 
 	var logDate time.Time
 	if *dateStr != "" {
@@ -606,46 +605,14 @@ func runBatch(cliArgs []string) {
 		logDate = parsed
 	}
 
-	var lines []string
-	var hostOS map[string]string
-	switch {
-	case isNDJSON:
-		if path == "--" {
-			fatal("--format ndjson needs a file path, not stdin")
-		}
-		source, err := reporter.NewElkSource(path)
-		if err != nil {
-			fatal("%v", err)
-		}
-		lines, err = source.Run()
-		if err != nil {
-			fatal("%v", err)
-		}
-		if source.Skipped > 0 {
-			fmt.Fprintf(os.Stderr, "warning: skipped %d NDJSON records with no timestamp or message\n", source.Skipped)
-		}
-		// Key the aggregates off the data itself rather than assuming the
-		// dump is yesterday's; an explicit --date still wins.
-		if logDate.IsZero() && source.LogDate != nil {
-			logDate = *source.LogDate
-		}
-		hostOS = source.HostOS
-	case path == "--":
-		var err error
-		lines, err = readLines(os.Stdin)
-		if err != nil {
-			fatal("reading stdin: %v", err)
-		}
-	default:
-		f, err := os.Open(path)
-		if err != nil {
-			fatal("%v", err)
-		}
-		lines, err = readLines(f)
-		f.Close()
-		if err != nil {
-			fatal("reading %s: %v", path, err)
-		}
+	lines, sourceDate, hostOS, err := readLogSource(path, isNDJSON)
+	if err != nil {
+		fatal("%v", err)
+	}
+	// Key the aggregates off the data itself rather than assuming the
+	// dump is yesterday's; an explicit --date still wins.
+	if logDate.IsZero() && sourceDate != nil {
+		logDate = *sourceDate
 	}
 
 	run(runConfig{
@@ -666,6 +633,50 @@ func runBatch(cliArgs []string) {
 		contextLines: *contextLines,
 		maxResolve:   *maxResolve,
 	})
+}
+
+// readLogSource loads a day's log: an ELK NDJSON dump (plain or gzipped),
+// a plain syslog file, or stdin for "--". The date and host OS map come
+// only from NDJSON; both are nil otherwise. Shared by run and knowns hits.
+func readLogSource(path string, ndjson bool) (lines []string, logDate *time.Time, hostOS map[string]string, err error) {
+	switch {
+	case ndjson:
+		if path == "--" {
+			return nil, nil, nil, fmt.Errorf("--format ndjson needs a file path, not stdin")
+		}
+		source, err := reporter.NewElkSource(path)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if lines, err = source.Run(); err != nil {
+			return nil, nil, nil, err
+		}
+		if source.Skipped > 0 {
+			fmt.Fprintf(os.Stderr, "warning: skipped %d NDJSON records with no timestamp or message\n", source.Skipped)
+		}
+		return lines, source.LogDate, source.HostOS, nil
+	case path == "--":
+		if lines, err = readLines(os.Stdin); err != nil {
+			return nil, nil, nil, fmt.Errorf("reading stdin: %w", err)
+		}
+		return lines, nil, nil, nil
+	default:
+		f, err := os.Open(path)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		defer f.Close()
+		if lines, err = readLines(f); err != nil {
+			return nil, nil, nil, fmt.Errorf("reading %s: %w", path, err)
+		}
+		return lines, nil, nil, nil
+	}
+}
+
+// isNDJSONPath applies the --format auto rule: an .ndjson or .ndjson.gz
+// suffix means an ELK dump.
+func isNDJSONPath(path string) bool {
+	return strings.HasSuffix(path, ".ndjson") || strings.HasSuffix(path, ".ndjson.gz")
 }
 
 // maxResolveIssuesFromEnv reads SYSLOG_MAX_RESOLVE_ISSUES (default
@@ -739,11 +750,16 @@ func run(cfg runConfig) {
 	}
 	log.Info("Known knowns: %d active, %d expired (%s)",
 		len(knowns.Active), len(knowns.Expired), cfg.dbPath)
+	if len(knowns.Active)+len(knowns.Expired) == 0 {
+		log.Info("No known-knowns in %s; run 'syslog-reporter knowns seed' to load the bundled noise rules", cfg.dbPath)
+	}
+	if v := strings.TrimSpace(os.Getenv("SYSLOG_BLANKET_IGNORE")); v != "" {
+		log.Warn("SYSLOG_BLANKET_IGNORE is no longer read; make each entry a known-known instead: " +
+			"syslog-reporter knowns add --host '*' --match '<regex-quoted literal>' --reason '...'")
+	}
 
 	log.Info("Filtering log file")
-	logFilter := reporter.NewLogFilter(cfg.lines, knowns)
-	log.Info("Blanket ignore: %d entries from SYSLOG_BLANKET_IGNORE", len(logFilter.BlanketIgnores))
-	filteredLines := logFilter.Run()
+	filteredLines := reporter.NewLogFilter(cfg.lines, knowns).Run()
 	log.Debug("Filtered log file length: %d", len(filteredLines))
 
 	if cfg.dumpOnly {

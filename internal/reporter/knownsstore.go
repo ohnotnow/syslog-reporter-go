@@ -8,13 +8,32 @@ package reporter
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
+// Where an entry came from. api: the mute endpoint, from a finding. cli:
+// 'knowns add' or the TOML import on the box. bundled: the noise-rules
+// file shipped with the binary, via 'knowns seed'. jev: 'knowns discover',
+// the Jev-scored noise finder (ant ADR srg-uHwCr).
 const (
-	KnownSourceAPI = "api"
-	KnownSourceCLI = "cli"
+	KnownSourceAPI     = "api"
+	KnownSourceCLI     = "cli"
+	KnownSourceBundled = "bundled"
+	KnownSourceJev     = "jev"
 )
+
+// KnownSources lists every accepted source value, in display order.
+var KnownSources = []string{KnownSourceAPI, KnownSourceCLI, KnownSourceBundled, KnownSourceJev}
+
+func validKnownSource(s string) bool {
+	for _, v := range KnownSources {
+		if s == v {
+			return true
+		}
+	}
+	return false
+}
 
 // KnownEntryInput is what a caller supplies; ID and created_at come from
 // the store. Empty CreatedBy and TokenPrefix are stored as NULL.
@@ -36,8 +55,8 @@ func (s *LibraryStore) AddKnownEntries(in []KnownEntryInput) ([]*KnownEntry, err
 		if i.Host == "" || i.Reason == "" {
 			return nil, fmt.Errorf("known-known entry needs both 'host' and 'reason'")
 		}
-		if i.Source != KnownSourceAPI && i.Source != KnownSourceCLI {
-			return nil, fmt.Errorf("known-known entry source must be %q or %q", KnownSourceAPI, KnownSourceCLI)
+		if !validKnownSource(i.Source) {
+			return nil, fmt.Errorf("known-known entry source must be one of %s", strings.Join(KnownSources, ", "))
 		}
 		added := i.Added.UTC().Truncate(24 * time.Hour)
 		e, err := newKnownEntry(i.Host, i.Reason, i.Match, i.Program, &added, i.Expires)
@@ -105,7 +124,7 @@ func (s *LibraryStore) LoadKnownKnowns(logDate time.Time) (*KnownKnowns, error) 
 
 func (s *LibraryStore) knownEntriesWhere(cond string, args ...any) ([]*KnownEntry, error) {
 	rows, err := s.db.Query(`SELECT id, host, program, match, reason, added, expires,
-		source, created_by, token_prefix, finding_id FROM known_knowns WHERE `+cond+` ORDER BY id`, args...)
+		source, created_by, token_prefix, finding_id, created_at FROM known_knowns WHERE `+cond+` ORDER BY id`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -115,12 +134,12 @@ func (s *LibraryStore) knownEntriesWhere(cond string, args ...any) ([]*KnownEntr
 		var (
 			id                                   int64
 			host, program, match, reason, source string
-			added                                string
+			added, createdAt                     string
 			expires, createdBy, tokenPrefix      sql.NullString
 			findingID                            sql.NullInt64
 		)
 		if err := rows.Scan(&id, &host, &program, &match, &reason, &added, &expires,
-			&source, &createdBy, &tokenPrefix, &findingID); err != nil {
+			&source, &createdBy, &tokenPrefix, &findingID, &createdAt); err != nil {
 			return nil, err
 		}
 		addedT, err := parseDay(added)
@@ -140,6 +159,9 @@ func (s *LibraryStore) knownEntriesWhere(cond string, args ...any) ([]*KnownEntr
 			return nil, fmt.Errorf("known-known %d: %w", id, err)
 		}
 		e.ID, e.Source, e.CreatedBy, e.TokenPrefix = id, source, createdBy.String, tokenPrefix.String
+		if e.CreatedAt, err = time.Parse(time.RFC3339, createdAt); err != nil {
+			return nil, fmt.Errorf("known-known %d: bad created_at %q", id, createdAt)
+		}
 		if findingID.Valid {
 			v := findingID.Int64
 			e.FindingID = &v

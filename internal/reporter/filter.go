@@ -4,12 +4,17 @@ package reporter
 // detectors deliberately run upstream of this filter.
 
 import (
-	"os"
 	"regexp"
 	"strings"
 )
 
 var pidBracketRe = regexp.MustCompile(`\[\d+\]`)
+
+// StripPID removes every "[1234]" pid bracket, the normalisation the
+// dedupe pass applies; 'knowns hits' groups caught lines by it too.
+func StripPID(s string) string {
+	return pidBracketRe.ReplaceAllString(s, "")
+}
 
 // compileLinePattern compiles a rule pattern for use on single lines that
 // may retain their trailing newline: the (?m) flag makes `$` match just
@@ -19,17 +24,24 @@ func compileLinePattern(pattern string) (*regexp.Regexp, error) {
 	return regexp.Compile("(?m)" + pattern)
 }
 
-func mustCompileLinePatterns(patterns []string) []*regexp.Regexp {
-	res := make([]*regexp.Regexp, len(patterns))
-	for i, p := range patterns {
-		res[i] = regexp.MustCompile("(?m)" + p)
-	}
-	return res
+// CompileLinePattern is compileLinePattern for callers outside the
+// package that need the compiled regex ('knowns discover' checks each
+// generated rule against its own example line).
+func CompileLinePattern(pattern string) (*regexp.Regexp, error) {
+	return compileLinePattern(pattern)
+}
+
+// CheckLinePattern reports whether pattern would be accepted as a
+// known-known match, using the same compiler the run uses. For callers
+// that want to fail with their own context (a file line number) before
+// handing a batch to AddKnownEntries.
+func CheckLinePattern(pattern string) error {
+	_, err := compileLinePattern(pattern)
+	return err
 }
 
 var (
-	compiledRegexIgnores = mustCompileLinePatterns(regexIgnoreList)
-	compiledNormalise    = func() []*regexp.Regexp {
+	compiledNormalise = func() []*regexp.Regexp {
 		res := make([]*regexp.Regexp, len(normaliseMap))
 		for i, rule := range normaliseMap {
 			res[i] = regexp.MustCompile("(?m)" + rule.pattern)
@@ -38,30 +50,23 @@ var (
 	}()
 )
 
+// LogFilter drops known-known lines (the bundled noise rules and the
+// operator's mutes, all rows of the known_knowns table), normalises what
+// survives, and dedupes. A nil knowns means nothing is dropped.
 type LogFilter struct {
 	lines  []string
 	knowns *KnownKnowns
-	// Estate-specific ignore substrings (hostnames, internal IPs, local
-	// usernames) live in the environment, not in this public codebase:
-	// SYSLOG_BLANKET_IGNORE is a comma-separated list treated exactly
-	// like ignoreList entries.
-	BlanketIgnores []string
+	// OnKnownDrop, when set, sees every line a known-known drops and the
+	// entry that caught it. The run leaves it nil; 'knowns hits' uses it.
+	OnKnownDrop func(e *KnownEntry, line string)
 }
 
 func NewLogFilter(lines []string, knowns *KnownKnowns) *LogFilter {
-	var blanket []string
-	for _, t := range strings.Split(os.Getenv("SYSLOG_BLANKET_IGNORE"), ",") {
-		if trimmed := strings.TrimSpace(t); trimmed != "" {
-			blanket = append(blanket, trimmed)
-		}
-	}
-	return &LogFilter{lines: lines, knowns: knowns, BlanketIgnores: blanket}
+	return &LogFilter{lines: lines, knowns: knowns}
 }
 
 func (f *LogFilter) Run() []string {
 	lines := f.removeKnownLines(f.lines)
-	lines = f.removeIgnoredLines(lines)
-	lines = f.removeRegexIgnoredLines(lines)
 	lines = f.normaliseLines(lines)
 	lines = f.removeDuplicates(lines)
 	return lines
@@ -69,7 +74,7 @@ func (f *LogFilter) Run() []string {
 
 func (f *LogFilter) removeKnownLines(lines []string) []string {
 	// First step so the per-entry hit counts reflect the raw line volume,
-	// before the general ignores and the dedupe cap thin things out.
+	// before normalise and the dedupe cap thin things out.
 	if f.knowns == nil {
 		return lines
 	}
@@ -87,45 +92,13 @@ func (f *LogFilter) removeKnownLines(lines []string) []string {
 		if p := ParseLine(line); p != nil {
 			program = p.Program
 		}
-		if f.knowns.LineIgnored(parts[3], program, parts[4]) {
+		if e := f.knowns.IgnoringEntry(parts[3], program, parts[4]); e != nil {
+			if f.OnKnownDrop != nil {
+				f.OnKnownDrop(e, line)
+			}
 			continue
 		}
 		kept = append(kept, line)
-	}
-	return kept
-}
-
-func (f *LogFilter) removeIgnoredLines(lines []string) []string {
-	ignores := append(append([]string{}, ignoreList...), f.BlanketIgnores...)
-	kept := make([]string, 0, len(lines))
-	for _, line := range lines {
-		ignored := false
-		for _, ig := range ignores {
-			if strings.Contains(line, ig) {
-				ignored = true
-				break
-			}
-		}
-		if !ignored {
-			kept = append(kept, line)
-		}
-	}
-	return kept
-}
-
-func (f *LogFilter) removeRegexIgnoredLines(lines []string) []string {
-	kept := make([]string, 0, len(lines))
-	for _, line := range lines {
-		ignored := false
-		for _, re := range compiledRegexIgnores {
-			if re.MatchString(line) {
-				ignored = true
-				break
-			}
-		}
-		if !ignored {
-			kept = append(kept, line)
-		}
 	}
 	return kept
 }

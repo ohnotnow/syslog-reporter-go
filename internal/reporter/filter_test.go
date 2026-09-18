@@ -10,31 +10,6 @@ import (
 	"testing"
 )
 
-const blanketLine = "Aug 26 14:00:05 labbox widgetd[12]: probe from 203.0.113.9"
-
-func TestBlanketIgnoreEnvEntriesDropMatchingLines(t *testing.T) {
-	t.Setenv("SYSLOG_BLANKET_IGNORE", "203.0.113.9, oldprinter")
-	if got := NewLogFilter([]string{blanketLine}, nil).Run(); len(got) != 0 {
-		t.Errorf("expected line dropped, got %#v", got)
-	}
-}
-
-func TestBlanketIgnoreUnsetEnvKeepsTheLine(t *testing.T) {
-	t.Setenv("SYSLOG_BLANKET_IGNORE", "")
-	got := NewLogFilter([]string{blanketLine}, nil).Run()
-	if !reflect.DeepEqual(got, []string{blanketLine}) {
-		t.Errorf("expected line kept, got %#v", got)
-	}
-}
-
-func TestBlanketIgnoreWhitespaceAndEmptyEntriesAreIgnored(t *testing.T) {
-	t.Setenv("SYSLOG_BLANKET_IGNORE", " , ,oldprinter , ")
-	f := NewLogFilter(nil, nil)
-	if !reflect.DeepEqual(f.BlanketIgnores, []string{"oldprinter"}) {
-		t.Errorf("BlanketIgnores = %#v, want [oldprinter]", f.BlanketIgnores)
-	}
-}
-
 func TestPidDifferencesDoNotDefeatTheDedupeCap(t *testing.T) {
 	var lines []string
 	for i := 0; i < 6; i++ {
@@ -47,10 +22,24 @@ func TestPidDifferencesDoNotDefeatTheDedupeCap(t *testing.T) {
 	}
 }
 
+// bundledKnowns builds the known-knowns a seeded database would give the
+// run, so these tests pin the shipped rules, not an empty filter.
+func bundledKnowns(t *testing.T) *KnownKnowns {
+	t.Helper()
+	rules, err := BundledNoiseRules()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := make([]*KnownEntry, 0, len(rules))
+	for _, r := range rules {
+		entries = append(entries, mustEntry(t, r.Host, r.Reason, r.Match, "", nil))
+	}
+	return NewKnownKnowns(entries, sliceDate)
+}
+
 func filterOne(t *testing.T, line string) []string {
 	t.Helper()
-	t.Setenv("SYSLOG_BLANKET_IGNORE", "")
-	return NewLogFilter([]string{line}, nil).Run()
+	return NewLogFilter([]string{line}, bundledKnowns(t)).Run()
 }
 
 func TestNamedRefusedScannerChatterIsDropped(t *testing.T) {

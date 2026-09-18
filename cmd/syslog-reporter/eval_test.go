@@ -146,7 +146,6 @@ func TestEvalRoutesModelsAndAccountsForStages(t *testing.T) {
 			t.Setenv("OPENAI_BASE_URL", server.URL+"/v1/")
 			t.Setenv("OPENAI_API_KEY", "test-key")
 			t.Setenv("SYSLOG_REASONING_EFFORT", "high")
-			t.Setenv("SYSLOG_BLANKET_IGNORE", "")
 			t.Setenv("SYSLOG_DB_PATH", filepath.Join(t.TempDir(), "absent.db")) // eval with no db: no knowns, no error
 			out := filepath.Join(t.TempDir(), "eval.md")
 			runEval([]string{"--scan-model", "openai/scan-test", "--issue-model", "openai/issue-test", "--out", out})

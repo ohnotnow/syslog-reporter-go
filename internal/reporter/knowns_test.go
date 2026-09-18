@@ -137,7 +137,6 @@ func TestKnownsHitsAreCountedPerEntry(t *testing.T) {
 }
 
 func TestKnownLinesDroppedHostAware(t *testing.T) {
-	t.Setenv("SYSLOG_BLANKET_IGNORE", "")
 	lines := []string{
 		"Aug 26 14:00:05 scopebox widgetd[12]: retry on port 1234",
 		"Aug 26 14:00:06 otherbox widgetd[12]: retry on port 1234",
@@ -151,7 +150,6 @@ func TestKnownLinesDroppedHostAware(t *testing.T) {
 }
 
 func TestNoKnownsChangesNothing(t *testing.T) {
-	t.Setenv("SYSLOG_BLANKET_IGNORE", "")
 	lines := []string{
 		"Aug 26 14:00:05 scopebox widgetd[12]: retry on port 1234",
 		"Aug 26 14:00:06 otherbox widgetd[12]: retry on port 1234",

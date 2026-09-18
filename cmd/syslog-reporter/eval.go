@@ -47,9 +47,10 @@ same model to force a single-model comparison. Anomaly explanations are
 not evaluated. No cost is computed: multiply the token counts by your
 own price sheet. Environment: the provider keys, SYSLOG_REASONING_EFFORT,
 SYSLOG_REDACT and SYSLOG_CONTEXT_LINES apply exactly as in 'run'
-(OPENAI_API_KEY, ANTHROPIC_API_KEY, AZURE_OPENAI_ENDPOINT + _API_KEY), as do
-the filter's SYSLOG_BLANKET_IGNORE; known-knowns come from SYSLOG_DB_PATH when
-that file exists.
+(OPENAI_API_KEY, ANTHROPIC_API_KEY, AZURE_OPENAI_ENDPOINT + _API_KEY).
+Known-knowns, which now include the bundled noise rules, come from
+SYSLOG_DB_PATH when that file exists; with no database, nothing is dropped
+before the LLM stages, only normalised and deduped.
 `
 
 type evalConfig struct {

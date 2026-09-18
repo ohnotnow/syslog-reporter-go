@@ -1,0 +1,151 @@
+# Bundled noise rules, loaded into the known_knowns table by
+#   syslog-reporter knowns seed            (this embedded copy)
+#   syslog-reporter knowns seed <file>     (an edited copy)
+#
+# One rule per line. A rule is a regex matched against the line after the
+# hostname, i.e. 'program[pid]: message', the same text a known-known's
+# --match sees. Lines starting with # are comments, blank lines are ignored.
+# A '#' preceded by whitespace on a rule line starts that rule's reason.
+# 'host=GLOB ' at the start of a rule limits it to matching hostnames;
+# every other rule applies to host *. Literal text must be regex-quoted
+# (a dot is \., brackets are \[ \]). Seeding skips rules already present
+# and never deletes; remove a rule with 'knowns remove <id>'.
+#
+# Estate-identifying literals (your hostnames, your internal IPs) belong
+# in the database via 'knowns add', not in this public file.
+
+# literal substrings (from the former ignoreList), regex-quoted
+Hello recv from server
+ No entries 
+USB disconnect
+Is a desktop session
+Checking session /org/freedesktop
+Loop exited\. Forcing reload
+onedrive
+Finished apt-daily\.service
+message repeated
+CCMP_REPLAY
+BA_FLUSH
+USB hub found
+unknown client
+DHCPREQUEST
+DHCPACK
+DHCPOFFER
+Note that yum will try to contact the repo\. when it runs most commands
+snapd-desktop   # bit brutal, but it spams like hell
+Starting ISC DHCPv4 server
+Internet Systems Consortium DHCP Server
+Copyright 2004-2018 Internet Systems Consortium
+All rights reserved
+Stopping LSB: DHCP server
+Dormant child reaped
+systemd\[1\]: Reloading
+Cleanup of Temporary Directories
+gnome-shell
+gdm-x-session
+usbmuxd
+Starting System Logging Service
+Reached target
+gsd-media-keys
+GNOME
+gnome-session-binary
+Starting Virtual filesystem
+Successfully activated service
+Starting Accessibility
+Started Path
+reused old ethernet address
+arpwatch: flip flop
+Starting rsyslog\.service
+tracker-miner-f
+tracker-store
+Starting Tracker metadata
+kubelet
+org\.freedesktop\.ScreenSaver\.GetActive
+DHCPINFORM
+DHCPNAK
+Stopped Network Time Synchronization
+speech-dispatcher
+libreoffice
+Message of the Day
+treated changed event as add
+Logitech
+ boltd
+not supported by any plugin
+ipheth
+iPhone USB
+
+# regexes (from the former regexIgnoreList)
+Catalog compiled by \S+
+kernel.+hub.+detected
+kernel.+usb.+Product
+host=*lab* (?i)usb   # lab machines' usb chatter (was a whole-line regex)
+kernel:.+\[\s+[0-9]\.[0-9]
+snapd-desktop-i.+Checking session
+snapd-desktop-i.+Forcing a reload.
+puppet-agent.+Requesting catalog from
+puppet.+Building dependency tree
+puppet-agent.+executed successfully
+hid-generic .+ USB HID .+Mouse
+kernel: .+ Keyboard
+kernel: .+ usb.+SerialNumber
+Copyright.+Internet Systems Consortium
+rngd.+stats:   # rngd stats spam
+ADDRCONF\(NETDEV_UP\): .+ link is not ready   # IPv6 spam
+DAD attempt detected for .+ on .+   # more IPv6 spam (Duplicate Address Detection)
+puppet-agent.+Applied catalog in.+seconds
+puppet-agent.+Reading state information
+sshd.+Close session
+host=*lab* kernel   # lab machines' kernel chatter (was a whole-line regex)
+host=*lab* dbus   # lab machines' dbus chatter (was a whole-line regex)
+host=*lab* os-prober   # lab machines' os-prober chatter (was a whole-line regex)
+kernel:\s+usb.+(new|New) USB
+kernel:\s+usb.+(removed|Removed|Manufacturer|Product:|SerialNumber|disconnect)
+kernel: .+input:.+HID.+ as 
+kernel: .+ KCS in invalid state   # KCS = Keyboard Controller Style (so says gpt)
+run-docker-runtime.+Succeeded
+dhcpd.+Server starting service
+x2go.+(succeeded|success)
+dbus.+[Aa]ctiv
+dbus-daemon.+(requested|activated)
+isc-dhcp-server.+Stopping
+systemd.+([Ss]tart|[Rr]each|[Ll]isten|[Ss]topped|[Ss]ucceeded)
+systemd.+GnuPG
+NetworkManager.+(requested_interface_mtu|requested|option|<info>)
+rsyslogd.+(groupid|userid).+changed
+rsyslogd.+(Acquired|start)
+systemd.+Deactivated successfully
+containerd.+(clean|ignoring|loading plugin|disconnected)
+dockerd.+ignoring event
+named.+received from primary
+systemd-logind.+(logged out|Removed session)
+docker.+Succeeded
+snapd-desktop.+theme
+kernel:\s\[\s\s\s+[0-9]
+dnsmasq.+\sread\s
+kernel:.+usb.+(new|New)
+kernel: hub.+(found|attached|detected)
+pcieport.+(bridge|released|assigned)
+firefox.+info
+dockerd.+NetworkDB stats
+enx[0-9a-f]{6}.+renamed
+apt-daily\.service .+ unmet condition check.+ConditionACPower
+For info, please visit.+dhcp
+dhcpd.+Wrote.+ leases to leases file.
+kernel.+usb .+Manufacturer
+named\[\d+\]: client .+ denied   # scanners probing an authoritative DNS box
+named\[\d+\]: client .+ query failed \(REFUSED\)   # the REFUSED twin of every denied line
+named\[\d+\]: .*rate limit (slip|drop)   # response-rate-limiting doing its job
+CROND?\[\d+\]: \([^)]+\) (CMD|LIST)   # cron ran a job / listed a crontab
+CRON.+No MTA installed
+crontab\[\d+\]: \([^)]+\) LIST
+dhclient\[\d+\]: XMT: Solicit   # DHCPv6 solicit heartbeat
+ocsinventory-agent.+\[debug\]
+puppet-agent.+Testing connection with   # Defender connectivity self-check
+systemd.+Closed 
+systemd-logind.+New session
+Got notification message from PID   # mdatp systemd notify chatter
+nfsrahead.+setting .+ readahead
+named\[\d+\]: (stop limiting|limit REFUSED) error responses   # RRL start/stop announcements
+systemd\[\d+\]: .+ Consumed .*CPU time   # per-service resource accounting
+nessus-service.+Killing nessusd   # nessus agent's scheduled restart
+rpc\.mountd.+client (attached|detached)   # routine NFS mounts

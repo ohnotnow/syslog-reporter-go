@@ -86,7 +86,6 @@ func TestTopLevelHelpAndVersion(t *testing.T) {
 // TestRunCommandOwnsTheBatchPath drives the real batch path through dispatch
 // using --dump-filtered, which exits after the deterministic filter stage.
 func TestRunCommandOwnsTheBatchPath(t *testing.T) {
-	t.Setenv("SYSLOG_BLANKET_IGNORE", "")
 	t.Setenv("SYSLOG_DB_PATH", filepath.Join(t.TempDir(), "run.db"))
 	logPath := filepath.Join(t.TempDir(), "sample.log")
 	line := "Jan 12 03:04:05 web01.example.test badservice[123]: catastrophic widget failure\n"
@@ -120,7 +119,6 @@ func TestRunCommandOwnsTheBatchPath(t *testing.T) {
 // The full deterministic pipeline (--no-llm --no-store) honours --out-dir
 // for the report file drops.
 func TestRunWritesReportFilesToOutDir(t *testing.T) {
-	t.Setenv("SYSLOG_BLANKET_IGNORE", "")
 	t.Setenv("SYSLOG_DB_PATH", filepath.Join(t.TempDir(), "run.db"))
 	logPath := filepath.Join(t.TempDir(), "sample.log")
 	line := "Jan 12 03:04:05 web01.example.test badservice[123]: catastrophic widget failure\n"
@@ -156,7 +154,6 @@ func TestRunWritesReportFilesToOutDir(t *testing.T) {
 // Known-knowns come from the shared db (migration 5). A --no-store run
 // still reads them, and writes nothing back.
 func TestRunNoStoreStillReadsKnownKnownsFromTheDatabase(t *testing.T) {
-	t.Setenv("SYSLOG_BLANKET_IGNORE", "")
 	dbPath := filepath.Join(t.TempDir(), "run.db")
 	t.Setenv("SYSLOG_DB_PATH", dbPath)
 	lib, err := reporter.OpenLibraryStore(dbPath)
