@@ -38,10 +38,11 @@ type KnownEntry struct {
 	Hits    int
 
 	// Provenance (migration 5): who created the entry and from what.
-	Source      string // KnownSourceAPI or KnownSourceCLI
-	CreatedBy   string // username for API entries; "" for CLI
-	TokenPrefix string // api_tokens prefix for API entries; "" for CLI
-	FindingID   *int64 // the finding a mute derived from; nil for free-form
+	Source      string    // one of KnownSources
+	CreatedBy   string    // username for API entries; "" for CLI
+	TokenPrefix string    // api_tokens prefix for API entries; "" for CLI
+	FindingID   *int64    // the finding a mute derived from; nil for free-form
+	CreatedAt   time.Time // wall-clock instant the row was written; zero for an unstored entry
 
 	matchRe *regexp.Regexp
 }
@@ -98,6 +99,12 @@ func NewKnownKnowns(entries []*KnownEntry, logDate time.Time) *KnownKnowns {
 // or "" for a line it cannot parse, so program entries never fire on odd
 // lines. First hit wins and is counted for the report footer.
 func (k *KnownKnowns) LineIgnored(host, program, message string) bool {
+	return k.IgnoringEntry(host, program, message) != nil
+}
+
+// IgnoringEntry is LineIgnored returning the entry that fired, or nil, for
+// callers that need to know which rule caught a line ('knowns hits').
+func (k *KnownKnowns) IgnoringEntry(host, program, message string) *KnownEntry {
 	for _, e := range k.Active {
 		if !e.matchesHost(host) {
 			continue
@@ -115,9 +122,9 @@ func (k *KnownKnowns) LineIgnored(host, program, message string) bool {
 			}
 		}
 		e.Hits++
-		return true
+		return e
 	}
-	return false
+	return nil
 }
 
 // AnomalyMuted reports whether an active entry mutes this (host, program).
