@@ -50,8 +50,10 @@ type ReportAgent struct {
 	// RepoURL is where the README lives; the mute-line footer links to its
 	// sysadmin API section. Empty suppresses that footer.
 	RepoURL string
-	// Optional KnownKnowns: suppression must stay visible in the report, or
-	// a muted entry can quietly become a real fault nobody looks at.
+	// Optional KnownKnowns. The email body carries one count line and the
+	// attachment the per-entry detail, with the bundled noise rules folded
+	// into one item (owner decision 2026-09-18, ant ADR srg-uHwCr); what a
+	// rule actually caught is 'knowns hits' on the box.
 	Knowns *KnownKnowns
 }
 
@@ -247,9 +249,8 @@ func (r *ReportAgent) emailBodyN(topIssues, topAnomalies int) string {
 		totalAnomalies, plural(totalAnomalies, "y", "ies"),
 		AttachmentName)
 
-	suppressed := r.suppressed()
-	if len(suppressed) > 0 {
-		b.WriteString("\n_Known knowns suppressed: " + strings.Join(suppressed, "; ") + "._\n")
+	if summary := r.suppressedSummary(); summary != "" {
+		b.WriteString("\n_" + summary + "_\n")
 	}
 	if expired := r.expiredCount(); expired > 0 {
 		b.WriteString("\n_" + expiredSentence(expired) + "_\n")
@@ -314,17 +315,45 @@ func expiredSentence(n int) string {
 	return fmt.Sprintf("%d known-known entries have expired; noise they covered may have reappeared above.", n)
 }
 
-// suppressed returns one "reason (host) ×hits" string per known-known entry
-// that fired today.
+// suppressed returns one "reason (host) ×hits" string per operator
+// known-known that fired today, in HitEntries order, with every bundled
+// noise rule that fired folded into one final "bundled noise rules ×N".
 func (r *ReportAgent) suppressed() []string {
 	if r.Knowns == nil {
 		return nil
 	}
 	var out []string
+	bundled := 0
 	for _, e := range r.Knowns.HitEntries() {
+		if e.Source == KnownSourceBundled {
+			bundled += e.Hits
+			continue
+		}
 		out = append(out, fmt.Sprintf("%s (%s) ×%d", e.Reason, e.Host, e.Hits))
 	}
+	if bundled > 0 {
+		out = append(out, fmt.Sprintf("bundled noise rules ×%d", bundled))
+	}
 	return out
+}
+
+// suppressedSummary is the email body's one line: lines dropped and
+// entries that fired, pointing at 'knowns hits' for the detail. Empty when
+// nothing fired.
+func (r *ReportAgent) suppressedSummary() string {
+	if r.Knowns == nil {
+		return ""
+	}
+	lines, entries := 0, 0
+	for _, e := range r.Knowns.HitEntries() {
+		lines += e.Hits
+		entries++
+	}
+	if entries == 0 {
+		return ""
+	}
+	return fmt.Sprintf("Known knowns dropped %s line%s (%d entr%s); see `syslog-reporter knowns hits`.",
+		thousands(lines), plural(lines, "", "s"), entries, plural(entries, "y", "ies"))
 }
 
 func (r *ReportAgent) expiredCount() int {

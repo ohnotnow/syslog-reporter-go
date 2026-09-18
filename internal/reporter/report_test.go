@@ -222,8 +222,9 @@ func TestIssueMarkdownHasBlankLineSeparation(t *testing.T) {
 	}
 }
 
-// Suppression must stay visible: a muted entry that never appears anywhere
-// is how a known known quietly becomes an unwatched fault.
+// The email body carries a count of what known-knowns dropped; the full
+// report keeps the per-entry list, with bundled noise rules folded into
+// one item (owner decision 2026-09-18, ant ADR srg-uHwCr).
 
 func knownsReport(knowns *KnownKnowns) *ReportAgent {
 	return &ReportAgent{Issues: &IssueList{}, Resolutions: &ResolutionList{},
@@ -236,10 +237,39 @@ func TestFiredKnownEntriesAppearInBodyAndFullReport(t *testing.T) {
 	knowns.LineIgnored("scopebox", "", "retry on port 1234")
 
 	rep := knownsReport(knowns)
-	for _, text := range []string{rep.EmailBody(), rep.Run()} {
-		if !strings.Contains(text, "microscope kit (scopebox) ×1") {
-			t.Errorf("missing suppression note in: %q", text)
-		}
+	if body := rep.EmailBody(); !strings.Contains(body, "_Known knowns dropped 1 line (1 entry); see `syslog-reporter knowns hits`._") ||
+		strings.Contains(body, "microscope kit") {
+		t.Errorf("body should carry the count line and no per-entry detail: %q", body)
+	}
+	if full := rep.Run(); !strings.Contains(full, "Suppressed today: microscope kit (scopebox) ×1.") {
+		t.Errorf("full report should list the entry: %q", full)
+	}
+}
+
+func TestBundledRulesFoldIntoOneItemInTheFullReport(t *testing.T) {
+	mine := mustEntry(t, "scopebox", "microscope kit", "port 1234", "", nil)
+	one := mustEntry(t, "*", "bundled noise rule", "USB disconnect", "", nil)
+	two := mustEntry(t, "*", "rngd stats spam", "rngd.+stats:", "", nil)
+	one.Source, two.Source, mine.Source = KnownSourceBundled, KnownSourceBundled, KnownSourceCLI
+	knowns := NewKnownKnowns([]*KnownEntry{one, mine, two}, day(2026, 8, 27))
+	for i := 0; i < 1200; i++ {
+		knowns.LineIgnored("anybox", "kernel", "USB disconnect, address 3")
+	}
+	for i := 0; i < 34; i++ {
+		knowns.LineIgnored("anybox", "rngd", "rngd[1]: stats: bits received")
+	}
+	knowns.LineIgnored("scopebox", "widgetd", "retry on port 1234")
+
+	rep := knownsReport(knowns)
+	if body := rep.EmailBody(); !strings.Contains(body, "Known knowns dropped 1,235 lines (3 entries)") {
+		t.Errorf("body count wrong: %q", body)
+	}
+	full := rep.Run()
+	if !strings.Contains(full, "Suppressed today: microscope kit (scopebox) ×1; bundled noise rules ×1234.") {
+		t.Errorf("bundled rules should fold into one last item: %q", full)
+	}
+	if strings.Contains(full, "rngd stats spam") || strings.Contains(full, "bundled noise rule (") {
+		t.Errorf("a bundled rule was listed individually: %q", full)
 	}
 }
 
