@@ -10,10 +10,12 @@ package reporter
 import (
 	"regexp"
 	"strings"
+
+	"github.com/ohnotnow/syslog-reporter-go/internal/llm"
 )
 
 var (
-	maskEmail = regexp.MustCompile(`[^\s<>@]+@[^\s<>]+`)
+	maskEmail = llm.EmailPattern
 	maskIPv4  = regexp.MustCompile(`\b\d{1,3}(?:\.\d{1,3}){3}\b`)
 	// Either a full 6-to-8-group address or anything with a '::' in it; a
 	// looser form (two or more hex groups) also matched clock times.

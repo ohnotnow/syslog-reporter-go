@@ -46,7 +46,7 @@ Stage environment variables override --model; set both stage flags to the
 same model to force a single-model comparison. Anomaly explanations are
 not evaluated. No cost is computed: multiply the token counts by your
 own price sheet. Environment: the provider keys, SYSLOG_REASONING_EFFORT,
-SYSLOG_REDACT and SYSLOG_CONTEXT_LINES apply exactly as in 'run'
+SYSLOG_SCRUB* and SYSLOG_CONTEXT_LINES apply exactly as in 'run'
 (OPENAI_API_KEY, ANTHROPIC_API_KEY, AZURE_OPENAI_ENDPOINT + _API_KEY).
 Known-knowns, which now include the bundled noise rules, come from
 SYSLOG_DB_PATH when that file exists; with no database, nothing is dropped
@@ -110,6 +110,9 @@ func runEval(args []string) {
 		fatal("%v", err)
 	}
 	log := &logger{}
+	if w := llm.ScrubWarning(cfg.scanModel, cfg.issueModel); w != "" {
+		log.Warn("%s", w)
+	}
 	llm.SetLogger(log.Warn)
 	llm.SetDebugLogger(log.Debug)
 

@@ -11,7 +11,7 @@ func TestMaskMessageTokens(t *testing.T) {
 		// emails first: an address at the logging host must not leak its
 		// local part once the host mask has eaten the domain
 		{"to=<someone.name@mx1.example.test>, relay=mail.example.test[10.0.0.1]:25", "to=<<email>>, relay=<fqdn>[<ip>]:<n>"},
-		{"from=<> to=alice@gmail.com bounced", "from=<> <email> bounced"},
+		{"from=<> to=alice@gmail.com bounced", "from=<> to=<email> bounced"},
 		{"connection from mx1.example.test and mx1 refused", "connection from <host> and <host> refused"},
 		{"client 192.168.1.10#53 (a.b.c): query denied", "client <ip>#<n> (<fqdn>): query denied"},
 		{"link fe80::1 down; 2001:db8::ff00:42:8329 up", "link <ip6> down; <ip6> up"},

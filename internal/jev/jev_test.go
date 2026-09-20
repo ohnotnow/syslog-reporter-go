@@ -140,17 +140,27 @@ func TestAskFailsAtOnceOnClientErrors(t *testing.T) {
 	}
 }
 
-func TestAskRedactsOutboundState(t *testing.T) {
+func TestAskScrubsOutboundState(t *testing.T) {
 	bodies := serve(t, func(w http.ResponseWriter, _ *http.Request, _ []byte) { io.WriteString(w, reply) })
-	llm.SetRedactions([]string{"secret-estate.example"})
-	t.Cleanup(func() { llm.SetRedactions(nil) })
-	state := map[string]any{"log": map[string]any{"message": "connect to db.SECRET-estate.example failed"}}
+	t.Setenv("SYSLOG_SCRUB", "1")
+	t.Setenv("SYSLOG_SCRUB_DOMAINS", "secret-estate.example=fake.example")
+	t.Setenv("SYSLOG_SCRUB_IP_PREFIXES", "")
+	t.Setenv("SYSLOG_REDACT", "")
+	if err := llm.LoadScrub(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		t.Setenv("SYSLOG_SCRUB", "")
+		t.Setenv("SYSLOG_SCRUB_DOMAINS", "")
+		llm.LoadScrub()
+	})
+	state := map[string]any{"log": map[string]any{"message": "connect to db.SECRET-estate.example failed for ops@secret-estate.example"}}
 	if _, err := Ask(context.Background(), state, question()); err != nil {
 		t.Fatal(err)
 	}
 	sent := string((*bodies)[0])
-	if strings.Contains(strings.ToLower(sent), "secret-estate") || !strings.Contains(sent, "[redacted]") {
-		t.Errorf("state left the box unredacted: %s", sent)
+	if strings.Contains(strings.ToLower(sent), "secret-estate") || !strings.Contains(sent, "db.fake.example") || !strings.Contains(sent, `\u003cemail-1\u003e`) {
+		t.Errorf("state left the box unscrubbed: %s", sent)
 	}
 }
 

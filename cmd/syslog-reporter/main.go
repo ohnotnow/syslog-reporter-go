@@ -105,11 +105,11 @@ func main() {
 	// already in the environment.
 	_ = godotenv.Load()
 
-	// SYSLOG_REDACT: comma-separated literal strings stripped from every
-	// provider-bound message (ant ADR srg-Mzvjf). Parsed once here; the llm
-	// package never reads the environment itself.
-	if v := os.Getenv("SYSLOG_REDACT"); v != "" {
-		llm.SetRedactions(strings.Split(v, ","))
+	// SYSLOG_SCRUB*: what leaves the box for the LLM providers (ant ADR
+	// srg-Sgdkm). Validated once here so a bad .env dies naming the
+	// variable, whichever command runs.
+	if err := llm.LoadScrub(); err != nil {
+		fatal("%v", err)
 	}
 
 	os.Exit(dispatch(os.Args[1:], os.Stdout, os.Stderr))
@@ -724,6 +724,11 @@ func run(cfg runConfig) {
 	log := &logger{debugEnabled: cfg.debug}
 	llm.SetLogger(log.Warn)
 	llm.SetDebugLogger(log.Debug)
+	if cfg.llmOn && !cfg.dumpOnly {
+		if w := llm.ScrubWarning(cfg.scanModel, cfg.issueModel); w != "" {
+			log.Warn("%s", w)
+		}
+	}
 
 	// The slice we're processing is yesterday's by default; the date keys
 	// the persisted aggregates (NDJSON input overrides this from the data).

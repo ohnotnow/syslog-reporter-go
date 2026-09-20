@@ -100,6 +100,9 @@ func runDigest(args []string) {
 		if err := llm.CheckReasoningEffort(); err != nil {
 			fatal("%v", err)
 		}
+		if w := llm.ScrubWarning(digestModel); w != "" {
+			log.Warn("%s", w)
+		}
 	}
 	// The digest is a reader; a missing db is a typo'd path.
 	if err := reporter.RequireDatabase(*dbPath); err != nil {

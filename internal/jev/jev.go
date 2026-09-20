@@ -102,8 +102,8 @@ func Model() string {
 }
 
 // Ask sends one state with its questions and returns the reply. The
-// marshalled state passes through llm.Redact (SYSLOG_REDACT) before it
-// leaves the box. 429 and 5xx are retried with exponential backoff from
+// marshalled state passes through llm.ScrubOut (SYSLOG_SCRUB*) before it
+// leaves the box; the reply is scores, so there is nothing to reverse. 429 and 5xx are retried with exponential backoff from
 // retryBase, honouring a Retry-After in seconds when the server sends
 // one; other statuses fail at once with the start of the body in the
 // error.
@@ -117,7 +117,7 @@ func Ask(ctx context.Context, state any, questions map[string]Question) (Respons
 	}
 	body, err := json.Marshal(map[string]any{
 		"model":     Model(),
-		"state":     json.RawMessage(llm.Redact(string(stateJSON))),
+		"state":     json.RawMessage(llm.ScrubOut(string(stateJSON))),
 		"questions": questions,
 	})
 	if err != nil {

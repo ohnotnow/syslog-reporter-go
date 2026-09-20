@@ -73,23 +73,34 @@ func SetDebugLogger(fn func(format string, args ...any)) {
 // prefix and decodes the JSON structured output (constrained by schema)
 // into out. schemaName labels the schema for providers that want a name.
 func Complete(ctx context.Context, model, system, user, schemaName string, schema map[string]any, out any) error {
-	// Redaction sits here so every provider path is covered and no future
-	// agent can forget it (SYSLOG_REDACT; ant ADR srg-Mzvjf).
-	user = Redact(user)
+	// Scrubbing sits here, both directions, so every provider path is
+	// covered and no future agent can forget it (SYSLOG_SCRUB*; ant ADR
+	// srg-Sgdkm): the user message goes out scrubbed and the reply is
+	// swapped back before it is decoded.
+	user, sess := scrubOut(user)
 	provider, modelID, ok := strings.Cut(model, "/")
 	if !ok {
 		return fmt.Errorf("model %q has no provider prefix; use the litellm format, e.g. openai/%s", model, model)
 	}
+	var content string
+	var err error
 	switch provider {
 	case "openai":
-		return completeOpenAI(ctx, modelID, system, user, schemaName, schema, out)
+		content, err = completeOpenAI(ctx, modelID, system, user, schemaName, schema)
 	case "azure":
-		return completeAzure(ctx, modelID, system, user, schemaName, schema, out)
+		content, err = completeAzure(ctx, modelID, system, user, schemaName, schema)
 	case "anthropic":
-		return completeAnthropic(ctx, modelID, system, user, schema, out)
+		content, err = completeAnthropic(ctx, modelID, system, user, schema)
 	default:
 		return fmt.Errorf("unsupported provider prefix %q in model %q (supported: openai/, azure/, anthropic/)", provider, model)
 	}
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal([]byte(sess.in(content)), out); err != nil {
+		return fmt.Errorf("%s: decoding structured output: %w", model, err)
+	}
+	return nil
 }
 
 // CheckCredentials fails fast when the model's provider is missing its
@@ -152,13 +163,13 @@ func CheckReasoningEffort() error {
 		effort, strings.Join(reasoningEfforts, ", "))
 }
 
-func completeOpenAI(ctx context.Context, modelID, system, user, schemaName string, schema map[string]any, out any) error {
+func completeOpenAI(ctx context.Context, modelID, system, user, schemaName string, schema map[string]any) (string, error) {
 	client := openai.NewClient( // OPENAI_API_KEY / OPENAI_BASE_URL from env
 		option.WithMaxRetries(llmMaxRetries),
 		option.WithMaxRetryDelay(llmMaxRetryDelay),
 		option.WithMiddleware(rateLimitMiddleware("openai/"+modelID)),
 	)
-	return completeChat(ctx, client, "openai", modelID, system, user, schemaName, schema, out)
+	return completeChat(ctx, client, "openai", modelID, system, user, schemaName, schema)
 }
 
 // completeAzure rides the OpenAI chat path against an Azure OpenAI
@@ -168,11 +179,11 @@ func completeOpenAI(ctx context.Context, modelID, system, user, schemaName strin
 // URL rewriting, api-version, azcore) is needed. The trailing slash on the
 // base URL is load-bearing: request paths resolve relative to it, and
 // without the slash the endpoint's final path segment is silently dropped.
-func completeAzure(ctx context.Context, modelID, system, user, schemaName string, schema map[string]any, out any) error {
+func completeAzure(ctx context.Context, modelID, system, user, schemaName string, schema map[string]any) (string, error) {
 	endpoint := os.Getenv("AZURE_OPENAI_ENDPOINT")
 	apiKey := os.Getenv("AZURE_OPENAI_API_KEY")
 	if endpoint == "" || apiKey == "" {
-		return fmt.Errorf("azure/%s needs AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY set", modelID)
+		return "", fmt.Errorf("azure/%s needs AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY set", modelID)
 	}
 	client := openai.NewClient(
 		option.WithBaseURL(strings.TrimRight(endpoint, "/")+"/"),
@@ -181,7 +192,7 @@ func completeAzure(ctx context.Context, modelID, system, user, schemaName string
 		option.WithMaxRetryDelay(llmMaxRetryDelay),
 		option.WithMiddleware(rateLimitMiddleware("azure/"+modelID)),
 	)
-	return completeChat(ctx, client, "azure", modelID, system, user, schemaName, schema, out)
+	return completeChat(ctx, client, "azure", modelID, system, user, schemaName, schema)
 }
 
 // rateLimitMiddleware sits inside both SDKs' retry loops (their Middleware
@@ -242,7 +253,9 @@ func retryAfterHint(resp *http.Response) string {
 	return "no Retry-After header, backing off"
 }
 
-func completeChat(ctx context.Context, client openai.Client, provider, modelID, system, user, schemaName string, schema map[string]any, out any) error {
+// completeChat and completeAnthropic return the reply's raw JSON text;
+// Complete reverses the scrub and decodes it.
+func completeChat(ctx context.Context, client openai.Client, provider, modelID, system, user, schemaName string, schema map[string]any) (string, error) {
 	params := openai.ChatCompletionNewParams{
 		Model: modelID,
 		Messages: []openai.ChatCompletionMessageParamUnion{
@@ -262,20 +275,16 @@ func completeChat(ctx context.Context, client openai.Client, provider, modelID, 
 	params.ReasoningEffort = shared.ReasoningEffort(ReasoningEffort())
 	resp, err := client.Chat.Completions.New(ctx, params)
 	if err != nil {
-		return fmt.Errorf("%s/%s: %w", provider, modelID, err)
+		return "", fmt.Errorf("%s/%s: %w", provider, modelID, err)
 	}
 	addUsage(provider+"/"+modelID, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
 	if len(resp.Choices) == 0 {
-		return fmt.Errorf("%s/%s: response had no choices", provider, modelID)
+		return "", fmt.Errorf("%s/%s: response had no choices", provider, modelID)
 	}
-	content := resp.Choices[0].Message.Content
-	if err := json.Unmarshal([]byte(content), out); err != nil {
-		return fmt.Errorf("%s/%s: decoding structured output: %w", provider, modelID, err)
-	}
-	return nil
+	return resp.Choices[0].Message.Content, nil
 }
 
-func completeAnthropic(ctx context.Context, modelID, system, user string, schema map[string]any, out any) error {
+func completeAnthropic(ctx context.Context, modelID, system, user string, schema map[string]any) (string, error) {
 	client := anthropic.NewClient( // ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL from env
 		anthropicoption.WithMaxRetries(llmMaxRetries),
 		anthropicoption.WithMiddleware(rateLimitMiddleware("anthropic/"+modelID)),
@@ -294,7 +303,7 @@ func completeAnthropic(ctx context.Context, modelID, system, user string, schema
 	}
 	resp, err := client.Messages.New(ctx, params)
 	if err != nil {
-		return fmt.Errorf("anthropic/%s: %w", modelID, err)
+		return "", fmt.Errorf("anthropic/%s: %w", modelID, err)
 	}
 	addUsage("anthropic/"+modelID, resp.Usage.InputTokens, resp.Usage.OutputTokens)
 	var text strings.Builder
@@ -304,10 +313,7 @@ func completeAnthropic(ctx context.Context, modelID, system, user string, schema
 		}
 	}
 	if text.Len() == 0 {
-		return fmt.Errorf("anthropic/%s: response had no text content (stop_reason=%s)", modelID, resp.StopReason)
+		return "", fmt.Errorf("anthropic/%s: response had no text content (stop_reason=%s)", modelID, resp.StopReason)
 	}
-	if err := json.Unmarshal([]byte(text.String()), out); err != nil {
-		return fmt.Errorf("anthropic/%s: decoding structured output: %w", modelID, err)
-	}
-	return nil
+	return text.String(), nil
 }
