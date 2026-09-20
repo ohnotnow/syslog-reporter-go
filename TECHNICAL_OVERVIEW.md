@@ -714,13 +714,26 @@ Read from the environment or a `.env` beside the working directory
 - `AZURE_OPENAI_ENDPOINT` + `AZURE_OPENAI_API_KEY` for `azure/` models
   (the resource's v1 endpoint; see the provider routing section)
 - `SYSLOG_REASONING_EFFORT` reasoning effort, see above; unset = `low`
-- `SYSLOG_REDACT` comma-separated literal strings stripped
-  (case-insensitively, replaced with `[redacted]`) from every
-  provider-bound message, e.g. `SYSLOG_REDACT=example.ac.uk,10.20.` to
-  keep your domain and address range out of API traffic. A count of
-  replacements is printed, never the values. This is an estate-identity
-  courtesy, not PII or compliance redaction: if your log classification
-  needs that, use `--no-llm` or a suitably contracted endpoint
+- `SYSLOG_SCRUB`, `SYSLOG_SCRUB_DOMAINS`, `SYSLOG_SCRUB_IP_PREFIXES`
+  scrub every provider-bound user message and reverse the scrub on the
+  reply, inside `llm.Complete`, so no agent, prompt, store or report ever
+  sees the substitutes. With `SYSLOG_SCRUB=1`: every email address
+  becomes a numbered token (`<email-1>`, the same address the same token
+  within one request; no configuration, so other institutions' and
+  personal addresses are covered); the domains listed as
+  `real=fake,real=fake` are swapped case-insensitively at word
+  boundaries, longest first so `student.example.ac.uk` follows an
+  `example.ac.uk` entry without its own; the public IP prefixes listed
+  the same way (`203.0=192.168`) are swapped at the start of a dotted
+  quad, trailing octets kept. Private addresses and bare hostnames are
+  left alone. Startup refuses the toggle on with both lists empty, a
+  fake used twice or a fake that is also a real, and a leftover
+  `SYSLOG_REDACT` (replaced 2026-09-20, ant ADR srg-Sgdkm). With the
+  toggle off, `run`, `digest` and `eval` warn when a model is not
+  `azure/`, the one provider with the estate's data-processing agreement.
+  A count of replacements is printed per request, never the values.
+  Not general PII scrubbing: if your log classification needs that, use
+  `--no-llm` or a suitably contracted endpoint
 - `SYSLOG_SMTP_SERVER`, `SYSLOG_SMTP_SENDER`, `SYSLOG_SMTP_RECIPIENTS` for
   `--send-email` (recipients ride the SMTP envelope as BCC). The daily
   email is a text+HTML alternative pair - the plain part is the digest

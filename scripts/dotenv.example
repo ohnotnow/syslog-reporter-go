@@ -53,11 +53,16 @@ OPENAI_API_KEY=sk-...
 # bounds a storm day; issues past the cap still appear in the attachment
 # and the findings library, just without a resolution.
 #SYSLOG_MAX_RESOLVE_ISSUES=60
-# Optional: literal strings to strip from anything sent to the LLM
-# provider, e.g. your domain. Case-insensitive, replaced with [redacted].
-# A courtesy for hiding estate identity, NOT PII/compliance redaction;
-# if your logs need that, stick to --no-llm.
-#SYSLOG_REDACT=example.ac.uk,10.20.
+# Scrubbing of what leaves the box for the LLM provider. With SYSLOG_SCRUB
+# on, every email address becomes a numbered token, your domains and
+# public IP prefixes become the fake ones listed, and the reply is swapped
+# back before it is used, so reports and stores keep the real names. Off,
+# raw log lines go out as they are (the run warns unless the model is
+# azure/). Not general PII scrubbing: use --no-llm for log classes that
+# forbid external processing.
+#SYSLOG_SCRUB=1
+#SYSLOG_SCRUB_DOMAINS=example.ac.uk=example.org,example.edu=example.net
+#SYSLOG_SCRUB_IP_PREFIXES=203.0=192.168
 # Optional: TypeSafe (Jev) key for 'knowns discover', the noise finder.
 # Nothing else reads it. SYSLOG_JEV_MODEL pins a model id (default
 # jev-latest).

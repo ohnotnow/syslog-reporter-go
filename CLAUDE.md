@@ -125,11 +125,16 @@ SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.
   (unset = `low`) and goes to both providers verbatim; `none` and
   `minimal` were dropped (owner decision 2026-09-06, ant ADR srg-heCEJ)
   and are refused at startup by llm.CheckReasoningEffort.
-  `SYSLOG_REDACT` strips operator-listed literals from every
-  provider-bound user message (llm.Complete is the choke point) - an
-  estate-identity courtesy, deliberately NOT PII scrubbing (ant ADR
-  srg-Mzvjf). All four prompts carry a trust-boundary block and both
-  report layouts a paste caution, each pinned by tests - keep them.
+  `SYSLOG_SCRUB=1` with `SYSLOG_SCRUB_DOMAINS` / `SYSLOG_SCRUB_IP_PREFIXES`
+  (real=fake pairs) tokenises every email address and swaps the listed
+  domains and public IP prefixes in every provider-bound user message,
+  then reverses it on the reply inside llm.Complete, so nothing
+  downstream sees the substitutes (ant ADR srg-Sgdkm, owner decision
+  2026-09-20). Provider-independent on purpose; off, non-azure models
+  get a startup warning. SYSLOG_REDACT is gone and refused at startup.
+  Not general PII scrubbing: never claim it is. All four prompts carry a
+  trust-boundary block and both report layouts a paste caution, each
+  pinned by tests - keep them.
 - `--send-email` was verified against a local mailhog: recipients ride the
   SMTP envelope only (BCC), the To header carries the sender. Since
   srg-kOKT9 (owner decision 2026-08-29) the daily email body is
