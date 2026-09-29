@@ -1,10 +1,12 @@
 # syslog-reporter-go
 
 A batch CLI tool that turns a noisy, org-wide syslog stream into a short,
-prioritised email report for a small university sysadmin team. Deterministic
-code (filters, counts, robust statistics) decides *what* is worth surfacing;
-the LLM only explains findings and writes paste-ready commands. Alert
-fatigue is the enemy. The same binary also keeps a findings library (every
+prioritised email report for a small university sysadmin team. Two paths:
+for issues, deterministic filters strip the routine noise and the LLM
+decides which remaining lines are real problems, then writes paste-ready
+commands; for anomalies, statistical detectors on the raw lines decide
+which hosts are odd and the LLM only explains them. Alert fatigue is the
+enemy. The same binary also keeps a findings library (every
 run's findings captured to SQLite) served as a stdlib+htmx web UI (`serve`),
 a findings CLI, and a management summary (`mgmt-report`).
 
