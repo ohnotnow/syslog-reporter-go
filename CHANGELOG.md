@@ -41,6 +41,27 @@ commands of it.
   `daily-run.log`, so use your own job monitor for alerts.
 - ELK access honours `https_proxy`/`no_proxy` from the `.env`: list the
   cluster in `no_proxy` if it must not go through your proxy.
+- The issue detector is told how many hosts logged a message it only sees
+  a few examples of (`[on N hosts]`), so an estate-wide fault no longer
+  reads as one host's problem. The cap of three example lines is unchanged.
+- The management summary counts feedback as votes ("2 of 3 feedback votes
+  said the fix worked"), not as reviewed findings.
+
+### Fixed
+- An Elasticsearch search that timed out or lost a shard could be saved
+  as a complete day; it now fails and is retried.
+- A run whose findings could not be saved to the library still counted as
+  done, leaving the day out of the weekly digest. It now fails after
+  writing and sending its report, so the next hourly attempt files it.
+- `SYSLOG_SCRUB` now also covers the system prompt, which carries the
+  host list with full hostnames.
+- The weekly digest could pair advice or a finding number with the wrong
+  issue when two groups shared a title, and could order tied groups
+  differently from run to run.
+- A mail relay that stops answering no longer hangs the run (30s to
+  connect, 5 minutes for the whole exchange).
+- A deleted known-known's id is never reused, so retrying a delete cannot
+  remove a newer rule.
 
 ### Removed
 - `scripts/daily-run.sh`, `scripts/backfill.sh` and `tools/elk_dump.py`.
