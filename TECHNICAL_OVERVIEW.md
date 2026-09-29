@@ -581,9 +581,19 @@ product, nobody has to log in).
 
 `mgmt-report` renders a periodic summary for senior IT management as a
 self-contained, email-safe HTML page (tables and inline styles only, no
-scripts or SVG, so Outlook's Word renderer copes): headline numbers, a
-daily volume bar chart, issues by severity, most flagged services, and
-the team's feedback votes.
+scripts or SVG, so Outlook's Word renderer copes): hosts sending logs
+(in the period's last week, against the same week a period earlier when
+the aggregates still hold it, plus how many over the whole period; a
+week so hosts missing the odd day do not read as decline, and it leads
+because the ELK rollout covers a small share of the estate), headline
+numbers, a daily volume bar chart with each day's host count, issues by severity, most flagged services, the
+team's feedback votes, and three host tables (top five each): most
+flagged hosts (ranked by days named in a finding, out of the days with
+a run), noisiest hosts (lines a day against the median host, with the
+program sending most of them), and biggest changes in volume (the
+period's first and last week, or its halves under a fortnight; hosts
+under 1,000 lines a day in both are skipped, and starting or stopping
+logging outranks any ratio).
 
 ```bash
 syslog-reporter mgmt-report [--days N] [--send-email] [--db PATH]
@@ -596,7 +606,10 @@ It is a pure reader of the never-pruned runs/findings/feedback tables
 (ant ADR srg-9X77J): per-run `raw_lines`/`filtered_lines` provide the
 volume trend, and days predating those columns borrow an approximate
 volume from the aggregates table while the prune window still holds
-them (marked with an asterisk in the chart). The HTML always lands in
+them (marked with an asterisk in the chart). The host counts, noisiest-hosts and
+biggest-changes tables are the other exception: they read per-host
+volume from the aggregates table, so they only reach back as far as its
+prune window (`SYSLOG_DB_KEEP_DAYS`, 90 by default). The HTML always lands in
 `--out` (default `mgmt_report.html`); `--send-email` posts it as a
 text+HTML alternative message to `SYSLOG_MGMT_RECIPIENTS`, which is
 deliberately separate from the daily digest's list with no fallback

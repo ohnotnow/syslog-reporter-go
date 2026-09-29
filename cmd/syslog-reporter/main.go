@@ -192,7 +192,7 @@ func runMgmtReport(args []string) {
 	log.Debug("Gathered stats: %d/%d days with data, %d findings",
 		stats.DaysWithData, len(stats.Days), stats.TotalFindings)
 
-	html, err := reporter.RenderMgmtHTML(stats, version)
+	html, err := reporter.RenderMgmtHTML(stats, version, selfupdate.RepoURL)
 	if err != nil {
 		fatal("rendering management report: %v", err)
 	}

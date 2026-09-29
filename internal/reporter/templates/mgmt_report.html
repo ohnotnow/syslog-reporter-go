@@ -20,13 +20,26 @@
 
 <tr><td style="padding:24px;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+  {{if .HostsWindow}}
+  <tr>
+    <td colspan="2" style="padding:0 0 16px 0;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#E6E7EE" style="background-color:#E6E7EE;">
+      <tr><td style="padding:16px;">
+        <p style="margin:0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:13px; color:#4D4D4D;">Hosts sending logs</p>
+        <p style="margin:4px 0 0 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:28px; font-weight:700; color:#011451;">{{.RecentHosts}}{{if .HostsCompare}} <span style="font-size:14px; font-weight:400; color:#4D4D4D;">({{.HostsCompare}})</span>{{end}}</p>
+        <p style="margin:4px 0 0 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:12px; color:#666666;">{{.HostsWindow}}; {{.HostsPeriod}}</p>
+      </td></tr>
+      </table>
+    </td>
+  </tr>
+  {{end}}
   <tr>
     <td width="50%" style="padding:0 8px 16px 0;">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#E6E7EE" style="background-color:#E6E7EE;">
       <tr><td style="padding:16px;">
         <p style="margin:0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:13px; color:#4D4D4D;">Log lines ingested</p>
         <p style="margin:4px 0 0 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:28px; font-weight:700; color:#011451;">{{.TotalRaw}}</p>
-        <p style="margin:4px 0 0 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:12px; color:#666666;">{{.DaysWithData}} of {{.TotalDays}} days with data</p>
+        <p style="margin:4px 0 0 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:12px; color:#666666;">{{.DaysWithData}} of {{.TotalDays}} {{if eq .TotalDays 1}}day{{else}}days{{end}} with data</p>
       </td></tr>
       </table>
     </td>
@@ -87,8 +100,9 @@
       </table>
     </td>
     <td width="80" align="right" style="padding:2px 0 2px 8px; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:12px; color:#323232; white-space:nowrap;">{{.VolLabel}}{{if .Approx}}*{{end}}</td>
+    <td width="64" align="right" style="padding:2px 0 2px 8px; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:12px; color:#666666; white-space:nowrap;">{{.Hosts}}</td>
     {{else}}
-    <td colspan="2" style="padding:2px 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:12px; color:#999999;">no data</td>
+    <td colspan="3" style="padding:2px 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:12px; color:#999999;">no data</td>
     {{end}}
   </tr>
   {{end}}
@@ -131,8 +145,74 @@
   </table>
 </td></tr>
 
+{{if .TopHosts}}
+<tr><td style="padding:0 24px 24px 24px;">
+  <h2 style="margin:0 0 12px 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:18px; font-weight:700; color:#323232;">Most flagged hosts</h2>
+  <table width="100%" cellpadding="0" cellspacing="0" border="0">
+  <tr>
+    <th scope="col" align="left" style="padding:4px 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:12px; font-weight:600; color:#4D4D4D; border-bottom:1px solid #E6E6E6;">Host</th>
+    <th scope="col" align="right" style="padding:4px 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:12px; font-weight:600; color:#4D4D4D; border-bottom:1px solid #E6E6E6;">Flagged on</th>
+    <th scope="col" align="right" style="padding:4px 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:12px; font-weight:600; color:#4D4D4D; border-bottom:1px solid #E6E6E6;">Findings</th>
+  </tr>
+  {{range .TopHosts}}
+  <tr>
+    <td style="padding:4px 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:14px; color:#323232;">{{.Host}}</td>
+    <td align="right" style="padding:4px 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:14px; font-weight:600; color:#323232;">{{.DaysLabel}}</td>
+    <td align="right" style="padding:4px 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:14px; color:#323232;">{{.Findings}}</td>
+  </tr>
+  {{end}}
+  </table>
+</td></tr>
+{{end}}
+
+{{if .NoisiestHosts}}
+<tr><td style="padding:0 24px 24px 24px;">
+  <h2 style="margin:0 0 12px 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:18px; font-weight:700; color:#323232;">Noisiest hosts</h2>
+  <table width="100%" cellpadding="0" cellspacing="0" border="0">
+  <tr>
+    <th scope="col" align="left" style="padding:4px 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:12px; font-weight:600; color:#4D4D4D; border-bottom:1px solid #E6E6E6;">Host</th>
+    <th scope="col" align="right" style="padding:4px 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:12px; font-weight:600; color:#4D4D4D; border-bottom:1px solid #E6E6E6;">Lines a day</th>
+    <th scope="col" align="right" style="padding:4px 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:12px; font-weight:600; color:#4D4D4D; border-bottom:1px solid #E6E6E6;">vs typical</th>
+    <th scope="col" align="left" style="padding:4px 0 4px 16px; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:12px; font-weight:600; color:#4D4D4D; border-bottom:1px solid #E6E6E6;">Mostly from</th>
+  </tr>
+  {{range .NoisiestHosts}}
+  <tr>
+    <td style="padding:4px 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:14px; color:#323232;">{{.Host}}</td>
+    <td align="right" style="padding:4px 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:14px; color:#323232;">{{.PerDay}}</td>
+    <td align="right" style="padding:4px 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:14px; font-weight:600; color:#323232;">{{.Times}}</td>
+    <td style="padding:4px 0 4px 16px; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:14px; color:#323232;">{{.Source}}</td>
+  </tr>
+  {{end}}
+  </table>
+  <p style="margin:8px 0 0 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:12px; color:#666666;">{{.TypicalLabel}}</p>
+</td></tr>
+{{end}}
+
+{{if .Movers}}
+<tr><td style="padding:0 24px 24px 24px;">
+  <h2 style="margin:0 0 12px 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:18px; font-weight:700; color:#323232;">Biggest changes in volume</h2>
+  <table width="100%" cellpadding="0" cellspacing="0" border="0">
+  <tr>
+    <th scope="col" align="left" style="padding:4px 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:12px; font-weight:600; color:#4D4D4D; border-bottom:1px solid #E6E6E6;">Host</th>
+    <th scope="col" align="right" style="padding:4px 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:12px; font-weight:600; color:#4D4D4D; border-bottom:1px solid #E6E6E6;">Before</th>
+    <th scope="col" align="right" style="padding:4px 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:12px; font-weight:600; color:#4D4D4D; border-bottom:1px solid #E6E6E6;">After</th>
+    <th scope="col" align="right" style="padding:4px 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:12px; font-weight:600; color:#4D4D4D; border-bottom:1px solid #E6E6E6;">Change</th>
+  </tr>
+  {{range .Movers}}
+  <tr>
+    <td style="padding:4px 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:14px; color:#323232;">{{.Host}}</td>
+    <td align="right" style="padding:4px 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:14px; color:#323232;">{{.Before}}</td>
+    <td align="right" style="padding:4px 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:14px; color:#323232;">{{.After}}</td>
+    <td align="right" style="padding:4px 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:14px; font-weight:600; color:#323232;">{{.Change}}</td>
+  </tr>
+  {{end}}
+  </table>
+  <p style="margin:8px 0 0 0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:12px; color:#666666;">{{.MoverLabel}}</p>
+</td></tr>
+{{end}}
+
 <tr><td bgcolor="#011451" style="background-color:#011451; padding:16px 24px;">
-  <p style="margin:0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:12px; color:#CCD0DC;">Generated on {{.GeneratedAt}} by syslog-reporter {{.Version}}. Figures cover the period {{.PeriodLabel}}.</p>
+  <p style="margin:0; font-family:'Noto Sans','Segoe UI',Arial,sans-serif; font-size:12px; color:#CCD0DC;">Generated on {{.GeneratedAt}} by {{if .RepoURL}}<a href="{{.RepoURL}}" style="color:#FFFFFF; text-decoration:underline;">syslog-reporter</a>{{else}}syslog-reporter{{end}} {{.Version}}. Figures cover the period {{.PeriodLabel}}.</p>
 </td></tr>
 
 </table>
