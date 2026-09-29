@@ -140,12 +140,12 @@ func TestRenderMgmtHTML(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		"1,650",                            // total volume, grouped
-		"01 Jun to 04 Jun 2026",            // period label
-		"3 of 4 days with data",            // coverage
-		"1 of 2 reviewed findings",         // feedback line
-		"approximate volume reconstructed", // footnote (2 approx days)
-		"no data",                          // the empty day
+		"1,650",                 // total volume, grouped
+		"01 Jun to 04 Jun 2026", // period label
+		"3 of 4 days with data", // coverage
+		"1 of 2 feedback votes said the fix worked", // feedback line
+		"approximate volume reconstructed",          // footnote (2 approx days)
+		"no data",                                   // the empty day
 		"test-version",
 		"sssd",                                // flagged service
 		`<a href="https://example.test/repo"`, // footer links the project
@@ -168,7 +168,7 @@ func TestRenderMgmtTextHeadlines(t *testing.T) {
 	text := RenderMgmtText(stats)
 	// "including": anomalies are part of the findings total, not on top of
 	// it, and the wording must never drift back to "plus" (srg-so8ja.3).
-	for _, want := range []string{"1,650", "Findings surfaced: 3 (including", "1 of 2 reviewed findings"} {
+	for _, want := range []string{"1,650", "Findings surfaced: 3 (including", "1 of 2 feedback votes said the fix worked"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("text missing %q in:\n%s", want, text)
 		}

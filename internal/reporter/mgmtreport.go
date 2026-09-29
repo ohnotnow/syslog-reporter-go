@@ -772,9 +772,15 @@ func buildMgmtView(stats *MgmtStats, version string) *mgmtView {
 
 	v.FeedbackTotal = stats.FeedbackWorked + stats.FeedbackDidnt
 	if v.FeedbackTotal > 0 {
-		v.FeedbackLabel = fmt.Sprintf(
-			"%d of %d reviewed findings marked as useful by the team",
-			stats.FeedbackWorked, v.FeedbackTotal)
+		// Rows are votes, one per person per finding, so several people
+		// reviewing one finding count several times: say votes, not
+		// findings (ait srg-6Vsgx.9).
+		votes := "votes"
+		if v.FeedbackTotal == 1 {
+			votes = "vote"
+		}
+		v.FeedbackLabel = fmt.Sprintf("%d of %d feedback %s said the fix worked",
+			stats.FeedbackWorked, v.FeedbackTotal, votes)
 	}
 	return v
 }
