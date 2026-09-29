@@ -792,14 +792,14 @@ func run(cfg runConfig) {
 			fatal("detecting issues: %v", err)
 		}
 		log.Info("Collapsed %d filtered lines to %d for the issue detector", len(filteredLines), detector.SentLines)
-		log.Debug("Detected %d issues", len(issues.Issues))
+		log.Info("Detected %d issues", len(issues.Issues))
 
 		log.Info("Consolidating duplicate issues")
 		issues, err = reporter.NewIssueDeduplicator(issues, cfg.scanModel).Run(ctx)
 		if err != nil {
 			fatal("consolidating issues: %v", err)
 		}
-		log.Debug("Consolidated to %d issues", len(issues.Issues))
+		log.Info("Consolidated to %d issues", len(issues.Issues))
 		logTokenUsage(log, "initial processing")
 
 		// The resolution writer runs on the expensive model, so a storm
