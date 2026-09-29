@@ -77,6 +77,9 @@ func Complete(ctx context.Context, model, system, user, schemaName string, schem
 	// covered and no future agent can forget it (SYSLOG_SCRUB*; ant ADR
 	// srg-Sgdkm): the user message goes out scrubbed and the reply is
 	// swapped back before it is decoded.
+	if err := checkBudget(); err != nil {
+		return err
+	}
 	user, sess := scrubOut(user)
 	provider, modelID, ok := strings.Cut(model, "/")
 	if !ok {

@@ -55,6 +55,18 @@ type ReportAgent struct {
 	// into one item (owner decision 2026-09-18, ant ADR srg-uHwCr); what a
 	// rule actually caught is 'knowns hits' on the box.
 	Knowns *KnownKnowns
+	// BudgetReached is true when the run hit the LLM prompt-token budget
+	// and finished degraded; both layouts say so under the title.
+	BudgetReached bool
+}
+
+// budgetNotice is the daily layouts' line for a run that hit the
+// prompt-token budget.
+func (r *ReportAgent) budgetNotice() string {
+	if !r.BudgetReached {
+		return ""
+	}
+	return "**LLM budget reached.** This run stopped calling the model when it spent its prompt-token budget (SYSLOG_MAX_PROMPT_TOKENS), so the analysis below is incomplete. Something unusual is likely flooding the logs or the pipeline; the run's log has the details.\n\n"
 }
 
 // ModelLabel is the attribution string for a run that may have split the
@@ -98,6 +110,7 @@ func (r *ReportAgent) Run() string {
 
 	var b strings.Builder
 	b.WriteString("# Syslog Report for " + r.reportDate() + "\n\n")
+	b.WriteString(r.budgetNotice())
 	b.WriteString("## Issues\n")
 	b.WriteString(issues + "\n")
 	b.WriteString("\n## Resolutions\n")
@@ -191,6 +204,7 @@ func (r *ReportAgent) emailBodyN(topIssues, topAnomalies int) string {
 
 	var b strings.Builder
 	b.WriteString("# Syslog digest - " + r.reportDate() + "\n\n")
+	b.WriteString(r.budgetNotice())
 	// No greeting line (owner decision 2026-08-29: cheery wears thin by the
 	// 50th email). Only the load-bearing fact survives: a truncation notice
 	// when there are more issues than the digest shows.

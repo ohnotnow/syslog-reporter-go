@@ -59,6 +59,11 @@ func runDigest(args []string) {
 		"Skip the resolution writer and anomaly explainer so the digest costs nothing")
 	noStore := fs.Bool("no-store", false,
 		"Don't file the digest in the findings library (no finding ids or mute lines in the email)")
+	defaultMaxPromptTokens, err := maxPromptTokensFromEnv()
+	if err != nil {
+		fatal("%v", err)
+	}
+	maxPromptTokens := fs.Int64("max-prompt-tokens", defaultMaxPromptTokens, maxPromptTokensUsage)
 	debug := fs.Bool("debug", false, "Print extra debug information")
 	fs.Parse(args)
 	if fs.NArg() > 0 {
@@ -71,6 +76,7 @@ func runDigest(args []string) {
 		fatal("--max-issues, --max-one-offs and --max-anomalies cannot be negative")
 	}
 	log := &logger{debugEnabled: *debug}
+	llm.SetBudget(*maxPromptTokens)
 
 	if info, err := os.Stat(*outDir); err != nil || !info.IsDir() {
 		fatal("--out-dir %s is not an existing directory", *outDir)
@@ -136,9 +142,9 @@ func runDigest(args []string) {
 	if !*noLLM {
 		log.Info("Grouping the window's daily issues by problem with %s", digestModel)
 		clusters, err = reporter.NewIssueClusterer(findings, digestModel).Run(context.Background())
-		if err != nil {
-			fatal("grouping the window's issues: %v", err)
-		}
+		// Fatal, never a silent fall-back to the old key - except a spent
+		// budget, which finishes degraded (on the old key) with a notice.
+		llmStage(log, "grouping the window's issues", err)
 	}
 	digest := reporter.BuildDigest(from, until, runs, findings, clusters)
 	log.Info("Digest %s to %s: %d daily runs, %d issue groups (%d recurring), %d anomaly groups",
@@ -168,18 +174,14 @@ func runDigest(args []string) {
 			// No context windows (the dumps are not re-read) and no host OS
 			// map: each issue's own OS field travels in its markdown.
 			resolutions, err = reporter.NewResolutionAgent(issues, nil, digestModel, nil).Run(ctx)
-			if err != nil {
-				fatal("resolving recurring issues: %v", err)
-			}
+			llmStage(log, "resolving recurring issues", err)
 		}
 		if len(anomalies) > 0 {
 			log.Info("Explaining %d recurring anomalies with %s", len(anomalies), digestModel)
 			explainer := reporter.NewAnomalyExplainer(anomalies, digestModel)
 			explainer.MaxExplain = len(anomalies)
 			explained, err = explainer.Run(ctx)
-			if err != nil {
-				fatal("explaining recurring anomalies: %v", err)
-			}
+			llmStage(log, "explaining recurring anomalies", err)
 		}
 		logTokenUsage(log, "analysis")
 	}
@@ -205,6 +207,11 @@ func runDigest(args []string) {
 			log.Warn("capturing digest findings: %v", err)
 		} else {
 			log.Info("Captured %d digest findings under %s", len(filed.Issues)+len(explained), until)
+			if llm.BudgetReached() {
+				if err := lib.MarkBudgetReached(toDate, reporter.RunKindDigest); err != nil {
+					log.Warn("flagging the digest's budget in the library: %v", err)
+				}
+			}
 		}
 	}
 
@@ -217,6 +224,14 @@ func runDigest(args []string) {
 		Model:       digestModel,
 		LLMSkipped:  *noLLM,
 		RepoURL:     selfupdate.RepoURL,
+
+		BudgetReached: llm.BudgetReached(),
+	}
+	if report.BudgetReached {
+		log.Warn("LLM prompt-token budget reached: this digest is incomplete")
+	}
+	if len(digest.BudgetDays) > 0 {
+		log.Warn("Daily runs that hit the LLM budget: %s", strings.Join(digest.BudgetDays, ", "))
 	}
 	body := report.EmailBody()
 	attachment := report.FullReport()

@@ -511,6 +511,10 @@ func runBatch(cliArgs []string) {
 	if err != nil {
 		fatal("%v", err)
 	}
+	defaultMaxPromptTokens, err := maxPromptTokensFromEnv()
+	if err != nil {
+		fatal("%v", err)
+	}
 	defaultContextLines, err := contextLinesFromEnv()
 	if err != nil {
 		fatal("%v", err)
@@ -542,6 +546,7 @@ func runBatch(cliArgs []string) {
 			"explanations) so the run costs nothing")
 	maxResolve := fs.Int("max-resolve-issues", defaultMaxResolve,
 		"Most issues handed to the resolution writer, most severe first (0 = all; default: SYSLOG_MAX_RESOLVE_ISSUES)")
+	maxPromptTokens := fs.Int64("max-prompt-tokens", defaultMaxPromptTokens, maxPromptTokensUsage)
 	contextLines := fs.Int("context-lines", defaultContextLines,
 		"Same-host log lines to show the resolution writer either side of each issue's example (0 disables; default: SYSLOG_CONTEXT_LINES)")
 	dumpFiltered := fs.Bool("dump-filtered", false,
@@ -632,6 +637,7 @@ func runBatch(cliArgs []string) {
 		dumpOnly:     *dumpFiltered,
 		contextLines: *contextLines,
 		maxResolve:   *maxResolve,
+		maxPrompt:    *maxPromptTokens,
 	})
 }
 
@@ -690,6 +696,35 @@ func maxResolveIssuesFromEnv() (int, error) {
 	return n, nil
 }
 
+// maxPromptTokensFromEnv reads SYSLOG_MAX_PROMPT_TOKENS (default
+// llm.DefaultMaxPromptTokens); 0 turns the budget off. Shared by run and
+// digest.
+func maxPromptTokensFromEnv() (int64, error) {
+	raw := getenvDefault("SYSLOG_MAX_PROMPT_TOKENS", strconv.FormatInt(llm.DefaultMaxPromptTokens, 10))
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("SYSLOG_MAX_PROMPT_TOKENS must be a whole number of tokens (0 = no budget), got %q", raw)
+	}
+	return n, nil
+}
+
+const maxPromptTokensUsage = "Most prompt tokens one run may send to the LLM; past it the run stops calling the model and finishes degraded, with a notice (0 = no budget; default: SYSLOG_MAX_PROMPT_TOKENS)"
+
+// llmStage fatals on an LLM stage's error, except a spent prompt-token
+// budget (llm.ErrBudget): that run finishes degraded and says so instead,
+// because daily-run.sh retries a failed run hourly and each retry would
+// spend the budget again.
+func llmStage(log *logger, what string, err error) {
+	if err == nil {
+		return
+	}
+	if errors.Is(err, llm.ErrBudget) {
+		log.Warn("%s: %v; finishing without it", what, err)
+		return
+	}
+	fatal("%s: %v", what, err)
+}
+
 // contextLinesFromEnv reads SYSLOG_CONTEXT_LINES (default
 // reporter.DefaultContextRadius); 0 disables the context windows.
 func contextLinesFromEnv() (int, error) {
@@ -716,14 +751,16 @@ type runConfig struct {
 	llmOn        bool
 	hostOS       map[string]string
 	dumpOnly     bool
-	contextLines int // same-host lines either side of each issue's example; 0 = none
-	maxResolve   int // most issues sent to the resolution writer; 0 = all
+	contextLines int   // same-host lines either side of each issue's example; 0 = none
+	maxResolve   int   // most issues sent to the resolution writer; 0 = all
+	maxPrompt    int64 // prompt-token budget for the run; 0 = none
 }
 
 func run(cfg runConfig) {
 	log := &logger{debugEnabled: cfg.debug}
 	llm.SetLogger(log.Warn)
 	llm.SetDebugLogger(log.Debug)
+	llm.SetBudget(cfg.maxPrompt)
 	if cfg.llmOn && !cfg.dumpOnly {
 		if w := llm.ScrubWarning(cfg.scanModel, cfg.issueModel); w != "" {
 			log.Warn("%s", w)
@@ -788,16 +825,15 @@ func run(cfg runConfig) {
 		var err error
 		detector := reporter.NewIssueDetector(filteredLines, cfg.scanModel, cfg.hostOS)
 		issues, err = detector.Run(ctx)
-		if err != nil {
-			fatal("detecting issues: %v", err)
-		}
+		llmStage(log, "detecting issues", err)
 		log.Info("Collapsed %d filtered lines to %d for the issue detector", len(filteredLines), detector.SentLines)
 		log.Info("Detected %d issues", len(issues.Issues))
 
 		log.Info("Consolidating duplicate issues")
-		issues, err = reporter.NewIssueDeduplicator(issues, cfg.scanModel).Run(ctx)
-		if err != nil {
-			fatal("consolidating issues: %v", err)
+		deduped, err := reporter.NewIssueDeduplicator(issues, cfg.scanModel).Run(ctx)
+		llmStage(log, "consolidating issues", err)
+		if err == nil {
+			issues = deduped
 		}
 		log.Info("Consolidated to %d issues", len(issues.Issues))
 		logTokenUsage(log, "initial processing")
@@ -828,9 +864,7 @@ func run(cfg runConfig) {
 		}
 		log.Info("Resolving %d issues", len(toResolve.Issues))
 		resolutions, err = reporter.NewResolutionAgent(toResolve, contexts, cfg.issueModel, cfg.hostOS).Run(ctx)
-		if err != nil {
-			fatal("resolving issues: %v", err)
-		}
+		llmStage(log, "resolving issues", err)
 		log.Debug("Generated %d resolutions", len(resolutions.Resolutions))
 	} else {
 		sent := len(reporter.CollapseRepeats(filteredLines))
@@ -911,9 +945,7 @@ func run(cfg runConfig) {
 		log.Info("Explaining anomalies")
 		var err error
 		explained, err = reporter.NewAnomalyExplainer(anomalies, cfg.issueModel).Run(ctx)
-		if err != nil {
-			fatal("explaining anomalies: %v", err)
-		}
+		llmStage(log, "explaining anomalies", err)
 		log.Debug("Explained %d anomalies", len(explained))
 	} else {
 		log.Info("--no-llm: rendering anomalies without explanations")
@@ -943,6 +975,11 @@ func run(cfg runConfig) {
 			} else {
 				log.Info("Captured %d findings for %s",
 					len(issues.Issues)+len(explained), logDate.Format("2006-01-02"))
+				if llm.BudgetReached() {
+					if err := lib.MarkBudgetReached(logDate, reporter.RunKindDaily); err != nil {
+						log.Warn("flagging the run's budget in the library: %v", err)
+					}
+				}
 			}
 			lib.Close()
 		}
@@ -963,6 +1000,10 @@ func run(cfg runConfig) {
 		RepoURL:       selfupdate.RepoURL,
 		Knowns:        knowns,
 		LogDate:       logDate,
+		BudgetReached: llm.BudgetReached(),
+	}
+	if rep.BudgetReached {
+		log.Warn("LLM prompt-token budget reached: this run's analysis is incomplete")
 	}
 	fullReport := rep.Run()
 	emailBody := rep.EmailBody()

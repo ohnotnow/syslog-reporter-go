@@ -179,7 +179,9 @@ func (a *IssueDetectorAgent) Run(ctx context.Context) (*IssueList, error) {
 		err := llm.Complete(ctx, a.Model, system, strings.Join(chunk, "\n"),
 			"IssueList", issueListSchema(), &got)
 		if err != nil {
-			return nil, err
+			// What the earlier chunks found, for a run that finishes
+			// degraded (llm.ErrBudget); every other caller treats err as fatal.
+			return &IssueList{Issues: all}, err
 		}
 		for _, issue := range got.Issues {
 			issue.ExampleLogEntry = stripRepeatTag(issue.ExampleLogEntry)
@@ -441,12 +443,13 @@ func (a *ResolutionAgent) Run(ctx context.Context) (*ResolutionList, error) {
 	}
 	system := resolutionPrompt(a.HostOS, len(a.Contexts) > 0)
 	var all ResolutionList
+	var err error
 	for _, batch := range a.batches() {
 		var got ResolutionList
-		err := llm.Complete(ctx, a.Model, system, batch.payload(),
+		err = llm.Complete(ctx, a.Model, system, batch.payload(),
 			"ResolutionList", resolutionListSchema(), &got)
 		if err != nil {
-			return nil, err
+			break // return the batches already written alongside err
 		}
 		all.Resolutions = append(all.Resolutions, got.Resolutions...)
 	}
@@ -459,7 +462,7 @@ func (a *ResolutionAgent) Run(ctx context.Context) (*ResolutionList, error) {
 		r.LookFor = strings.TrimSpace(r.LookFor)
 		trimEach(r.FixCommands)
 	}
-	return &all, nil
+	return &all, err
 }
 
 // trimEach TrimSpaces a list of LLM-supplied lines in place.
@@ -529,17 +532,18 @@ func (a *AnomalyExplainerAgent) Run(ctx context.Context) ([]*ExplainedAnomaly, e
 	system := strings.TrimSuffix(anomalyExplanationPromptRaw, "\n")
 	var top []Anomaly
 	var explanations []*AnomalyExplanation
+	var err error
 	for _, batch := range batches {
-		var got AnomalyExplanationList
-		err := llm.Complete(ctx, a.Model, system, explainerPayload(batch),
-			"AnomalyExplanationList", anomalyExplanationListSchema(), &got)
-		if err != nil {
-			return nil, err
-		}
 		top = append(top, batch...)
+		if err != nil {
+			continue // keep the rest as facts only, alongside err
+		}
+		var got AnomalyExplanationList
+		err = llm.Complete(ctx, a.Model, system, explainerPayload(batch),
+			"AnomalyExplanationList", anomalyExplanationListSchema(), &got)
 		explanations = append(explanations, got.Explanations...)
 	}
-	return mergeExplanations(top, explanations), nil
+	return mergeExplanations(top, explanations), err
 }
 
 // mergeExplanations pairs each anomaly with its explanation by

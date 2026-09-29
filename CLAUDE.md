@@ -176,6 +176,14 @@ SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.
   startup - deferred (ait srg-2KY5X.5) until the owner is present for a
   Keycloak round-trip. Risky listen/auth combos WARN at startup, never
   refuse - plain HTTP on a LAN is a supported case (owner stance).
+- `SYSLOG_MAX_PROMPT_TOKENS` / `--max-prompt-tokens` (default 2M, owner
+  decision 2026-09-29) is a per-process prompt-token budget in
+  llm.Complete, the safety net after a crash loop sent 25M tokens
+  unnoticed. Hitting it is the ONE LLM failure that does not fail the
+  run: stages finish degraded (llm.ErrBudget via llmStage in main.go),
+  because daily-run.sh retries failed runs hourly and each retry would
+  spend it again. The run is flagged in the library (migration 6) and
+  the weekly digest puts a notice straight under its title.
 - `--dump-filtered` prints the post-filter lines and exits - the
   documented filter-tuning aid (owner decision 2026-08-28).
 - Known-knowns live in the `known_knowns` table (migration 5, ant ADR

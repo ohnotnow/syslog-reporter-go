@@ -599,6 +599,16 @@ type RunSummary struct {
 	RawLines      *int   `json:"raw_lines"`
 	FilteredLines *int   `json:"filtered_lines"`
 	Findings      int    `json:"findings"`
+	BudgetReached bool   `json:"budget_reached"` // the LLM budget ran out; analysis incomplete
+}
+
+// MarkBudgetReached flags the run of that date and kind as having hit the
+// LLM prompt-token budget. Call it after CaptureRun, which replaces the
+// day's run (and so clears any earlier flag) on a re-run.
+func (s *LibraryStore) MarkBudgetReached(logDate time.Time, kind string) error {
+	_, err := s.db.Exec("UPDATE runs SET budget_reached = 1 WHERE log_date = ? AND kind = ?",
+		isoDate(logDate), kind)
+	return err
 }
 
 // ListRuns returns the runs whose log_date lies in [from, to] (ISO dates,
@@ -616,7 +626,7 @@ func (s *LibraryStore) ListRuns(from, to string) ([]*RunSummary, error) {
 	}
 	rows, err := s.db.Query(
 		"SELECT r.id, r.log_date, r.kind, COALESCE(r.model, ''), r.raw_lines, r.filtered_lines, "+
-			"(SELECT COUNT(*) FROM findings f WHERE f.run_id = r.id) "+
+			"(SELECT COUNT(*) FROM findings f WHERE f.run_id = r.id), r.budget_reached "+
 			"FROM runs r WHERE "+strings.Join(where, " AND ")+" ORDER BY r.log_date, r.id",
 		args...)
 	if err != nil {
@@ -627,7 +637,7 @@ func (s *LibraryStore) ListRuns(from, to string) ([]*RunSummary, error) {
 	for rows.Next() {
 		rs := &RunSummary{}
 		var raw, filtered sql.NullInt64
-		if err := rows.Scan(&rs.ID, &rs.LogDate, &rs.Kind, &rs.Model, &raw, &filtered, &rs.Findings); err != nil {
+		if err := rows.Scan(&rs.ID, &rs.LogDate, &rs.Kind, &rs.Model, &raw, &filtered, &rs.Findings, &rs.BudgetReached); err != nil {
 			return nil, err
 		}
 		if raw.Valid {

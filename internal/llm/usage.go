@@ -35,6 +35,7 @@ func addUsage(model string, prompt, completion int64) {
 	u.CompletionTokens += completion
 	usageByModel[model] = u
 	usageMu.Unlock()
+	spendBudget(prompt)
 }
 
 // TotalUsage returns the tokens accumulated across every model since

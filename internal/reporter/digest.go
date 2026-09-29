@@ -47,6 +47,7 @@ type Digest struct {
 	From, To    string   // ISO, inclusive
 	RunDays     []string // window dates with a daily run, ascending
 	MissingDays []string // window dates with no daily run, ascending
+	BudgetDays  []string // daily runs that hit the LLM prompt-token budget, ascending
 	Issues      []*IssueGroup
 	Anomalies   []*AnomalyGroup
 }
@@ -61,8 +62,12 @@ func BuildDigest(from, to string, runs []*RunSummary, findings []*FindingDetail,
 	for _, r := range runs {
 		if r.Kind == RunKindDaily {
 			ran[r.LogDate] = true
+			if r.BudgetReached {
+				d.BudgetDays = appendDistinct(d.BudgetDays, r.LogDate)
+			}
 		}
 	}
+	sort.Strings(d.BudgetDays)
 	for _, day := range windowDays(from, to) {
 		if ran[day] {
 			d.RunDays = append(d.RunDays, day)

@@ -724,6 +724,21 @@ Read from the environment or a `.env` beside the working directory
 - `SYSLOG_MAX_RESOLVE_ISSUES` the most issues one run hands to the
   resolution writer, most severe first (default 60; 0 resolves every
   issue); `--max-resolve-issues` overrides it per run
+- `SYSLOG_MAX_PROMPT_TOKENS` the prompt-token budget for one run or one
+  digest (default 2,000,000, `llm.DefaultMaxPromptTokens`; 0 = none);
+  `--max-prompt-tokens` on `run` and `digest` overrides it. Checked in
+  `llm.Complete` before every request against the process's spend (never
+  reset by the per-stage usage logging), so every stage is covered and a
+  run overshoots by at most one request. When it is spent, Complete
+  returns `llm.ErrBudget` and the stages finish degraded rather than
+  failing (daily-run.sh retries a failed run hourly, which would spend
+  the budget again): the detector keeps what earlier chunks found, the
+  dedupe is skipped, the resolutions and explanations keep what earlier
+  batches wrote, and the digest groups on the old service + host set
+  key. The run warns in its log, both report layouts carry a notice
+  under the title, the library flags the run (`runs.budget_reached`,
+  migration 6), and the weekly digest names those days in a notice
+  straight under its title. Any other LLM error is still fatal.
 - `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` for whichever provider is used
 - `AZURE_OPENAI_ENDPOINT` + `AZURE_OPENAI_API_KEY` for `azure/` models
   (the resource's v1 endpoint; see the provider routing section)

@@ -915,3 +915,37 @@ func TestDailyFindingsWindow(t *testing.T) {
 		t.Errorf("empty window = %v, %v", empty, err)
 	}
 }
+
+func TestMarkBudgetReached(t *testing.T) {
+	lib := newTestLibrary(t)
+	day := time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC)
+	for _, kind := range []string{RunKindDaily, RunKindDigest} {
+		if err := CaptureRun(lib, day, kind, "m", 10, 5, &IssueList{}, &ResolutionList{}, nil); err != nil {
+			t.Fatalf("capture %s: %v", kind, err)
+		}
+	}
+	if err := lib.MarkBudgetReached(day, RunKindDaily); err != nil {
+		t.Fatalf("MarkBudgetReached: %v", err)
+	}
+	runs, err := lib.ListRuns("2026-09-28", "2026-09-28")
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	got := map[string]bool{}
+	for _, r := range runs {
+		got[r.Kind] = r.BudgetReached
+	}
+	if !got[RunKindDaily] || got[RunKindDigest] {
+		t.Errorf("budget flags = %v, want the daily run only", got)
+	}
+	// A re-run replaces the day's run, and with it the flag.
+	if err := CaptureRun(lib, day, RunKindDaily, "m", 10, 5, &IssueList{}, &ResolutionList{}, nil); err != nil {
+		t.Fatalf("re-capture: %v", err)
+	}
+	runs, _ = lib.ListRuns("2026-09-28", "2026-09-28")
+	for _, r := range runs {
+		if r.BudgetReached {
+			t.Errorf("%s run still flagged after a re-run", r.Kind)
+		}
+	}
+}

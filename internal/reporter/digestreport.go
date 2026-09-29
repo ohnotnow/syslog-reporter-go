@@ -26,6 +26,9 @@ type DigestReport struct {
 	// LLMSkipped means no footer.
 	Model      string
 	LLMSkipped bool
+	// BudgetReached is true when writing this digest hit the LLM
+	// prompt-token budget; Digest.BudgetDays are the daily runs that did.
+	BudgetReached bool
 	// RepoURL is where the README lives, for the mute-line footer; empty
 	// suppresses it.
 	RepoURL string
@@ -43,6 +46,25 @@ func DigestPeriodLabel(from, to string) string {
 
 func (r *DigestReport) title() string {
 	return "# Syslog weekly digest - " + DigestPeriodLabel(r.Digest.From, r.Digest.To) + "\n\n"
+}
+
+// budgetNotice sits straight under the title of both layouts: a spent
+// prompt-token budget means something unusual happened (a flood nothing
+// else caught, or a fault), so it must not be missed (owner 2026-09-29).
+func (r *DigestReport) budgetNotice() string {
+	var b strings.Builder
+	if days := r.Digest.BudgetDays; len(days) > 0 {
+		labels := make([]string, len(days))
+		for i, day := range days {
+			labels[i] = DigestDay(day)
+		}
+		fmt.Fprintf(&b, "**LLM budget reached on %s.** The run stopped calling the model when it spent its prompt-token budget (SYSLOG_MAX_PROMPT_TOKENS), so that analysis is incomplete. Something unusual is likely flooding the logs or the pipeline; the run's log on the reporting box has the details.\n\n",
+			strings.Join(labels, ", "))
+	}
+	if r.BudgetReached {
+		b.WriteString("**LLM budget reached while writing this digest.** Its grouping or advice is incomplete; the digest's log on the reporting box has the details.\n\n")
+	}
+	return b.String()
 }
 
 // coverage is the factual line about the window: how many daily runs it
@@ -85,6 +107,7 @@ func (r *DigestReport) EmailBody() string {
 
 	var b strings.Builder
 	b.WriteString(r.title())
+	b.WriteString(r.budgetNotice())
 	b.WriteString(r.coverage())
 	b.WriteString(r.tally())
 	if allGroups > shownGroups {
@@ -200,6 +223,7 @@ func (r *DigestReport) FullReport() string {
 
 	var b strings.Builder
 	b.WriteString(r.title())
+	b.WriteString(r.budgetNotice())
 	b.WriteString(r.coverage())
 	b.WriteString(r.tally())
 	if !r.LLMSkipped && (len(r.Resolutions.resolutionsOrNil()) > 0 || len(r.Anomalies) > 0) {

@@ -94,6 +94,7 @@ var migrations = []migration{
 	{3, "non-reusable finding and user ids", applyNonReusableIDs},
 	{4, "run kind", applyRunKind},
 	{5, "known knowns", applyKnownKnowns},
+	{6, "run budget reached", applyRunBudgetReached},
 }
 
 const baselineSchema = `
@@ -372,5 +373,18 @@ CREATE INDEX IF NOT EXISTS idx_known_knowns_finding ON known_knowns (finding_id)
 
 func applyKnownKnowns(tx *sql.Tx) error {
 	_, err := tx.Exec(knownKnownsSchema)
+	return err
+}
+
+// Migration 6: a run that hit the prompt-token budget (llm.ErrBudget,
+// SYSLOG_MAX_PROMPT_TOKENS) finishes degraded rather than failing, so the
+// hourly cron does not spend the budget again; the flag is how the weekly
+// digest finds out.
+func applyRunBudgetReached(tx *sql.Tx) error {
+	have, err := tableColumns(tx, "runs")
+	if err != nil || have["budget_reached"] {
+		return err
+	}
+	_, err = tx.Exec("ALTER TABLE runs ADD COLUMN budget_reached INTEGER NOT NULL DEFAULT 0")
 	return err
 }

@@ -53,6 +53,13 @@ OPENAI_API_KEY=sk-...
 # bounds a storm day; issues past the cap still appear in the attachment
 # and the findings library, just without a resolution.
 #SYSLOG_MAX_RESOLVE_ISSUES=60
+# Optional: the most prompt tokens one run (or one digest) may send to the
+# LLM (default 2000000; 0 = no budget). A safety net for a flood nothing
+# else catches: past it the run stops calling the model, finishes with
+# what it has, and says so in its report, the library and the weekly
+# digest. It does not fail the run, so the hourly retries cannot spend it
+# again. A normal day uses roughly 150-300K.
+#SYSLOG_MAX_PROMPT_TOKENS=2000000
 # Scrubbing of what leaves the box for the LLM provider. With SYSLOG_SCRUB
 # on, every email address becomes a numbered token, your domains and
 # public IP prefixes become the fake ones listed, and the reply is swapped
