@@ -168,7 +168,7 @@ func writeDigestIssue(b *strings.Builder, n int, i *Issue, resolutions map[strin
 	b.WriteString("**" + i.TimestampFrequency + "**\n\n")
 	b.WriteString(i.Description + "\n\n")
 	if i.ExampleLogEntry != "" {
-		b.WriteString("**Example:**\n\n```\n" + i.ExampleLogEntry + "\n```\n\n")
+		b.WriteString("**Example:**\n\n```\n" + MaskSecrets(i.ExampleLogEntry) + "\n```\n\n")
 	}
 	if res, ok := resolutions[i.Issue]; ok {
 		writeResolutionBrief(b, res)

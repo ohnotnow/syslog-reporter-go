@@ -225,7 +225,7 @@ func (r *ReportAgent) emailBodyN(topIssues, topAnomalies int) string {
 		// have seen it by then. Outside the resolution branch so a --no-llm
 		// run gets it too.
 		if i.ExampleLogEntry != "" {
-			b.WriteString("**Example:**\n\n```\n" + i.ExampleLogEntry + "\n```\n\n")
+			b.WriteString("**Example:**\n\n```\n" + MaskSecrets(i.ExampleLogEntry) + "\n```\n\n")
 		}
 		if res, ok := resolutions[i.Issue]; ok {
 			writeResolutionBrief(&b, res)

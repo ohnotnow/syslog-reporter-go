@@ -66,7 +66,7 @@ func (i *Issue) ToMarkdown() string {
 			"%s",
 		i.Issue, i.Severity, i.AffectedService, i.TimestampFrequency, findingTag(i.ID),
 		i.Description, i.HostsSummary(), osLine, i.PotentialImpact,
-		i.RecommendedAction, i.ExampleLogEntry, muteParagraph(i.ID))
+		i.RecommendedAction, MaskSecrets(i.ExampleLogEntry), muteParagraph(i.ID))
 }
 
 // findingTag is the " · **Finding:** #1234" suffix for a captured finding,
@@ -192,7 +192,7 @@ func (e *ExplainedAnomaly) ToMarkdown() string {
 	}
 	example := ""
 	if e.ExampleLine != "" {
-		example = fmt.Sprintf("**Example:** `%s`\n\n", e.ExampleLine)
+		example = fmt.Sprintf("**Example:** `%s`\n\n", MaskSecrets(e.ExampleLine))
 	}
 	return fmt.Sprintf(
 		"### %s - %s%s\n"+

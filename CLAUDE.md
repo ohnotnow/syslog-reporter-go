@@ -45,6 +45,13 @@ internal/reporter/
   noiserules.go             the bundled drop rules: embedded noise-rules.txt and
                             its parser; 'knowns seed' loads them into known_knowns
   filter.go                 LogFilter (deterministic noise removal)
+  collapse.go               CollapseRepeats: repeats of host + program +
+                            masked message become one "[xN first-last]"
+                            example, for the issue detector only (a crash
+                            loop once cost 25M tokens)
+  secrets.go                MaskSecrets: <redacted> for key/token/password
+                            values in the example lines the emails quote
+                            (library, web UI and API keep the raw line)
   knowns.go                 known-knowns suppression semantics
   knownsstore.go            known_knowns table (migration 5): add, list,
                             delete, load; the only store of suppressions
