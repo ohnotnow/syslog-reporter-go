@@ -156,12 +156,15 @@ const DetectorChunkSize = 250
 // IssueDetectorAgent finds issues in the filtered log, DetectorChunkSize
 // lines at a time, after CollapseRepeats has folded each repeated message into one tagged
 // example. HostOS is the per-host OS inventory when the log source knows it
-// (nil otherwise); the model copies each issue's OS from it. SentLines is
-// how many lines Run sent after collapsing.
+// (nil otherwise); the model copies each issue's OS from it. Spread is
+// LogFilter.Spread, when the caller has it: lines whose message came from
+// several hosts are tagged with the count. SentLines is how many lines Run
+// sent after collapsing.
 type IssueDetectorAgent struct {
 	Lines     []string
 	Model     string
 	HostOS    map[string]string
+	Spread    map[string]int
 	SentLines int
 }
 
@@ -171,7 +174,7 @@ func NewIssueDetector(lines []string, model string, hostOS map[string]string) *I
 
 func (a *IssueDetectorAgent) Run(ctx context.Context) (*IssueList, error) {
 	system := issueDetectionPrompt(a.HostOS)
-	lines := CollapseRepeats(a.Lines)
+	lines := tagSpread(CollapseRepeats(a.Lines), a.Spread)
 	a.SentLines = len(lines)
 	var all []*Issue
 	for _, chunk := range chunkLines(lines, DetectorChunkSize) {

@@ -16,9 +16,29 @@ import (
 )
 
 // repeatTag prefixes a collapsed line: "[x364112 00:00:03-23:59:58] ".
-// The detection prompt explains it; stripRepeatTag removes it from the
-// example the model copies back, so the example is a real log line again.
-var repeatTag = regexp.MustCompile(`^\[x\d+ [^\]]*\] `)
+// A line whose message came from several hosts also carries a spread tag,
+// "[on 1012 hosts] ", in front of it (tagSpread). The detection prompt
+// explains both; stripRepeatTag removes them from the example the model
+// copies back, so the example is a real log line again.
+var repeatTag = regexp.MustCompile(`^(\[(x\d+ [^\]]*|on \d+ hosts)\] )+`)
+
+// tagSpread prefixes each line whose message spread says came from more
+// than one host with "[on N hosts] ". Lines already carry any repeat tag;
+// the key is taken from the line after it, as the dedupe took it.
+func tagSpread(lines []string, spread map[string]int) []string {
+	if len(spread) == 0 {
+		return lines
+	}
+	out := make([]string, len(lines))
+	for i, line := range lines {
+		key, _ := dedupeKey(repeatTag.ReplaceAllString(line, ""))
+		if n := spread[key]; n > 1 {
+			line = fmt.Sprintf("[on %d hosts] %s", n, line)
+		}
+		out[i] = line
+	}
+	return out
+}
 
 // CollapseRepeats returns lines with every repeat of a host + program +
 // masked message folded into its first occurrence, tagged with the count

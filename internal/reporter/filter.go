@@ -56,6 +56,9 @@ var (
 type LogFilter struct {
 	lines  []string
 	knowns *KnownKnowns
+	// spread is, per dedupe key, how many distinct hosts logged it before
+	// the dedupe kept only three lines (see Spread).
+	spread map[string]int
 	// OnKnownDrop, when set, sees every line a known-known drops and the
 	// entry that caught it. The run leaves it nil; 'knowns hits' uses it.
 	OnKnownDrop func(e *KnownEntry, line string)
@@ -129,24 +132,49 @@ func (f *LogFilter) normaliseLines(lines []string) []string {
 }
 
 func (f *LogFilter) removeDuplicates(lines []string) []string {
-	// Ignoring the syslog timestamp, keep at most 3 occurrences of each
-	// unique message (pids and kernel timestamps stripped so otherwise
-	// identical messages count together).
+	// Ignoring the syslog timestamp and host, keep at most 3 occurrences of
+	// each unique message (pids and kernel timestamps stripped so otherwise
+	// identical messages count together). Host is left out on purpose: a
+	// bad config push that makes every host log the same error must not
+	// send a thousand lines to the model. How many hosts logged it is kept
+	// instead, for the issue detector (Spread).
 	messageCounts := map[string]int{}
+	hosts := map[string]map[string]bool{}
 	result := make([]string, 0, len(lines))
 	for _, line := range lines {
-		parts := splitWS(line, 4)
-		var message string
-		if len(parts) >= 5 {
-			message = parts[4]
-		} else {
-			message = strings.TrimSpace(line)
+		key, host := dedupeKey(line)
+		if host != "" {
+			if hosts[key] == nil {
+				hosts[key] = map[string]bool{}
+			}
+			hosts[key][host] = true
 		}
-		normalisedMessage := pidBracketRe.ReplaceAllString(message, "")
-		if messageCounts[normalisedMessage] < 3 {
-			messageCounts[normalisedMessage]++
+		if messageCounts[key] < 3 {
+			messageCounts[key]++
 			result = append(result, line)
 		}
 	}
+	f.spread = make(map[string]int, len(hosts))
+	for key, set := range hosts {
+		f.spread[key] = len(set)
+	}
 	return result
+}
+
+// dedupeKey is the message removeDuplicates counts by (program and
+// message, pid stripped) and the line's host, "" when it has none.
+func dedupeKey(line string) (key, host string) {
+	parts := splitWS(line, 4)
+	if len(parts) < 5 {
+		return pidBracketRe.ReplaceAllString(strings.TrimSpace(line), ""), ""
+	}
+	return pidBracketRe.ReplaceAllString(parts[4], ""), parts[3]
+}
+
+// Spread reports, after Run, how many distinct hosts logged each message
+// the dedupe capped. The issue detector tags lines seen on more than one
+// host with it, so three examples from one host still read as estate-wide
+// when they are (ait srg-6Vsgx.6).
+func (f *LogFilter) Spread() map[string]int {
+	return f.spread
 }

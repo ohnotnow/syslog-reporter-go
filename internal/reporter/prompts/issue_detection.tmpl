@@ -21,7 +21,11 @@ If a chunk of log has nothing worth an admin's time, return an empty issues list
 
 ## Repeated lines
 
-Repeats are folded before you see them. A line starting with a tag such as "[x364112 00:00:03-23:59:58]" stands for 364,112 lines from that host and program with the same message shape, the first at 00:00:03 and the last at 23:59:58; the rest of the line is the first of them, verbatim. Use the count and times for timestamp_frequency and to judge scale (a message repeated hundreds of thousands of times is usually a loop worth reporting). Never copy the tag into example_log_entry: copy only the log line after it.
+Repeats are folded before you see them. A line starting with a tag such as "[x364112 00:00:03-23:59:58]" stands for 364,112 lines from that host and program with the same message shape, the first at 00:00:03 and the last at 23:59:58; the rest of the line is the first of them, verbatim. Use the count and times for timestamp_frequency and to judge scale (a message repeated hundreds of thousands of times is usually a loop worth reporting).
+
+Identical messages from many hosts are also cut down to a few examples. A line starting with a tag such as "[on 1012 hosts]" means that message (pids aside) was logged by 1,012 different hosts, of which you see only these examples. Treat it as affecting all of them: say how many hosts in the issue and weigh severity by it (the same error on every host at once often means a bad configuration or package push), while affected_host lists only the hosts you can see. A line can carry both tags.
+
+Never copy either tag into example_log_entry: copy only the log line after them.
 {{if .HostOS}}
 ## Known host operating systems
 

@@ -115,3 +115,48 @@ func TestProgramOnlyKnownEntryDropsLinesThroughTheFilter(t *testing.T) {
 		t.Errorf("hits = %d, want 1", entry.Hits)
 	}
 }
+
+// The dedupe cap is per message, not per host, on purpose: a bad push that
+// makes every host log the same error must not send every host's line. But
+// the model must still learn how far it spread (ait srg-6Vsgx.6): Spread
+// counts the distinct hosts, and the detector's input is tagged with it.
+func TestDedupeKeepsTheCapButCountsTheHosts(t *testing.T) {
+	var lines []string
+	for _, h := range []string{"alpha", "alpha", "alpha", "beta", "gamma"} {
+		lines = append(lines, "Sep 28 10:00:00 "+h+".example.test puppet-agent[42]: Could not parse /etd/config.json")
+	}
+	lines = append(lines,
+		"Sep 28 10:00:01 alpha.example.test cron[7]: job failed",
+		"Sep 28 10:00:02 alpha.example.test cron[8]: job failed")
+	f := NewLogFilter(lines, nil)
+	kept := f.Run()
+	puppet := 0
+	for _, l := range kept {
+		if strings.Contains(l, "puppet-agent") {
+			puppet++
+		}
+	}
+	if puppet != 3 {
+		t.Errorf("kept %d puppet lines, want the cap of 3", puppet)
+	}
+
+	tagged := tagSpread(CollapseRepeats(kept), f.Spread())
+	var sawPuppet, sawCron bool
+	for _, l := range tagged {
+		switch {
+		case strings.Contains(l, "puppet-agent"):
+			sawPuppet = true
+			if !strings.HasPrefix(l, "[on 3 hosts] ") {
+				t.Errorf("puppet line not tagged with its spread: %q", l)
+			}
+		case strings.Contains(l, "cron"):
+			sawCron = true
+			if strings.HasPrefix(l, "[on ") {
+				t.Errorf("single-host message tagged: %q", l)
+			}
+		}
+	}
+	if !sawPuppet || !sawCron {
+		t.Fatalf("lost a message: %q", tagged)
+	}
+}

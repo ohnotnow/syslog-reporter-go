@@ -70,7 +70,8 @@ func TestCollapseRepeatsKeepsDistinctShapesApart(t *testing.T) {
 
 func TestStripRepeatTag(t *testing.T) {
 	line := "Sep 28 00:00:00 web01 node_exporter[1000]: bind: address already in use"
-	for _, in := range []string{line, "[x500 00:00:00-00:08:19] " + line, "  [x2 01:00:00-01:00:04] " + line + "\n"} {
+	for _, in := range []string{line, "[x500 00:00:00-00:08:19] " + line, "  [x2 01:00:00-01:00:04] " + line + "\n",
+		"[on 12 hosts] " + line, "[on 12 hosts] [x2 01:00:00-01:00:04] " + line} {
 		if got := stripRepeatTag(in); got != line {
 			t.Errorf("stripRepeatTag(%q) = %q, want %q", in, got, line)
 		}

@@ -135,7 +135,13 @@ the high-volume programs the filter removes. Everything else runs on the
 filtered log. The filter is three passes: known-knowns (every row of the
 `known_knowns` table, which since ant ADR srg-uHwCr includes the bundled
 noise rules that used to be compiled in), the normalise rules (rewrite a
-line to a canonical form so variants dedupe), and the dedupe cap.
+line to a canonical form so variants dedupe), and the dedupe cap: at
+most three lines per program + message (pids stripped), whatever the
+host, so a bad push that makes every host log the same error sends three
+examples, not a thousand. The filter counts the distinct hosts behind
+each capped message, and the issue detector's input tags such lines
+`[on N hosts]` (alongside the collapse step's `[xN first-last]`) so the
+model still sees how far it spread.
 
 Operator-acknowledged "known knowns" (the `known_knowns` table in the
 shared database, migration 5; managed with the `knowns` command on the box

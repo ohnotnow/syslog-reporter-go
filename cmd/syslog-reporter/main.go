@@ -822,7 +822,8 @@ func run(cfg runConfig) {
 	}
 
 	log.Info("Filtering log file")
-	filteredLines := reporter.NewLogFilter(cfg.lines, knowns).Run()
+	logFilter := reporter.NewLogFilter(cfg.lines, knowns)
+	filteredLines := logFilter.Run()
 	log.Debug("Filtered log file length: %d", len(filteredLines))
 
 	if cfg.dumpOnly {
@@ -856,6 +857,7 @@ func run(cfg runConfig) {
 		log.Info("Detecting issues")
 		var err error
 		detector := reporter.NewIssueDetector(filteredLines, cfg.scanModel, cfg.hostOS)
+		detector.Spread = logFilter.Spread()
 		issues, err = detector.Run(ctx)
 		llmStage(log, "detecting issues", err)
 		log.Info("Collapsed %d filtered lines to %d for the issue detector", len(filteredLines), detector.SentLines)
