@@ -95,6 +95,7 @@ var migrations = []migration{
 	{4, "run kind", applyRunKind},
 	{5, "known knowns", applyKnownKnowns},
 	{6, "run budget reached", applyRunBudgetReached},
+	{7, "llm spend per day", applyLLMSpend},
 }
 
 const baselineSchema = `
@@ -386,5 +387,18 @@ func applyRunBudgetReached(tx *sql.Tx) error {
 		return err
 	}
 	_, err = tx.Exec("ALTER TABLE runs ADD COLUMN budget_reached INTEGER NOT NULL DEFAULT 0")
+	return err
+}
+
+// Migration 7 (ait srg-ZqQMU): the prompt-token
+// budget is per calendar day, so the spend has to outlive the process. One
+// row per local calendar day on the box's clock (not the slice date: three
+// by-hand re-runs of old days on a Tuesday are all Tuesday's money); run
+// and digest share it.
+func applyLLMSpend(tx *sql.Tx) error {
+	_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS llm_spend (
+    day           TEXT    PRIMARY KEY,   -- local 'YYYY-MM-DD' the tokens were spent on
+    prompt_tokens INTEGER NOT NULL
+)`)
 	return err
 }

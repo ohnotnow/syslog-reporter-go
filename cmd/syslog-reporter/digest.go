@@ -76,7 +76,7 @@ func runDigest(args []string) {
 		fatal("--max-issues, --max-one-offs and --max-anomalies cannot be negative")
 	}
 	log := &logger{debugEnabled: *debug}
-	llm.SetBudget(*maxPromptTokens)
+	llm.SetBudget(*maxPromptTokens, 0, nil)
 
 	if info, err := os.Stat(*outDir); err != nil || !info.IsDir() {
 		fatal("--out-dir %s is not an existing directory", *outDir)
@@ -127,6 +127,11 @@ func runDigest(args []string) {
 		fatal("opening findings library %s: %v", *dbPath, err)
 	}
 	defer lib.Close()
+	if !*noLLM {
+		if err := startBudget(log, lib, *maxPromptTokens); err != nil {
+			fatal("%v", err)
+		}
+	}
 	runs, err := lib.ListRuns(from, until)
 	if err != nil {
 		fatal("listing runs: %v", err)

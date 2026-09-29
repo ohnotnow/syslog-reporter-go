@@ -86,6 +86,24 @@ The store must already exist (a report run creates it); --db and
 SYSLOG_DB_PATH name it as in the other commands.
 `
 
+const budgetHelp = `Show or reset today's LLM prompt-token spend.
+
+usage: syslog-reporter budget [reset] [--db <path>]
+
+  (no argument)   today's spend against the daily budget
+  reset           forget today's spend, so the next run gets a fresh
+                  budget (other days are untouched)
+
+The budget (SYSLOG_MAX_PROMPT_TOKENS, default 2,000,000; 0 = none) is per
+calendar day on this box's clock, shared by every run and digest that
+day, and survives the hourly cron retries. Reset it when you are
+deliberately spending more, e.g. experimenting with other servers or
+dumps; a scratch --db keeps its own tally anyway.
+
+The store must already exist (a report run creates it); --db and
+SYSLOG_DB_PATH name it as in the other commands.
+`
+
 const tokenHelp = `Manage bearer tokens for the sysadmin API served by serve mode.
 
 usage: syslog-reporter token <create|list|revoke> [flags]

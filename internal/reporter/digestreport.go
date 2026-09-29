@@ -58,7 +58,7 @@ func (r *DigestReport) budgetNotice() string {
 		for i, day := range days {
 			labels[i] = DigestDay(day)
 		}
-		fmt.Fprintf(&b, "**LLM budget reached on %s.** The run stopped calling the model when it spent its prompt-token budget (SYSLOG_MAX_PROMPT_TOKENS), so that analysis is incomplete. Something unusual is likely flooding the logs or the pipeline; the run's log on the reporting box has the details.\n\n",
+		fmt.Fprintf(&b, "**LLM budget reached on %s.** The run stopped calling the model when the day's prompt-token budget (SYSLOG_MAX_PROMPT_TOKENS) was spent, so that analysis is incomplete. Something unusual is likely flooding the logs or the pipeline; the run's log on the reporting box has the details.\n\n",
 			strings.Join(labels, ", "))
 	}
 	if r.BudgetReached {

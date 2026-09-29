@@ -737,15 +737,21 @@ Read from the environment or a `.env` beside the working directory
 - `SYSLOG_MAX_RESOLVE_ISSUES` the most issues one run hands to the
   resolution writer, most severe first (default 60; 0 resolves every
   issue); `--max-resolve-issues` overrides it per run
-- `SYSLOG_MAX_PROMPT_TOKENS` the prompt-token budget for one run or one
-  digest (default 2,000,000, `llm.DefaultMaxPromptTokens`; 0 = none);
-  `--max-prompt-tokens` on `run` and `digest` overrides it. Checked in
-  `llm.Complete` before every request against the process's spend (never
-  reset by the per-stage usage logging), so every stage is covered and a
-  run overshoots by at most one request. When it is spent, Complete
-  returns `llm.ErrBudget` and the stages finish degraded rather than
-  failing (daily-run.sh retries a failed run hourly, which would spend
-  the budget again): the detector keeps what earlier chunks found, the
+- `SYSLOG_MAX_PROMPT_TOKENS` the prompt-token budget per calendar day
+  on the box's clock, shared by every run and digest that day (default
+  2,000,000, `llm.DefaultMaxPromptTokens`; 0 = none);
+  `--max-prompt-tokens` on `run` and `digest` overrides it. The day's
+  spend lives in the `llm_spend` table (migration 7): each run or digest
+  starts from it and adds every successful request's prompt tokens as it
+  goes, so the hourly retries of a run that spent and then failed (rate
+  limits, SMTP) cannot each spend a fresh budget. `syslog-reporter
+  budget` shows today's spend and `budget reset` clears it, for
+  deliberate experiments. Checked in `llm.Complete` before every request
+  (never reset by the per-stage usage logging), so every stage is
+  covered and a day overshoots by at most one request. When it is spent,
+  Complete returns `llm.ErrBudget` and the stages finish degraded rather
+  than failing (daily-run.sh would otherwise retry hourly, only to be
+  refused again): the detector keeps what earlier chunks found, the
   dedupe is skipped, the resolutions and explanations keep what earlier
   batches wrote, and the digest groups on the old service + host set
   key. The run warns in its log, both report layouts carry a notice

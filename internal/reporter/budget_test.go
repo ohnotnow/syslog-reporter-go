@@ -80,8 +80,8 @@ func TestAgentsReturnPartialResultsOnBudget(t *testing.T) {
 	t.Setenv("OPENAI_BASE_URL", server.URL+"/v1")
 	t.Setenv("OPENAI_API_KEY", "test-key")
 	t.Setenv("SYSLOG_REASONING_EFFORT", "")
-	llm.SetBudget(5)
-	t.Cleanup(func() { llm.SetBudget(0) })
+	llm.SetBudget(5, 0, nil)
+	t.Cleanup(func() { llm.SetBudget(0, 0, nil) })
 
 	// Two chunks of distinct lines: the second is refused.
 	var lines []string

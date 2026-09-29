@@ -708,12 +708,33 @@ func maxPromptTokensFromEnv() (int64, error) {
 	return n, nil
 }
 
-const maxPromptTokensUsage = "Most prompt tokens one run may send to the LLM; past it the run stops calling the model and finishes degraded, with a notice (0 = no budget; default: SYSLOG_MAX_PROMPT_TOKENS)"
+const maxPromptTokensUsage = "Most prompt tokens the LLM may be sent per calendar day, shared by every run and digest that day; past it a run stops calling the model and finishes degraded, with a notice (0 = no budget; default: SYSLOG_MAX_PROMPT_TOKENS)"
+
+// startBudget sets the day's prompt-token budget from what lib says today
+// already cost, and records each request's spend back to it, so the hourly
+// retries of a failed run share one daily budget instead of each starting
+// afresh (ait srg-ZqQMU). A failed write is logged, not fatal: this
+// process still counts the tokens in memory.
+func startBudget(log *logger, lib *reporter.LibraryStore, limit int64) error {
+	spent, err := lib.PromptTokensSpent(time.Now())
+	if err != nil {
+		return fmt.Errorf("reading today's LLM spend: %w", err)
+	}
+	if limit > 0 {
+		log.Info("LLM budget: %d of %d prompt tokens already spent today", spent, limit)
+	}
+	llm.SetBudget(limit, spent, func(prompt int64) {
+		if err := lib.AddPromptTokens(time.Now(), prompt); err != nil {
+			log.Warn("recording LLM spend: %v", err)
+		}
+	})
+	return nil
+}
 
 // llmStage fatals on an LLM stage's error, except a spent prompt-token
 // budget (llm.ErrBudget): that run finishes degraded and says so instead,
-// because daily-run.sh retries a failed run hourly and each retry would
-// spend the budget again.
+// because daily-run.sh retries a failed run hourly and a retry could only
+// be refused again by the same spent day.
 func llmStage(log *logger, what string, err error) {
 	if err == nil {
 		return
@@ -753,14 +774,14 @@ type runConfig struct {
 	dumpOnly     bool
 	contextLines int   // same-host lines either side of each issue's example; 0 = none
 	maxResolve   int   // most issues sent to the resolution writer; 0 = all
-	maxPrompt    int64 // prompt-token budget for the run; 0 = none
+	maxPrompt    int64 // prompt-token budget for the day; 0 = none
 }
 
 func run(cfg runConfig) {
 	log := &logger{debugEnabled: cfg.debug}
 	llm.SetLogger(log.Warn)
 	llm.SetDebugLogger(log.Debug)
-	llm.SetBudget(cfg.maxPrompt)
+	llm.SetBudget(cfg.maxPrompt, 0, nil)
 	if cfg.llmOn && !cfg.dumpOnly {
 		if w := llm.ScrubWarning(cfg.scanModel, cfg.issueModel); w != "" {
 			log.Warn("%s", w)
@@ -814,6 +835,17 @@ func run(cfg runConfig) {
 		}
 		out.Flush()
 		return
+	}
+
+	if cfg.llmOn {
+		spendLib, err := reporter.OpenLibraryStore(cfg.dbPath)
+		if err != nil {
+			fatal("opening %s for the LLM budget: %v", cfg.dbPath, err)
+		}
+		defer spendLib.Close()
+		if err := startBudget(log, spendLib, cfg.maxPrompt); err != nil {
+			fatal("%v", err)
+		}
 	}
 
 	ctx := context.Background()

@@ -29,7 +29,8 @@ as unknown.
 ```
 cmd/syslog-reporter/        CLI entry point; explicit command dispatch (run,
                             eval, serve, user, token, findings,
-                            knowns, mgmt-report, digest, self-update) from
+                            knowns, mgmt-report, digest, budget,
+                            self-update) from
                             one registry - no default mode; digest.go is
                             the weekly digest command; knowns.go, seed.go,
                             hits.go and discover.go the on-box known-knowns
@@ -69,6 +70,8 @@ internal/reporter/
   emailer.go                SMTP digest + markdown-attachment sender
   capture.go                files one run's findings into the library
   librarystore.go           findings library store (runs/findings/feedback/users)
+  llmspend.go               per-day prompt-token ledger (llm_spend,
+                            migration 7) behind SYSLOG_MAX_PROMPT_TOKENS
   apitokens.go              sysadmin API bearer tokens (sha256 + 8-char prefix)
   knownsmute.go             mute-by-finding-id: derive host+program entries
                             from a finding (optional host subset and match
@@ -177,13 +180,17 @@ SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.
   Keycloak round-trip. Risky listen/auth combos WARN at startup, never
   refuse - plain HTTP on a LAN is a supported case (owner stance).
 - `SYSLOG_MAX_PROMPT_TOKENS` / `--max-prompt-tokens` (default 2M, owner
-  decision 2026-09-29) is a per-process prompt-token budget in
-  llm.Complete, the safety net after a crash loop sent 25M tokens
-  unnoticed. Hitting it is the ONE LLM failure that does not fail the
-  run: stages finish degraded (llm.ErrBudget via llmStage in main.go),
-  because daily-run.sh retries failed runs hourly and each retry would
-  spend it again. The run is flagged in the library (migration 6) and
-  the weekly digest puts a notice straight under its title.
+  decision 2026-09-29) is a per-CALENDAR-DAY prompt-token budget in
+  llm.Complete (box clock, not slice date; run and digest share it),
+  the safety net after a crash loop sent 25M tokens unnoticed. The
+  day's spend is persisted in `llm_spend` (migration 7, ait srg-ZqQMU)
+  after every request, so hourly retries of a run that spent and then
+  failed start from it, not from zero; `budget` / `budget reset` show
+  and clear today's. Hitting it is the ONE LLM failure that does not
+  fail the run: stages finish degraded (llm.ErrBudget via llmStage in
+  main.go), so the day's marker is written and retries stop. The run is
+  flagged in the library (migration 6) and the weekly digest puts a
+  notice straight under its title.
 - `--dump-filtered` prints the post-filter lines and exits - the
   documented filter-tuning aid (owner decision 2026-08-28).
 - Known-knowns live in the `known_knowns` table (migration 5, ant ADR

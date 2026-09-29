@@ -66,7 +66,7 @@ func (r *ReportAgent) budgetNotice() string {
 	if !r.BudgetReached {
 		return ""
 	}
-	return "**LLM budget reached.** This run stopped calling the model when it spent its prompt-token budget (SYSLOG_MAX_PROMPT_TOKENS), so the analysis below is incomplete. Something unusual is likely flooding the logs or the pipeline; the run's log has the details.\n\n"
+	return "**LLM budget reached.** This run stopped calling the model when the day's prompt-token budget (SYSLOG_MAX_PROMPT_TOKENS) was spent, so the analysis below is incomplete. Something unusual is likely flooding the logs or the pipeline; the run's log has the details.\n\n"
 }
 
 // ModelLabel is the attribution string for a run that may have split the

@@ -62,13 +62,20 @@ func seedDailyRuns(t *testing.T, path string) {
 
 func runDigestCommand(t *testing.T, args ...string) (string, int) {
 	t.Helper()
+	return runCommand(t, append([]string{"digest"}, args...)...)
+}
+
+// runCommand dispatches args and returns what the command printed to
+// os.Stdout, and its exit code.
+func runCommand(t *testing.T, args ...string) (string, int) {
+	t.Helper()
 	old := os.Stdout
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
 	os.Stdout = w
-	code := dispatch(append([]string{"digest"}, args...), io.Discard, io.Discard)
+	code := dispatch(args, io.Discard, io.Discard)
 	w.Close()
 	os.Stdout = old
 	out, _ := io.ReadAll(r)
