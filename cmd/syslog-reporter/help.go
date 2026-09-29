@@ -106,6 +106,17 @@ used as-is, so a site without ELK can drop its own per-day files there.
 flags:
 `
 
+const backfillHelpIntro = `Bootstrap history: run the last N days through the pipeline with --no-llm,
+so it costs nothing, oldest first. Two of the three anomaly detectors
+compare against stored history, so a fresh install wants a couple of
+weeks of it before the first real run. Missing dumps are fetched from
+Elasticsearch; days that fail are reported and skipped. Re-running a day
+replaces its stored aggregates and findings. Run it from the directory
+holding the .env and the database.
+usage: syslog-reporter backfill [--days N]
+flags:
+`
+
 const fetchHelpIntro = `Dump one day of syslog from Elasticsearch as NDJSON, the input run reads.
 Point-in-time paging, so the dump is a consistent snapshot; the account
 needs only the 'read' index privilege. The file appears under its final

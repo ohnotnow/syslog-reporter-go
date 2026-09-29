@@ -24,6 +24,7 @@ var commands = []command{
 	{"run", "Run the daily batch pipeline over a log dump and write the report", cmdRun},
 	{"fetch", "Dump one day of syslog from Elasticsearch as NDJSON", cmdFetch},
 	{"daily", "The hourly cron job: fetch yesterday, run it, email the report or the weekly digest", cmdDaily},
+	{"backfill", "Bootstrap history: run the last N days with no LLM, fetching missing dumps", cmdBackfill},
 	{"eval", "Compare provider/model combinations over a small log sample", cmdEval},
 	{"serve", "Serve the findings library web UI (default 127.0.0.1:7373)", cmdServe},
 	{"user", "Manage local-auth accounts (add, list, passwd, remove)", cmdUser},
