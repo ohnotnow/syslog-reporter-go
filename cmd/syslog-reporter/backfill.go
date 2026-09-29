@@ -2,8 +2,7 @@ package main
 
 // The backfill command (ait srg-Sm1Is.3): run the last N days through the
 // pipeline with --no-llm, so it costs nothing, to give a fresh install the
-// history two of the three anomaly detectors compare against. It replaced
-// scripts/backfill.sh.
+// history two of the three anomaly detectors compare against.
 //
 // Unlike daily, each day's run is a child process of this same binary:
 // run fails through fatal() -> os.Exit(1), and a backfill must carry on

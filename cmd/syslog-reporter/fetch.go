@@ -1,9 +1,9 @@
 package main
 
 // The fetch command (ait srg-Sm1Is.1): one day of syslog from
-// Elasticsearch as NDJSON. It replaced tools/elk_dump.py, so the same
-// binary that runs the report can be copied to a box on the cluster's IP
-// allow-list, fetch there, and have the file copied back.
+// Elasticsearch as NDJSON. Where only certain addresses may reach the
+// cluster, the same binary that runs the report is copied to one of them,
+// fetches there, and the file is copied back.
 
 import (
 	"context"

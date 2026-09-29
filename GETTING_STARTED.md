@@ -25,9 +25,11 @@ on RHEL-alikes:
 grep '^Aug 28 ' /var/log/syslog > yesterday.log
 ```
 
-(If you're fancy and have ELK instead, `tools/elk_dump.py` pulls a day
-out of a cluster into a format the tool reads - usage notes at the top
-of the script.)
+(If you're fancy and have ELK instead, `./syslog-reporter fetch --day
+2026-08-28 --out syslog-2026-08-28.ndjson.gz` pulls a day out of a
+cluster into a format the tool reads - `fetch --help` has the settings.
+If only certain addresses may reach your cluster, copy the binary to one
+that can, fetch there and copy the file back.)
 
 Run it:
 
@@ -291,36 +293,38 @@ It does the following:
 2. Creates a `syslog-reporter` system user and its state directory,
    `/var/lib/syslog-reporter`, where the `.env`, the database, the
    dumps and the reports all live.
-3. Installs the binary, `elk_dump.py`, `backfill.sh` and `daily-run.sh`
-   into `/usr/local/bin`.
+3. Installs the binary into `/usr/local/bin`. It is the only file: the
+   ELK fetch, the daily cron job and the backfill are all commands of it.
 4. Drops [scripts/dotenv.example](scripts/dotenv.example) in as the
    `.env` and opens it in your editor: fill in the model and key, the
    SMTP relay and recipients, and the ELK credentials. An existing
    `.env` is left alone.
-5. Writes `/etc/cron.d/syslog-reporter`: `daily-run.sh --no-email` at
-   07:30 every day, retried on the half hour, and `daily-run.sh --digest`
-   on Mondays, logging to `daily-run.log` in the state directory. It asks
-   for a `MAILTO` address.
-6. Asks whether to run `backfill.sh` now: the last fortnight through
-   `--no-llm` (free), then loads the bundled noise rules into the new
-   database with `knowns seed`.
+5. Writes `/etc/cron.d/syslog-reporter`: `syslog-reporter daily
+   --no-email` at 07:30 every day, retried on the half hour, and `daily
+   --digest` on Mondays, logging to `daily-run.log` in the state
+   directory. It asks for a `MAILTO` address. An existing cron file is
+   kept; delete it first to get this schedule.
+6. Asks whether to run `syslog-reporter backfill` now: the last
+   fortnight through `--no-llm` (free), then loads the bundled noise
+   rules into the new database with `knowns seed`.
 7. Asks whether to install the findings web UI as a systemd service
    (section 5).
 
 Each question has a default, so `install.sh </dev/null` runs it
-unattended. Read the script if you would rather do it by hand; every
-path is a variable at the top of each helper (`REPORTER`, `ELK_DUMP`,
-`WORK_DIR`, `DUMP_DIR`), so trying one from a checkout looks like:
+unattended. Read the script if you would rather do it by hand. The
+commands find the `.env` and the database in their working directory,
+so run them from the state directory; trying one from a checkout looks
+like:
 
 ```bash
-REPORTER=./syslog-reporter ELK_DUMP=./tools/elk_dump.py WORK_DIR=. \
-  ./scripts/backfill.sh 3
+./syslog-reporter backfill --days 3 --dump-dir dumps
 ```
 
-`daily-run.sh` fetches yesterday's dump with `elk_dump.py`, runs the
-pipeline and leaves a `syslog-<day>.sent` marker in the dumps directory;
-every later attempt that day exits quietly. A non-zero exit means that
-attempt did not finish. Pass a date to re-run a specific day by hand.
+`daily` fetches yesterday's dump, runs the pipeline and leaves a
+`syslog-<day>.sent` marker in the dumps directory; every later attempt
+that day exits quietly. A non-zero exit means that attempt did not
+finish. Pass a date to re-run a specific day by hand; `daily --help` has
+the rest.
 
 **One email a week, not seven.** The crontab `install.sh` writes is the
 weekly shape: every day runs and files its findings without emailing
@@ -328,8 +332,8 @@ anyone (`--no-email`), and on Monday the run is followed by the weekly
 digest (`--digest`), which replaces that day's report:
 
 ```cron
-30 7-17 * * 0,2-6 syslog-reporter /usr/local/bin/daily-run.sh --no-email >> /var/lib/syslog-reporter/daily-run.log 2>&1
-30 7-17 * * 1     syslog-reporter /usr/local/bin/daily-run.sh --digest   >> /var/lib/syslog-reporter/daily-run.log 2>&1
+30 7-17 * * 0,2-6 syslog-reporter cd /var/lib/syslog-reporter && /usr/local/bin/syslog-reporter daily --no-email >> /var/lib/syslog-reporter/daily-run.log 2>&1
+30 7-17 * * 1     syslog-reporter cd /var/lib/syslog-reporter && /usr/local/bin/syslog-reporter daily --digest   >> /var/lib/syslog-reporter/daily-run.log 2>&1
 ```
 
 The digest is the findings that kept recurring over the last seven
@@ -368,8 +372,8 @@ is the same `.env`:
 
 ```bash
 https_proxy=http://proxy.example.ac.uk:3128
-# keep internal traffic direct - without this, elk_dump.py would try
-# to reach your ELK cluster THROUGH the proxy too
+# keep internal traffic direct - without this, fetch would try to
+# reach your ELK cluster THROUGH the proxy too
 no_proxy=elk.example.ac.uk
 ```
 

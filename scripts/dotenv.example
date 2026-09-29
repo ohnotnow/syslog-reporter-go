@@ -1,7 +1,7 @@
 # /var/lib/syslog-reporter/.env  (chmod 600, owned by syslog-reporter)
 #
-# Everything the daily run needs, in one file. Both the binary and
-# elk_dump.py read it from their working directory; real environment
+# Everything the daily run needs, in one file. The binary reads it from
+# its working directory; real environment
 # variables win over anything here. TECHNICAL_OVERVIEW.md is the full
 # reference.
 
@@ -39,7 +39,7 @@ OPENAI_API_KEY=sk-...
 # back to SYSLOG_DEFAULT_MODEL when its variable is unset.
 #SYSLOG_LOGSCAN_MODEL=openai/gpt-5.6-luna
 #SYSLOG_ISSUE_MODEL=anthropic/claude-fable-5-1
-# The weekly digest's model (daily-run.sh --digest): the smart one, run
+# The weekly digest's model (daily --digest): the smart one, run
 # once a week over the findings that kept recurring. Falls back to
 # SYSLOG_ISSUE_MODEL, then SYSLOG_DEFAULT_MODEL. The usual shape is cheap
 # models above for the quiet daily runs and the best you have here.
@@ -77,20 +77,23 @@ OPENAI_API_KEY=sk-...
 # jev-latest).
 #TYPESAFE_API_KEY=
 
-# Where elk_dump.py fetches yesterday's logs from. ELK_API_KEY works
-# instead of username/password; ELK_INSECURE=1 skips TLS verification
-# for a self-signed cluster (ELK_CA_CERT=/path/to/ca.pem trusts a local
-# CA instead). No ELK? Leave these unset and see the notes at the top
-# of daily-run.sh for slicing yesterday's log yourself.
+# Where fetch (and so daily and backfill) gets yesterday's logs from.
+# ELK_API_KEY works instead of username/password; ELK_INSECURE=1 skips
+# TLS verification for a self-signed cluster (ELK_CA_CERT=/path/to/ca.pem
+# trusts a local CA instead). No ELK? Leave these unset and put each
+# day's file in the dumps directory yourself before daily runs, as
+# syslog-YYYY-MM-DD.ndjson.gz in fetch's NDJSON shape: an existing dump
+# is used as-is. Raw rsyslog text goes straight to 'syslog-reporter run'.
 ELK_URL=https://elk.example.ac.uk:9200
 ELK_USERNAME=syslog-reporter
 ELK_PASSWORD=...
 ELK_INDEX=logs-system.syslog-default
 ELK_INSECURE=1
 
-# Only on a server with no direct internet route. Go and Python both
-# honour upper- or lower-case spellings; no_proxy keeps internal traffic
-# (your ELK cluster, your mail relay) off the proxy.
+# Only on a server with no direct internet route. Upper- or lower-case
+# spellings both work; no_proxy keeps internal traffic (your ELK cluster,
+# your mail relay) off the proxy - list the ELK host there, or fetch will
+# try to reach it through the proxy.
 #http_proxy=http://proxy.example.ac.uk:3128
 #https_proxy=http://proxy.example.ac.uk:3128
 #no_proxy=elk.example.ac.uk,mail-relay.example.ac.uk

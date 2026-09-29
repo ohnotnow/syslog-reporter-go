@@ -6,7 +6,7 @@ package reporter
 // rather than teach every stage a second data model we render each ES
 // document back into that shape.
 //
-// Input is the NDJSON produced by tools/elk_dump.py: one JSON object per
+// Input is the NDJSON produced by the fetch command: one JSON object per
 // line, flat dotted keys (@timestamp, host.name, host.hostname,
 // process.name, process.pid, message), optionally gzip-compressed
 // (.gz suffix).
@@ -77,7 +77,7 @@ func (s *ElkSource) Run() ([]string, error) {
 		dec.UseNumber()
 		if err := dec.Decode(&doc); err != nil {
 			return nil, fmt.Errorf(
-				"%s:%d: not valid JSON (%v); is this really an elk_dump.py NDJSON file?",
+				"%s:%d: not valid JSON (%v); is this really a fetch NDJSON file?",
 				s.path, lineno, err)
 		}
 		rendered, ts, ok, err := s.render(doc)

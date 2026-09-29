@@ -526,7 +526,7 @@ func runBatch(cliArgs []string) {
 		"Model to use (litellm format); SYSLOG_LOGSCAN_MODEL and SYSLOG_ISSUE_MODEL "+
 			"override it for the log-scanning and issue-writing stages respectively")
 	format := fs.String("format", "auto",
-		"Input format: 'raw' is rsyslog text, 'ndjson' is an elk_dump.py dump "+
+		"Input format: 'raw' is rsyslog text, 'ndjson' is a fetch dump "+
 			"(.gz handled). 'auto' picks ndjson for *.ndjson / *.ndjson.gz paths, "+
 			"raw otherwise (stdin is always raw).")
 	debug := fs.Bool("debug", false, "Print extra debug information")
@@ -733,7 +733,7 @@ func startBudget(log *logger, lib *reporter.LibraryStore, limit int64) error {
 
 // llmStage fatals on an LLM stage's error, except a spent prompt-token
 // budget (llm.ErrBudget): that run finishes degraded and says so instead,
-// because daily-run.sh retries a failed run hourly and a retry could only
+// because daily retries a failed run hourly and a retry could only
 // be refused again by the same spent day.
 func llmStage(log *logger, what string, err error) {
 	if err == nil {

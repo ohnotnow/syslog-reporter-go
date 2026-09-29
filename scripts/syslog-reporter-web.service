@@ -5,7 +5,7 @@
 #
 # Flags and SYSLOG_WEB_* environment variables are interchangeable (the
 # flag wins). serve refuses to start until the database exists, so do a
-# first run (or backfill.sh) before enabling it. Plain HTTP on localhost
+# first run (or syslog-reporter backfill) before enabling it. Plain HTTP on localhost
 # with local accounts is the default; TECHNICAL_OVERVIEW.md covers TLS,
 # other listen addresses and the auth modes.
 

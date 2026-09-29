@@ -1,9 +1,9 @@
 // Package elk dumps one day of syslog documents from Elasticsearch as
 // NDJSON: one trimmed JSON object per line, flat dotted keys, the input
-// reporter.ElkSource reads. It replaced tools/elk_dump.py (ait srg-Sm1Is.1)
-// and keeps its protocol: a point-in-time plus search_after, so the dump is
-// a consistent snapshot with no skipped or duplicated documents. The
-// account needs only the 'read' index privilege (which includes PIT).
+// reporter.ElkSource reads (ait srg-Sm1Is.1). Paging is a point-in-time
+// plus search_after, so the dump is a consistent snapshot with no skipped
+// or duplicated documents. The account needs only the 'read' index
+// privilege (which includes PIT).
 //
 // The day is bounded on both sides (gte day, lt day+1, in the given time
 // zone), which also keeps out the future-dated documents that bad RFC3164

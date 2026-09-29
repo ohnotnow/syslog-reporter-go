@@ -2,8 +2,7 @@ package main
 
 // The daily command (ait srg-Sm1Is.2), shaped for an hourly cron: fetch
 // yesterday's dump, run the pipeline, then email the day's report, say
-// nothing, or email the weekly digest instead. It replaced
-// scripts/daily-run.sh.
+// nothing, or email the weekly digest instead.
 //
 // The first attempt that gets all the way through leaves a
 // syslog-<day>.sent marker in the dump directory (and, with --digest, a

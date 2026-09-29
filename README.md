@@ -81,7 +81,7 @@ SYSLOG_DIGEST_MODEL=anthropic/claude-fable-5-1 ./syslog-reporter digest --send-e
 
 The digest is filed in the library as a run of its own, so the finding
 numbers in the email are the digest's: `findings show`, the API, feedback
-and `syslog-mute` all work on them. `scripts/daily-run.sh --digest` runs
+and `syslog-mute` all work on them. `syslog-reporter daily --digest` runs
 it after the day's run; the crontab in [GETTING_STARTED.md](GETTING_STARTED.md)
 does the rest.
 

@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 #
 # The "Make it daily" section of GETTING_STARTED.md as one script: a
-# system user, its state directory, the binary and helpers, a .env to
-# fill in, two weeks of free history, the hourly cron job and, if you
+# system user, its state directory, the binary, a .env to fill in, two weeks of free history, the hourly cron job and, if you
 # want it, the findings web UI as a systemd service.
 #
 # Run it as root from a checkout:
@@ -22,9 +21,10 @@
 # (`install.sh </dev/null`) the defaults are taken, so it can run
 # unattended.
 #
-# Re-running is safe: the binary and helpers are refreshed, the cron
-# file and unit are rewritten, and an existing .env is left exactly as
-# it is. Debian and RHEL-alikes with cron and systemd only.
+# Re-running is safe: the binary is refreshed and the unit rewritten,
+# while an existing cron file and .env are left exactly as they are
+# (delete the cron file first to get the current schedule). Debian and
+# RHEL-alikes with cron and systemd only.
 
 set -Eeuo pipefail
 
@@ -65,8 +65,6 @@ ask() {
 }
 
 [ "$(id -u)" -eq 0 ] || die "run as root: sudo $0"
-command -v python3 >/dev/null || die "python3 is needed for elk_dump.py"
-command -v flock >/dev/null || die "flock (util-linux) is needed by daily-run.sh"
 
 # The release workflow names assets by GOARCH; uname speaks differently.
 case "$(uname -m)" in
@@ -139,10 +137,8 @@ else
 fi
 install -d -o "$SERVICE_USER" -m 750 "$WORK_DIR"
 
-step "binary and helpers into $BIN_DIR"
+step "binary into $BIN_DIR"
 install -m 755 "$binary" "$BIN_DIR/syslog-reporter"
-install -m 755 "$here/tools/elk_dump.py" \
-    "$here/scripts/backfill.sh" "$here/scripts/daily-run.sh" "$BIN_DIR/"
 
 step "settings"
 env_file="$WORK_DIR/.env"
@@ -165,31 +161,32 @@ if [ -t 0 ]; then
 fi
 cron_file=/etc/cron.d/syslog-reporter
 [ -d /etc/cron.d ] || die "/etc/cron.d is missing - install cron (cronie on RHEL) and re-run"
-# An existing schedule is the operator's: a re-run refreshes the binary
-# and helpers, never the crontab. The weekly shape below is for a new
+# An existing schedule is the operator's: a re-run refreshes the binary,
+# never the crontab. The weekly shape below is for a new
 # install; to move an older daily-email install to it, edit the file.
 if [ -e "$cron_file" ]; then
     echo "kept existing $cron_file (delete it and re-run for the weekly-digest schedule)"
 else
 {
     echo "# syslog-reporter: run and file every day, first try at 07:30 and retried"
-    echo "# on the half hour (daily-run.sh keeps a .sent marker); on Mondays email the"
-    echo "# weekly digest of recurring findings instead of a daily report. For a daily"
-    echo "# email instead, use one line with no options: 30 7-17 * * * ... daily-run.sh"
+    echo "# on the half hour (daily keeps a .sent marker); on Mondays email the weekly"
+    echo "# digest of recurring findings instead of a daily report. For a daily email"
+    echo "# instead, use one line with no options: 30 7-17 * * * ... syslog-reporter daily"
     if [ -n "$mailto" ]; then echo "MAILTO=$mailto"; fi
-    echo "30 7-17 * * 0,2-6 $SERVICE_USER $BIN_DIR/daily-run.sh --no-email >> $WORK_DIR/daily-run.log 2>&1"
-    echo "30 7-17 * * 1     $SERVICE_USER $BIN_DIR/daily-run.sh --digest >> $WORK_DIR/daily-run.log 2>&1"
+    echo "30 7-17 * * 0,2-6 $SERVICE_USER cd $WORK_DIR && $BIN_DIR/syslog-reporter daily --no-email >> $WORK_DIR/daily-run.log 2>&1"
+    echo "30 7-17 * * 1     $SERVICE_USER cd $WORK_DIR && $BIN_DIR/syslog-reporter daily --digest >> $WORK_DIR/daily-run.log 2>&1"
 } > "$cron_file"
 chmod 644 "$cron_file"
 echo "wrote $cron_file"
 fi
 
 step "history"
-if ask "run backfill.sh for the last $BACKFILL_DAYS days now (free, no LLM)?" y; then
-    runuser -u "$SERVICE_USER" -- "$BIN_DIR/backfill.sh" "$BACKFILL_DAYS" ||
-        echo "backfill reported failures - check the ELK lines in $env_file and re-run: sudo -u $SERVICE_USER backfill.sh" >&2
+backfill_cmd="cd '$WORK_DIR' && '$BIN_DIR/syslog-reporter' backfill --days $BACKFILL_DAYS"
+if ask "backfill the last $BACKFILL_DAYS days now (free, no LLM)?" y; then
+    runuser -u "$SERVICE_USER" -- sh -c "$backfill_cmd" ||
+        echo "backfill reported failures - check the ELK lines in $env_file and re-run: sudo -u $SERVICE_USER sh -c \"$backfill_cmd\"" >&2
 else
-    echo "skipped - run it later with: sudo -u $SERVICE_USER backfill.sh"
+    echo "skipped - run it later with: sudo -u $SERVICE_USER sh -c \"$backfill_cmd\""
 fi
 
 # The bundled noise rules live in the database (knowns seed is idempotent,
@@ -223,4 +220,4 @@ fi
 echo
 echo "done. Cron runs yesterday's logs at 07:30 each day and emails the weekly digest"
 echo "on Mondays ($cron_file has the schedule); to see a day's report now:"
-echo "  sudo -u $SERVICE_USER $BIN_DIR/daily-run.sh"
+echo "  sudo -u $SERVICE_USER sh -c 'cd $WORK_DIR && $BIN_DIR/syslog-reporter daily'"

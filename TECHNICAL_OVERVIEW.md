@@ -32,10 +32,13 @@ implementation replaced it outright and maintains no compatibility with it.
 
 ```
 cmd/syslog-reporter/        CLI entry point; explicit command dispatch (run,
-                            eval, serve, user, token, findings, knowns,
-                            mgmt-report, digest, self-update) from one
-                            registry - no default mode; digest.go is the
-                            weekly digest command; knowns.go, seed.go,
+                            fetch, daily, backfill, eval, serve, user, token,
+                            findings, knowns, mgmt-report, digest, budget,
+                            self-update) from one registry - no default
+                            mode; fetch.go, daily.go (the hourly cron job,
+                            .sent markers, flock in lock_unix.go) and
+                            backfill.go replace the old bash and python
+                            helpers; digest.go is the weekly digest command; knowns.go, seed.go,
                             hits.go and discover.go the on-box
                             known-knowns command; since.go the --since
                             flag value
@@ -57,6 +60,8 @@ internal/reporter/
   knowns.go                 known-knowns suppression semantics (host glob +
                             program glob / match regex, expiry by slice date)
   knownsstore.go            known_knowns table: add, list, delete, load
+internal/elk/               stdlib Elasticsearch client behind fetch: one
+                            day as NDJSON via point-in-time + search_after
 internal/jev/               stdlib client for TypeSafe's System One API
                             (Jev), used only by 'knowns discover'
   anomaly.go                line parsing, robust z-scores, peer detector,
@@ -87,9 +92,8 @@ internal/cli/               the findings subcommands (list/show/feedback) and
 internal/llm/               provider seam: model-string prefix -> official SDK
 skills/syslog-reporter/     Claude Code skill: the sysadmin API's endpoints,
                             JSON shapes and etiquette (the laptop "client")
-tools/elk_dump.py           day-bounded NDJSON dumper for an ELK cluster
-                            (stdlib-only python3; runs on any box with read
-                            access to the log store)
+scripts/                    install.sh (the one-shot deploy), the web UI's
+                            systemd unit and the .env example
 .github/workflows/          release build (six OS/arch targets on v* tags)
 ```
 
@@ -568,7 +572,7 @@ is `--days 14` by hand. The model is `SYSLOG_DIGEST_MODEL`, then
 `SYSLOG_ISSUE_MODEL`, then `--model`; `--no-llm` renders facts only,
 `--no-store` skips capture (no ids, no mute lines). An empty window
 still renders, captures and emails: "no run was recorded for any day"
-is the stalled-cron alarm. `scripts/daily-run.sh --digest` runs it after
+is the stalled-cron alarm. `syslog-reporter daily --digest` runs it after
 the day's run in place of the day's email; `--no-email` is the quiet
 weekday mode.
 
@@ -750,8 +754,8 @@ Read from the environment or a `.env` beside the working directory
   (never reset by the per-stage usage logging), so every stage is
   covered and a day overshoots by at most one request. When it is spent,
   Complete returns `llm.ErrBudget` and the stages finish degraded rather
-  than failing (daily-run.sh would otherwise retry hourly, only to be
-  refused again): the detector keeps what earlier chunks found, the
+  than failing (`daily` would otherwise retry hourly, only to be refused
+  again): the detector keeps what earlier chunks found, the
   dedupe is skipped, the resolutions and explanations keep what earlier
   batches wrote, and the digest groups on the old service + host set
   key. The run warns in its log, both report layouts carry a notice
@@ -821,7 +825,9 @@ Read from the environment or a `.env` beside the working directory
 - `ELK_URL`, `ELK_USERNAME`/`ELK_PASSWORD` or `ELK_API_KEY`, `ELK_INDEX`,
   `ELK_INSECURE` (`1` skips TLS verification, for self-signed clusters) and
   `ELK_CA_CERT` (path to a CA certificate to trust instead) are read by
-  `tools/elk_dump.py` only; the matching `--insecure`/`--ca-cert` flags win
+  `fetch` (and so `daily` and `backfill`); the matching flags win. Proxies
+  follow `https_proxy`/`no_proxy` from the `.env` like everything else, so
+  list the cluster in `no_proxy` if it must not go through the proxy
 
 The store is keyed by the date the log slice covers: `--date YYYY-MM-DD`,
 defaulting to yesterday or, for NDJSON input, to the date found in the data.
@@ -829,11 +835,13 @@ defaulting to yesterday or, for NDJSON input, to the date found in the data.
 three detectors and the store writes still happen, and the report says the
 analysis was skipped rather than pretending the day was clean.
 
-If your estate forwards syslog to an ELK cluster, `tools/elk_dump.py`
-pulls one day of documents into the NDJSON format the tool ingests. It is
-stdlib-only python3, needs read-only access to the log store, and is run
-on whichever box has that access; see the usage notes at the top of the
-script.
+If your estate forwards syslog to an ELK cluster, `syslog-reporter fetch`
+pulls one day of documents into the NDJSON format the tool ingests
+(point-in-time + search_after, so a consistent snapshot; the account
+needs only the `read` index privilege). The file appears under its final
+name only once the whole day arrived. Where only certain addresses may
+reach the cluster, copy the binary to one of them, fetch there and copy
+the file back.
 
 ## Testing
 

@@ -28,10 +28,14 @@ as unknown.
 
 ```
 cmd/syslog-reporter/        CLI entry point; explicit command dispatch (run,
-                            eval, serve, user, token, findings,
-                            knowns, mgmt-report, digest, budget,
-                            self-update) from
-                            one registry - no default mode; digest.go is
+                            fetch, daily, backfill, eval, serve, user, token,
+                            findings, knowns, mgmt-report, digest, budget,
+                            self-update) from one registry - no default
+                            mode; fetch.go (ELK dump), daily.go (the hourly
+                            cron job: .sent markers, flock in lock_unix.go,
+                            run/digest in-process) and backfill.go (one
+                            child run per day) replaced the old bash and
+                            python helpers; digest.go is
                             the weekly digest command; knowns.go, seed.go,
                             hits.go and discover.go the on-box known-knowns
                             command (list/add/remove/seed/hits/discover and
@@ -92,13 +96,12 @@ internal/cli/               findings subcommands + ParseFlagsAnywhere
 internal/llm/               provider seam: litellm-style prefix -> official SDK
 internal/jev/               stdlib client for TypeSafe's Jev; only knowns
                             discover uses it
-tools/elk_dump.py           ELK NDJSON dumper (stdlib-only python3; runs on
-                            whichever box can read the log store)
-scripts/                    end-user bash wrappers: backfill.sh (bootstrap N
-                            days of history, --no-llm) and daily-run.sh (the
-                            cron job); self-contained, production defaults,
-                            both cd into WORK_DIR (/var/lib/syslog-reporter)
-                            so the cwd-relative .env and db resolve - deploy
+internal/elk/               stdlib Elasticsearch client behind fetch (PIT +
+                            search_after, temp file + rename)
+scripts/                    install.sh (one-shot deploy: binary, user, .env,
+                            cron lines that cd into /var/lib/syslog-reporter
+                            so the cwd-relative .env and db resolve), the
+                            web UI unit and dotenv.example - deploy
                             walkthrough in GETTING_STARTED.md
 
 ```
@@ -236,7 +239,7 @@ SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.
   mgmt-report counts daily runs only), and its finding ids are what the
   email prints. Model: `SYSLOG_DIGEST_MODEL` > `SYSLOG_ISSUE_MODEL` >
   `--model`. On digest day the digest REPLACES the daily email
-  (daily-run.sh `--digest`; `--no-email` for the other days). Issues
+  (`daily --digest`; `--no-email` for the other days). Issues
   group by an IssueClusterer call (the digest model groups the window's
   daily issues by underlying problem; srg-tCbyJ: service labels and host
   sets are LLM prose that drift, so service + host set almost never

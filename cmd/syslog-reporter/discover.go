@@ -2,7 +2,7 @@ package main
 
 // knowns discover: the Jev-scored noise finder (ait srg-M3Yny.9, ant ADR
 // srg-uHwCr, evaluation in srg-FGSKN). Templates a window of the dumps
-// daily-run.sh keeps, asks Jev once per message shape whether an admin
+// daily keeps, asks Jev once per message shape whether an admin
 // would want to see it, and adds the confidently routine, recurring
 // shapes to known_knowns with source jev. Auto-add is the default;
 // --preview shows the candidates first and asks y/n on a terminal, and on
@@ -77,7 +77,7 @@ type scorer func(ctx context.Context, s *shape) (float64, jev.Usage, error)
 func runKnownsDiscover(args []string) {
 	fs, dbPath := knownsFlagSet("knowns discover")
 	days := fs.Int("days", 30, "Days of dumps to read, ending yesterday")
-	dumpDir := fs.String("dump-dir", defaultDumpDir(), "Where daily-run.sh keeps syslog-YYYY-MM-DD.ndjson.gz (default: $WORK_DIR/dumps)")
+	dumpDir := fs.String("dump-dir", defaultDumpDir(), "Where daily keeps syslog-YYYY-MM-DD.ndjson.gz (default: $WORK_DIR/dumps)")
 	threshold := fs.Float64("threshold", 0.1, "Add a shape only when its attention score is below this")
 	minDays := fs.Int("min-days", 3, "Add a shape only when it appeared on at least this many days")
 	minLines := fs.Int("min-lines", 1, "Add a shape only when it produced at least this many lines in the window")
