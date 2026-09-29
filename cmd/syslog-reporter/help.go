@@ -86,6 +86,26 @@ The store must already exist (a report run creates it); --db and
 SYSLOG_DB_PATH name it as in the other commands.
 `
 
+const dailyHelpIntro = `The hourly cron job: fetch yesterday's syslog from Elasticsearch, run the
+pipeline, and email the day's report - or, with --no-email, file it
+quietly; or, with --digest, file it and email the weekly digest instead.
+usage: syslog-reporter daily [--no-email] [--digest] [YYYY-MM-DD]
+
+Schedule it hourly through the working day. The first attempt that gets
+all the way through leaves syslog-<day>.sent in the dump directory, and
+later attempts that day exit 0 at once, so a flaky ELK or LLM provider
+costs only a retry an hour later. A failed digest is retried on its own.
+One attempt runs at a time. Run it from the directory holding the .env
+and the database (cron: cd /var/lib/syslog-reporter && ...).
+
+A date re-runs that day by hand, ignoring its marker; it cannot be
+combined with --digest (the digest window always ends yesterday - recover
+a missed one with: syslog-reporter digest --days 14 --send-email).
+An existing non-empty syslog-<day>.ndjson.gz in the dump directory is
+used as-is, so a site without ELK can drop its own per-day files there.
+flags:
+`
+
 const fetchHelpIntro = `Dump one day of syslog from Elasticsearch as NDJSON, the input run reads.
 Point-in-time paging, so the dump is a consistent snapshot; the account
 needs only the 'read' index privilege. The file appears under its final
