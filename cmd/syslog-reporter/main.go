@@ -991,29 +991,21 @@ func run(cfg runConfig) {
 	// Persist this run's findings into the library (same SQLite file as the
 	// aggregates) BEFORE rendering: capture hands each finding its library
 	// id, which the digest prints alongside a paste-ready mute line (ait
-	// srg-Kj5Q8.7). A capture failure costs the library one day and the
-	// ids, not the report or the email.
+	// srg-Kj5Q8.7). A failed capture still gets the report written and
+	// sent, then fails the run at the end (ait srg-6Vsgx.2): the weekly
+	// digest reads the library, so a day that never got filed must not
+	// count as done, and daily's hourly retry refiles it. With --send-email
+	// that retry repeats the email; the quiet daily runs have none.
+	var captureErr error
 	if cfg.storeOn {
 		captureModel := modelLabel
 		if !cfg.llmOn {
 			captureModel = ""
 		}
-		if lib, err := reporter.OpenLibraryStore(cfg.dbPath); err != nil {
-			log.Warn("opening findings library %s: %v", cfg.dbPath, err)
-		} else {
-			if err := reporter.CaptureRun(lib, logDate, reporter.RunKindDaily, captureModel,
-				len(cfg.lines), len(filteredLines), issues, resolutions, explained); err != nil {
-				log.Warn("capturing findings: %v", err)
-			} else {
-				log.Info("Captured %d findings for %s",
-					len(issues.Issues)+len(explained), logDate.Format("2006-01-02"))
-				if llm.BudgetReached() {
-					if err := lib.MarkBudgetReached(logDate, reporter.RunKindDaily); err != nil {
-						log.Warn("flagging the run's budget in the library: %v", err)
-					}
-				}
-			}
-			lib.Close()
+		captureErr = captureDaily(log, cfg.dbPath, logDate, captureModel,
+			len(cfg.lines), len(filteredLines), issues, resolutions, explained)
+		if captureErr != nil {
+			log.Warn("%v; the report still goes out, then this run fails so it is retried", captureErr)
 		}
 	} else {
 		log.Info("--no-store: skipping findings capture")
@@ -1083,6 +1075,32 @@ func run(cfg runConfig) {
 		}
 		log.Info("Skipping email")
 	}
+	if captureErr != nil {
+		fatal("%v", captureErr)
+	}
+}
+
+// captureDaily files a daily run's findings in the library and, when the
+// run hit the LLM budget, flags it. Failing to flag is only a warning;
+// failing to file is the caller's error.
+func captureDaily(log *logger, dbPath string, logDate time.Time, model string, rawLines, filteredLines int,
+	issues *reporter.IssueList, resolutions *reporter.ResolutionList, explained []*reporter.ExplainedAnomaly) error {
+	lib, err := reporter.OpenLibraryStore(dbPath)
+	if err != nil {
+		return fmt.Errorf("opening findings library %s: %w", dbPath, err)
+	}
+	defer lib.Close()
+	if err := reporter.CaptureRun(lib, logDate, reporter.RunKindDaily, model,
+		rawLines, filteredLines, issues, resolutions, explained); err != nil {
+		return fmt.Errorf("capturing findings: %w", err)
+	}
+	log.Info("Captured %d findings for %s", len(issues.Issues)+len(explained), logDate.Format("2006-01-02"))
+	if llm.BudgetReached() {
+		if err := lib.MarkBudgetReached(logDate, reporter.RunKindDaily); err != nil {
+			log.Warn("flagging the run's budget in the library: %v", err)
+		}
+	}
+	return nil
 }
 
 // loadKnowns opens the library store just long enough to read the
