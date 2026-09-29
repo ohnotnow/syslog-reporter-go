@@ -22,6 +22,7 @@ import (
 	"net/textproto"
 	"os"
 	"strings"
+	"time"
 )
 
 // EmailAttachment is one text/markdown attachment.
@@ -236,13 +237,34 @@ func heloName() string {
 	return "localhost"
 }
 
+// SMTP time limits (ait srg-6Vsgx.7). A relay that accepts the connection
+// and then says nothing would otherwise hang the process for good, holding
+// daily's lock so every later hourly attempt stands aside. Generous: the
+// reports are small. Variables so tests can shrink them.
+var (
+	smtpDialTimeout = 30 * time.Second
+	smtpDeadline    = 5 * time.Minute
+)
+
 // sendMail is net/smtp.SendMail with the greeting name exposed: dial,
 // EHLO as helo, STARTTLS when the relay offers it, then the unauthenticated
-// envelope and body. Relay auth is not supported; the tool is meant to
-// sit behind an institutional relay that trusts its source address.
+// envelope and body, the whole conversation under smtpDeadline. Relay auth
+// is not supported; the tool is meant to sit behind an institutional relay
+// that trusts its source address.
 func sendMail(addr, helo, from string, to []string, msg []byte) error {
-	c, err := smtp.Dial(addr)
+	conn, err := net.DialTimeout("tcp", addr, smtpDialTimeout)
 	if err != nil {
+		return err
+	}
+	// Set on the raw connection, so it still holds after STARTTLS wraps it.
+	if err := conn.SetDeadline(time.Now().Add(smtpDeadline)); err != nil {
+		conn.Close()
+		return err
+	}
+	host, _, _ := net.SplitHostPort(addr)
+	c, err := smtp.NewClient(conn, host)
+	if err != nil {
+		conn.Close()
 		return err
 	}
 	defer c.Close()
@@ -250,7 +272,6 @@ func sendMail(addr, helo, from string, to []string, msg []byte) error {
 		return err
 	}
 	if ok, _ := c.Extension("STARTTLS"); ok {
-		host, _, _ := net.SplitHostPort(addr)
 		if err := c.StartTLS(&tls.Config{ServerName: host}); err != nil {
 			return err
 		}

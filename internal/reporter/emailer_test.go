@@ -13,6 +13,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func testEmailAgent() *EmailAgent {
@@ -324,4 +325,65 @@ func TestRunGreetsRelayWithHostname(t *testing.T) {
 			t.Errorf("greeted with %q, want the SYSLOG_SMTP_HELO value", *greeting)
 		}
 	})
+}
+
+// A relay that accepts and then goes quiet must not hang the run: daily
+// holds its lock across the send, so a hang stops every later attempt
+// (ait srg-6Vsgx.7). Two stalls: no greeting at all, and silence after
+// MAIL FROM.
+func TestRunGivesUpOnAStalledRelay(t *testing.T) {
+	oldDial, oldDeadline := smtpDialTimeout, smtpDeadline
+	smtpDialTimeout, smtpDeadline = time.Second, 300*time.Millisecond
+	t.Cleanup(func() { smtpDialTimeout, smtpDeadline = oldDial, oldDeadline })
+
+	for _, c := range []struct {
+		name    string
+		stallAt string // the verb after which the relay stops answering; "" = before the greeting
+	}{
+		{"silent after connect", ""},
+		{"silent after MAIL FROM", "MAIL"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ln, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { ln.Close() })
+			go func() {
+				conn, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				defer conn.Close()
+				if c.stallAt == "" {
+					time.Sleep(5 * time.Second)
+					return
+				}
+				tp := textproto.NewConn(conn)
+				tp.PrintfLine("220 fake ESMTP")
+				for {
+					line, err := tp.ReadLine()
+					if err != nil {
+						return
+					}
+					if strings.HasPrefix(strings.ToUpper(line), c.stallAt) {
+						time.Sleep(5 * time.Second)
+						return
+					}
+					tp.PrintfLine("250 ok")
+				}
+			}()
+
+			agent := testEmailAgent()
+			agent.SMTPServer = ln.Addr().String()
+			start := time.Now()
+			err = agent.Run()
+			if err == nil {
+				t.Fatal("Run succeeded against a stalled relay")
+			}
+			if took := time.Since(start); took > 2*time.Second {
+				t.Errorf("gave up after %v, want about the %v deadline", took, smtpDeadline)
+			}
+		})
+	}
 }
