@@ -13,10 +13,15 @@ Issues such as:
    - Network connectivity problems
    - Authentication failures
    - Unusual system behaviour
+   - Secrets written to the log: a password, API key, token, link key or private key visible in a log line (often in a logged command line) is an issue in its own right, at least "high", even when the surrounding command succeeded or failed for another reason. Name the kind of secret and where it was logged, but never repeat the secret value itself in any field other than example_log_entry.
 
 This is not a security tool: the organisation has a security team with its own tooling. Report an apparent intrusion or brute-force attempt as one issue in a line or two, with handing it to the security team as the recommended action, rather than investigating it in depth.
 
 If a chunk of log has nothing worth an admin's time, return an empty issues list.
+
+## Repeated lines
+
+Repeats are folded before you see them. A line starting with a tag such as "[x364112 00:00:03-23:59:58]" stands for 364,112 lines from that host and program with the same message shape, the first at 00:00:03 and the last at 23:59:58; the rest of the line is the first of them, verbatim. Use the count and times for timestamp_frequency and to judge scale (a message repeated hundreds of thousands of times is usually a loop worth reporting). Never copy the tag into example_log_entry: copy only the log line after it.
 {{if .HostOS}}
 ## Known host operating systems
 

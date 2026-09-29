@@ -143,13 +143,23 @@ func chunkLines(lines []string, size int) [][]string {
 	return chunks
 }
 
-// IssueDetectorAgent finds issues in the filtered log, 1000 lines at a time.
-// HostOS is the per-host OS inventory when the log source knows it (nil
-// otherwise); the model copies each issue's OS from it.
+// DetectorChunkSize is the lines per issue-detector request. The model
+// reports roughly 7-10 issues per request whatever it is sent, and after
+// CollapseRepeats every line is a distinct message, so 1000 collapsed lines
+// hid real problems on 28 Sep 2026 (ait srg-kQYKT). Cost follows total
+// lines, not requests, so smaller chunks only add a system prompt each.
+const DetectorChunkSize = 250
+
+// IssueDetectorAgent finds issues in the filtered log, DetectorChunkSize
+// lines at a time, after CollapseRepeats has folded each repeated message into one tagged
+// example. HostOS is the per-host OS inventory when the log source knows it
+// (nil otherwise); the model copies each issue's OS from it. SentLines is
+// how many lines Run sent after collapsing.
 type IssueDetectorAgent struct {
-	Lines  []string
-	Model  string
-	HostOS map[string]string
+	Lines     []string
+	Model     string
+	HostOS    map[string]string
+	SentLines int
 }
 
 func NewIssueDetector(lines []string, model string, hostOS map[string]string) *IssueDetectorAgent {
@@ -158,13 +168,18 @@ func NewIssueDetector(lines []string, model string, hostOS map[string]string) *I
 
 func (a *IssueDetectorAgent) Run(ctx context.Context) (*IssueList, error) {
 	system := issueDetectionPrompt(a.HostOS)
+	lines := CollapseRepeats(a.Lines)
+	a.SentLines = len(lines)
 	var all []*Issue
-	for _, chunk := range chunkLines(a.Lines, 1000) {
+	for _, chunk := range chunkLines(lines, DetectorChunkSize) {
 		var got IssueList
 		err := llm.Complete(ctx, a.Model, system, strings.Join(chunk, "\n"),
 			"IssueList", issueListSchema(), &got)
 		if err != nil {
 			return nil, err
+		}
+		for _, issue := range got.Issues {
+			issue.ExampleLogEntry = stripRepeatTag(issue.ExampleLogEntry)
 		}
 		all = append(all, got.Issues...)
 	}

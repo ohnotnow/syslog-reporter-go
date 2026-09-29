@@ -50,6 +50,10 @@ internal/reporter/
   template.go               message templating for the noise finder: mask
                             the varying parts, turn a shape into a regex
   filter.go                 LogFilter: known-knowns, normalise, dedupe
+  collapse.go               CollapseRepeats: fold repeats of one host +
+                            program + masked message into one tagged
+                            example ("[xN first-last] line") for the
+                            issue detector only
   knowns.go                 known-knowns suppression semantics (host glob +
                             program glob / match regex, expiry by slice date)
   knownsstore.go            known_knowns table: add, list, delete, load
@@ -96,7 +100,7 @@ Raw lines feed two branches that merge at the report:
 ```
 raw log lines
    |
-   +-- LogFilter --> filtered lines --> IssueDetector --> IssueList
+   +-- LogFilter --> filtered lines --> CollapseRepeats --> IssueDetector --> IssueList
    |                                        |
    |                                  IssueDeduplicator (merges cross-chunk dupes)
    |                                        |
@@ -270,11 +274,13 @@ Everything that has bitten on Azure OpenAI, in one place. The guide's
   resource's v1 URL (`https://<resource>.openai.azure.com/openai/v1/`).
   Older non-v1 endpoints are not supported.
 - **Size the deployment before the first real run.** Azure throttles
-  each deployment on tokens per minute (TPM). The detector's 1000-line
-  chunks run to roughly 35K tokens each, so a 50K TPM deployment holds
-  barely one chunk a minute: the second request is refused with
-  `Retry-After: 30`, the retry lands in the same minute and is refused
-  again, and the run waits out its eight retries and then fails. Give
+  each deployment on tokens per minute (TPM). The detector's chunks of
+  250 collapsed lines run to roughly 15K tokens each (a 28 Sep 2026 run:
+  8 chunks, 117K prompt tokens), sent back to back, and the resolution
+  batches follow. On a 50K TPM deployment the requests outrun the budget:
+  each refusal carries `Retry-After: 30`, the retry lands in the same
+  minute and is refused again, and the run waits out its eight retries
+  and then fails. Give
   the deployment 200K TPM or more: `--sku-capacity 200` on
   `az cognitiveservices account deployment create`, which also raises an
   existing deployment in place.

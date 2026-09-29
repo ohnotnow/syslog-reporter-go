@@ -786,10 +786,12 @@ func run(cfg runConfig) {
 	if cfg.llmOn {
 		log.Info("Detecting issues")
 		var err error
-		issues, err = reporter.NewIssueDetector(filteredLines, cfg.scanModel, cfg.hostOS).Run(ctx)
+		detector := reporter.NewIssueDetector(filteredLines, cfg.scanModel, cfg.hostOS)
+		issues, err = detector.Run(ctx)
 		if err != nil {
 			fatal("detecting issues: %v", err)
 		}
+		log.Info("Collapsed %d filtered lines to %d for the issue detector", len(filteredLines), detector.SentLines)
 		log.Debug("Detected %d issues", len(issues.Issues))
 
 		log.Info("Consolidating duplicate issues")
@@ -831,9 +833,9 @@ func run(cfg runConfig) {
 		}
 		log.Debug("Generated %d resolutions", len(resolutions.Resolutions))
 	} else {
-		chunks := (len(filteredLines) + 999) / 1000
-		log.Info("--no-llm: skipping issue detection (%d filtered lines would have gone to the LLM in %d chunk(s))",
-			len(filteredLines), chunks)
+		sent := len(reporter.CollapseRepeats(filteredLines))
+		log.Info("--no-llm: skipping issue detection (%d filtered lines, collapsed to %d, would have gone to the LLM in %d chunk(s))",
+			len(filteredLines), sent, (sent+reporter.DetectorChunkSize-1)/reporter.DetectorChunkSize)
 	}
 
 	// Detect anomalies on the RAW lines (upstream of the filter, so we still
