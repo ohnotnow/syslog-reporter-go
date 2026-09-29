@@ -251,3 +251,84 @@ func TestDigestRecurringAndOneOffs(t *testing.T) {
 			single.MinRecurringDays(), len(single.Recurring()), len(single.OneOffs()))
 	}
 }
+
+// With LLM clustering two groups can tie on days, severity, service and
+// hosts; the order (and so who makes the cap) must not come from map
+// iteration (ait srg-6Vsgx.5): the latest finding id settles it.
+func TestClusteredTiesOrderByLatestID(t *testing.T) {
+	var findings []*FindingDetail
+	clusters := map[int64]int{}
+	for i := int64(1); i <= 6; i++ {
+		findings = append(findings, issueFinding(i, "2026-09-01", "app", "high", []string{"web01.example.test"}, "App error"))
+		clusters[i] = int(i) // six distinct problems, identical on every sort key
+	}
+	runs := dailyRuns("2026-09-01", "2026-09-02")
+	for trial := 0; trial < 20; trial++ {
+		shuffled := append([]*FindingDetail(nil), findings...)
+		for i := range shuffled {
+			j := (i*7 + trial) % len(shuffled)
+			shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+		}
+		d := BuildDigest("2026-09-01", "2026-09-02", runs, shuffled, clusters)
+		var ids []int64
+		for _, g := range d.OneOffs() {
+			ids = append(ids, g.LatestID)
+		}
+		if !reflect.DeepEqual(ids, []int64{1, 2, 3, 4, 5, 6}) {
+			t.Fatalf("trial %d: one-off order %v, want by id", trial, ids)
+		}
+		issues, _ := d.OneOffIssues(2, len(d.RunDays))
+		if issues[0].Issue != "App error (web01.example.test)" || issues[1].Issue != "App error (web01.example.test) #2" {
+			t.Fatalf("trial %d: capped titles %q, %q", trial, issues[0].Issue, issues[1].Issue)
+		}
+	}
+}
+
+// Host-suffixing alone collides when host sets share a first host, or
+// when a natural title already reads like a suffixed one. Every title in
+// the digest must be distinct, and each list must use the same one.
+func TestDigestTitlesAreUniqueAcrossTheDigest(t *testing.T) {
+	findings := []*FindingDetail{
+		issueFinding(1, "2026-09-01", "svc", "high", []string{"alpha.example.test"}, "Service failed"),
+		issueFinding(2, "2026-09-02", "svc", "high", []string{"alpha.example.test"}, "Service failed"),
+		issueFinding(3, "2026-09-01", "svc", "high", []string{"alpha.example.test", "beta.example.test"}, "Service failed"),
+		issueFinding(4, "2026-09-02", "svc", "high", []string{"alpha.example.test", "beta.example.test"}, "Service failed"),
+		issueFinding(5, "2026-09-02", "other", "critical", []string{"gamma.example.test"}, "Service failed (alpha.example.test)"),
+	}
+	d := BuildDigest("2026-09-01", "2026-09-02", dailyRuns("2026-09-01", "2026-09-02"), findings, nil)
+	all := d.DigestIssues(2)
+	seen := map[string]bool{}
+	for _, i := range all {
+		if seen[i.Issue] {
+			t.Errorf("duplicate title %q in %v", i.Issue, titlesOf(all))
+		}
+		seen[i.Issue] = true
+	}
+	// The recurring list and the one-offs use the digest-wide titles.
+	recurring := d.RecurringIssues(10, 2)
+	oneOffs, _ := d.OneOffIssues(5, 2)
+	for _, i := range append(recurring, oneOffs...) {
+		if !seen[i.Issue] {
+			t.Errorf("list title %q is not one of the digest's %v", i.Issue, titlesOf(all))
+		}
+	}
+	// Resolutions pair by title, so each group gets its own.
+	res := &ResolutionList{}
+	for _, i := range all {
+		res.Resolutions = append(res.Resolutions, &Resolution{Issue: i.Issue, Investigate: "check " + i.Issue})
+	}
+	byIssue := res.ByIssue()
+	for _, i := range all {
+		if byIssue[i.Issue].Investigate != "check "+i.Issue {
+			t.Errorf("%q paired with %q", i.Issue, byIssue[i.Issue].Investigate)
+		}
+	}
+}
+
+func titlesOf(issues []*Issue) []string {
+	var t []string
+	for _, i := range issues {
+		t = append(t, i.Issue)
+	}
+	return t
+}

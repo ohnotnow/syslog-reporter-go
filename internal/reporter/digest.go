@@ -136,7 +136,13 @@ func BuildDigest(from, to string, runs []*RunSummary, findings []*FindingDetail,
 		if a.Service != b.Service {
 			return a.Service < b.Service
 		}
-		return strings.Join(a.Hosts, ",") < strings.Join(b.Hosts, ",")
+		if ha, hb := strings.Join(a.Hosts, ","), strings.Join(b.Hosts, ","); ha != hb {
+			return ha < hb
+		}
+		// With LLM clustering two groups can tie on everything above; a
+		// finding belongs to one group, so its id settles it (ait
+		// srg-6Vsgx.5) and map order never decides who makes the cap.
+		return a.LatestID < b.LatestID
 	})
 	for _, g := range anomalies {
 		sort.Strings(g.Days)
@@ -243,7 +249,13 @@ func (d *Digest) OneOffs() []*IssueGroup {
 		if a.Service != b.Service {
 			return a.Service < b.Service
 		}
-		return strings.Join(a.Hosts, ",") < strings.Join(b.Hosts, ",")
+		if ha, hb := strings.Join(a.Hosts, ","), strings.Join(b.Hosts, ","); ha != hb {
+			return ha < hb
+		}
+		// With LLM clustering two groups can tie on everything above; a
+		// finding belongs to one group, so its id settles it (ait
+		// srg-6Vsgx.5) and map order never decides who makes the cap.
+		return a.LatestID < b.LatestID
 	})
 	return out
 }
@@ -252,7 +264,8 @@ func (d *Digest) OneOffs() []*IssueGroup {
 // made unique: every downstream pairing (ResolutionList.ByIssue, capture,
 // the layouts) joins on the title, and two groups can share one LLM title
 // (the same fault on two host sets). The daily deduplicator merges those;
-// the digest keeps them apart, so a colliding title gets its first host.
+// the digest keeps them apart, so a colliding title gets its first host,
+// and anything still colliding a " #2", " #3" (see titles).
 func (d *Digest) DigestIssues(runDays int) []*Issue {
 	return d.digestIssues(d.Issues, runDays)
 }
@@ -261,17 +274,38 @@ func (d *Digest) DigestIssues(runDays int) []*Issue {
 // ALL of d.Issues (not just the subset), so the recurring list, the
 // one-offs and the attachment agree on every title.
 func (d *Digest) digestIssues(groups []*IssueGroup, runDays int) []*Issue {
-	seen := map[string]int{}
-	for _, g := range d.Issues {
-		seen[g.Latest.Issue.Issue]++
-	}
+	titles := d.titles()
 	out := make([]*Issue, 0, len(groups))
 	for _, g := range groups {
 		issue := g.DigestIssue(runDays)
-		if seen[issue.Issue] > 1 && len(g.Hosts) > 0 {
-			issue.Issue += " (" + g.Hosts[0] + ")"
-		}
+		issue.Issue = titles[g]
 		out = append(out, issue)
+	}
+	return out
+}
+
+// titles gives every issue group a title no other group has. A shared LLM
+// title gets the group's first host; that alone is not enough (hosts
+// [alpha] and [alpha, beta] both become "X (alpha)", and a natural title
+// can already read "X (alpha)"), so a final pass in rank order, which is
+// deterministic, numbers any title already taken (ait srg-6Vsgx.5).
+func (d *Digest) titles() map[*IssueGroup]string {
+	shared := map[string]int{}
+	for _, g := range d.Issues {
+		shared[g.Latest.Issue.Issue]++
+	}
+	used := map[string]bool{}
+	out := make(map[*IssueGroup]string, len(d.Issues))
+	for _, g := range d.Issues {
+		title := g.Latest.Issue.Issue
+		if shared[title] > 1 && len(g.Hosts) > 0 {
+			title += " (" + g.Hosts[0] + ")"
+		}
+		for n, base := 2, title; used[title]; n++ {
+			title = fmt.Sprintf("%s #%d", base, n)
+		}
+		used[title] = true
+		out[g] = title
 	}
 	return out
 }
