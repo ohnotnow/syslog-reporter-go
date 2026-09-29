@@ -5,6 +5,9 @@ on:
     branches:
       - master
   pull_request:
+  # The release workflow runs this same job before it builds anything, so
+  # a tag can never publish binaries from a commit that fails it.
+  workflow_call:
 
 permissions:
   contents: read
