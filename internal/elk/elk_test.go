@@ -23,18 +23,25 @@ import (
 // fakeES serves a PIT, pages docs by search_after (the sort value is the
 // doc's index) and records what it was asked.
 type fakeES struct {
-	t          *testing.T
-	docs       []map[string]any
-	pageSize   int
-	total      int // reported hits.total; -1 = len(docs)
-	failAfter  int // fail the search after this many pages; 0 = never
-	mu         sync.Mutex
-	pages      int
-	pitIDs     []string // pit id each search carried
-	closed     string   // pit id DELETE /_pit closed
-	lastQuery  map[string]any
-	pitPath    string
-	authHeader string
+	t         *testing.T
+	docs      []map[string]any
+	pageSize  int
+	total     int // reported hits.total; -1 = len(docs)
+	failAfter int // fail the search after this many pages; 0 = never
+	// HTTP-200 partial answers: on page partialPage (1-based) report a
+	// timeout ("timeout") or a failed shard ("shard"); pitShardFail marks
+	// the PIT open reply itself.
+	partialPage  int
+	partialKind  string
+	pitShardFail bool
+	allowPartial any // allow_partial_search_results as last sent
+	mu           sync.Mutex
+	pages        int
+	pitIDs       []string // pit id each search carried
+	closed       string   // pit id DELETE /_pit closed
+	lastQuery    map[string]any
+	pitPath      string
+	authHeader   string
 }
 
 func (f *fakeES) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -46,7 +53,11 @@ func (f *fakeES) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/_pit"):
 		f.pitPath = r.URL.EscapedPath() + "?" + r.URL.RawQuery
-		json.NewEncoder(w).Encode(map[string]any{"id": "pit-0"})
+		reply := map[string]any{"id": "pit-0", "_shards": map[string]any{"total": 3, "failed": 0}}
+		if f.pitShardFail {
+			reply["_shards"] = map[string]any{"total": 3, "failed": 1}
+		}
+		json.NewEncoder(w).Encode(reply)
 	case r.Method == http.MethodPost && r.URL.Path == "/_search":
 		f.pages++
 		if f.failAfter > 0 && f.pages > f.failAfter {
@@ -56,6 +67,7 @@ func (f *fakeES) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		pit := body["pit"].(map[string]any)
 		f.pitIDs = append(f.pitIDs, pit["id"].(string))
 		f.lastQuery = body["query"].(map[string]any)
+		f.allowPartial = body["allow_partial_search_results"]
 		start := 0
 		if sa, ok := body["search_after"].([]any); ok {
 			start = int(sa[0].(float64)) + 1
@@ -69,10 +81,21 @@ func (f *fakeES) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if total < 0 {
 			total = len(f.docs)
 		}
-		json.NewEncoder(w).Encode(map[string]any{
-			"pit_id": fmt.Sprintf("pit-%d", f.pages), // ES may hand back a new id each page
-			"hits":   map[string]any{"total": map[string]any{"value": total}, "hits": hits},
-		})
+		reply := map[string]any{
+			"pit_id":    fmt.Sprintf("pit-%d", f.pages), // ES may hand back a new id each page
+			"timed_out": false,
+			"_shards":   map[string]any{"total": 3, "failed": 0},
+			"hits":      map[string]any{"total": map[string]any{"value": total}, "hits": hits},
+		}
+		if f.pages == f.partialPage {
+			switch f.partialKind {
+			case "timeout":
+				reply["timed_out"] = true
+			case "shard":
+				reply["_shards"] = map[string]any{"total": 3, "failed": 1}
+			}
+		}
+		json.NewEncoder(w).Encode(reply)
 	case r.Method == http.MethodDelete && r.URL.Path == "/_pit":
 		f.closed, _ = body["id"].(string)
 		w.Write([]byte(`{"succeeded":true}`))
@@ -266,5 +289,54 @@ func assertNoFiles(t *testing.T, dir string) {
 	entries, _ := os.ReadDir(dir)
 	for _, e := range entries {
 		t.Errorf("left behind: %s", e.Name())
+	}
+}
+
+// A timed-out search or a failed shard still answers HTTP 200, with a
+// subset whose total can match what it returned. Each must fail the dump,
+// leave no temporary file, and not replace a good dump already there.
+func TestDumpRejectsPartialResults(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		f    *fakeES
+	}{
+		{"timed out on a later page", &fakeES{partialPage: 2, partialKind: "timeout"}},
+		{"failed shard on the first page", &fakeES{partialPage: 1, partialKind: "shard"}},
+		{"failed shard at the PIT open", &fakeES{pitShardFail: true}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			c.f.total = -1
+			for i := 0; i < 5; i++ {
+				c.f.docs = append(c.f.docs, doc(i))
+			}
+			cfg, out := setup(t, c.f)
+			if err := os.WriteFile(out, []byte("good dump\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Dump(context.Background(), cfg, out, io.Discard); err == nil {
+				t.Fatal("Dump accepted a partial answer")
+			}
+			if b, _ := os.ReadFile(out); string(b) != "good dump\n" {
+				t.Errorf("existing dump replaced: %q", b)
+			}
+			entries, _ := os.ReadDir(filepath.Dir(out))
+			if len(entries) != 1 {
+				t.Errorf("%d files in the dump dir, want only the existing dump", len(entries))
+			}
+			if c.f.closed == "" {
+				t.Error("PIT not closed")
+			}
+		})
+	}
+}
+
+func TestDumpAsksForNoPartialResults(t *testing.T) {
+	f := &fakeES{total: -1, docs: []map[string]any{doc(0)}}
+	cfg, out := setup(t, f)
+	if _, err := Dump(context.Background(), cfg, out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if f.allowPartial != false {
+		t.Errorf("allow_partial_search_results = %v, want false", f.allowPartial)
 	}
 }

@@ -157,9 +157,26 @@ func (c *client) do(ctx context.Context, method, path string, body, out any) err
 	return dec.Decode(out)
 }
 
+// shardStatus is the _shards block of a PIT or search reply. An HTTP 200
+// is not proof of a whole answer: a failed shard or a timed-out search
+// returns a subset, and its total can match what it returned.
+type shardStatus struct {
+	Total  int `json:"total"`
+	Failed int `json:"failed"`
+}
+
+func (s shardStatus) check(what string) error {
+	if s.Failed > 0 {
+		return fmt.Errorf("%s: %d of %d shards failed", what, s.Failed, s.Total)
+	}
+	return nil
+}
+
 type searchResponse struct {
-	PitID string `json:"pit_id"`
-	Hits  struct {
+	PitID    string      `json:"pit_id"`
+	TimedOut bool        `json:"timed_out"`
+	Shards   shardStatus `json:"_shards"`
+	Hits     struct {
 		Total struct {
 			Value int `json:"value"`
 		} `json:"total"`
@@ -191,7 +208,8 @@ func Dump(ctx context.Context, cfg Config, out string, logw io.Writer) (res Resu
 	}}}
 
 	var pit struct {
-		ID string `json:"id"`
+		ID     string      `json:"id"`
+		Shards shardStatus `json:"_shards"`
 	}
 	if err := c.do(ctx, http.MethodPost, "/"+escapeIndex(cfg.Index)+"/_pit?keep_alive="+pitKeepAlive, nil, &pit); err != nil || pit.ID == "" {
 		if err == nil {
@@ -210,6 +228,9 @@ func Dump(ctx context.Context, cfg Config, out string, logw io.Writer) (res Resu
 		}
 		res.Searches = c.searches
 	}()
+	if err := pit.Shards.check("opening the point-in-time"); err != nil {
+		return res, err
+	}
 
 	tmp, err := os.CreateTemp(filepath.Dir(out), "."+filepath.Base(out)+".tmp-*")
 	if err != nil {
@@ -238,6 +259,9 @@ func Dump(ctx context.Context, cfg Config, out string, logw io.Writer) (res Resu
 			"pit":              map[string]any{"id": pitID, "keep_alive": pitKeepAlive},
 			"sort":             []any{map[string]any{"@timestamp": "asc"}},
 			"track_total_hits": first,
+			// Refuse a subset rather than detect it afterwards; the checks
+			// below cover clusters that ignore this.
+			"allow_partial_search_results": false,
 		}
 		if searchAfter != nil {
 			body["search_after"] = searchAfter
@@ -249,6 +273,12 @@ func Dump(ctx context.Context, cfg Config, out string, logw io.Writer) (res Resu
 		}
 		if sr.PitID != "" {
 			pitID = sr.PitID
+		}
+		if sr.TimedOut {
+			return res, fmt.Errorf("after %d documents: search timed out (partial results)", res.Written)
+		}
+		if err := sr.Shards.check(fmt.Sprintf("after %d documents", res.Written)); err != nil {
+			return res, err
 		}
 		if first {
 			res.Total = sr.Hits.Total.Value
