@@ -67,11 +67,17 @@ searches titles. On `/api/aggregates`, `host` and `program` are exact.
 On the mute: `host` narrows the mute to some of the finding's hosts (each
 must be a host the finding lists, or the whole call is a 400 and nothing
 is written; absent means all of them). `match` is a regex (Go RE2) on
-the message: with it, only matching lines from that program on those
-hosts are dropped; without it, every line from that program on those
-hosts is dropped. The server compiles the regex first; one that does not
-compile is a 400 with the compiler's message. Entry ids (from the mute
-response or `/api/knowns`) are not finding ids.
+the line after the hostname, `program[pid]: message`. With it, every
+line it matches on those hosts is dropped, WHATEVER program logged it:
+the finding's program is not checked for lines. Without it, every line
+from the finding's program on those hosts is dropped. Either way the
+entry also mutes that program's anomalies on those hosts. So a mute on a
+`cron` finding with `match` `quota exceeded` also drops an `sshd` line
+saying "quota exceeded" on the same hosts; to keep it to cron, put the
+program in the regex: `^cron\[\d+\]: .*quota exceeded`. The server
+compiles the regex first; one that does not compile is a 400 with the
+compiler's message. Entry ids (from the mute response or `/api/knowns`)
+are not finding ids.
 
 Examples:
 

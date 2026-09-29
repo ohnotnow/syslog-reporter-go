@@ -63,9 +63,11 @@ and optional TLS.
 
 A daily email gets skimmed and archived. The intended shape is quiet
 daily runs and one email a week: `digest` reads the findings library over
-the last seven days, groups the daily findings that recur (the same
-service on the same hosts; the same host and program behaving oddly),
-ranks them by how many days they were seen, and has the digest model
+the last seven days, groups the daily findings that recur (issues by
+underlying problem, which the digest model judges from the week's
+daily issues since their wording drifts from day to day; anomalies by
+the same host and program behaving oddly), ranks them by how many days
+they were seen, and has the digest model
 write fresh resolutions that know the thing has been going on all week.
 Under that list sit the week's worst one-offs: critical or high issues
 that happened on a single day, with the advice the daily run already
