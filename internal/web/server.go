@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ohnotnow/syslog-reporter-go/internal/cli"
 	"github.com/ohnotnow/syslog-reporter-go/internal/reporter"
 )
 
@@ -64,7 +65,7 @@ type Config struct {
 // TLS pair: the pair may only become whole once flags are applied. Callers
 // run Validate after any overrides.
 func ConfigFromEnv() (Config, error) {
-	secure, err := parseBoolEnv("SYSLOG_WEB_SECURE_COOKIES")
+	secure, err := cli.ParseBoolEnv("SYSLOG_WEB_SECURE_COOKIES")
 	if err != nil {
 		return Config{}, err
 	}
@@ -109,20 +110,6 @@ func (c Config) Validate() error {
 			"the TLS certificate and key must be set together (or neither, for plain HTTP)")
 	}
 	return nil
-}
-
-// parseBoolEnv reads an on/off environment variable strictly: the usual
-// truthy and falsy spellings work, anything else errors instead of
-// silently meaning off.
-func parseBoolEnv(key string) (bool, error) {
-	switch strings.ToLower(os.Getenv(key)) {
-	case "1", "true", "yes", "on":
-		return true, nil
-	case "", "0", "false", "no", "off":
-		return false, nil
-	default:
-		return false, fmt.Errorf("%s=%q is not a boolean (use 1/true/yes/on or 0/false/no/off)", key, os.Getenv(key))
-	}
 }
 
 func (c Config) logDebug(format string, args ...any) {

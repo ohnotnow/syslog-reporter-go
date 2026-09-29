@@ -86,6 +86,24 @@ The store must already exist (a report run creates it); --db and
 SYSLOG_DB_PATH name it as in the other commands.
 `
 
+const fetchHelpIntro = `Dump one day of syslog from Elasticsearch as NDJSON, the input run reads.
+Point-in-time paging, so the dump is a consistent snapshot; the account
+needs only the 'read' index privilege. The file appears under its final
+name only once the whole day arrived.
+usage: syslog-reporter fetch [flags]
+flags:
+`
+
+const fetchHelpEnv = `environment (flags win):
+  ELK_URL, ELK_INDEX                    --url, --index
+  ELK_API_KEY                           API key ("id:key" or already base64)
+  ELK_USERNAME, ELK_PASSWORD            basic auth instead of a key
+  ELK_INSECURE (1/true/yes/on)          --insecure
+  ELK_CA_CERT                           --ca-cert
+  https_proxy / no_proxy                honoured; put the cluster in no_proxy
+                                        if it must not go through your proxy
+`
+
 const budgetHelp = `Show or reset today's LLM prompt-token spend.
 
 usage: syslog-reporter budget [reset] [--db <path>]
