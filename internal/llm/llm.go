@@ -75,12 +75,13 @@ func SetDebugLogger(fn func(format string, args ...any)) {
 func Complete(ctx context.Context, model, system, user, schemaName string, schema map[string]any, out any) error {
 	// Scrubbing sits here, both directions, so every provider path is
 	// covered and no future agent can forget it (SYSLOG_SCRUB*; ant ADR
-	// srg-Sgdkm): the user message goes out scrubbed and the reply is
-	// swapped back before it is decoded.
+	// srg-Sgdkm): the system and user messages go out scrubbed in one
+	// session and the reply is swapped back before it is decoded.
 	if err := checkBudget(); err != nil {
 		return err
 	}
-	user, sess := scrubOut(user)
+	scrubbed, sess := scrubAll(system, user)
+	system, user = scrubbed[0], scrubbed[1]
 	provider, modelID, ok := strings.Cut(model, "/")
 	if !ok {
 		return fmt.Errorf("model %q has no provider prefix; use the litellm format, e.g. openai/%s", model, model)

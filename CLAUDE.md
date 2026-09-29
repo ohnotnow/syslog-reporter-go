@@ -142,7 +142,7 @@ SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.
   and are refused at startup by llm.CheckReasoningEffort.
   `SYSLOG_SCRUB=1` with `SYSLOG_SCRUB_DOMAINS` / `SYSLOG_SCRUB_IP_PREFIXES`
   (real=fake pairs) tokenises every email address and swaps the listed
-  domains and public IP prefixes in every provider-bound user message,
+  domains and public IP prefixes in every provider-bound message (system and user),
   then reverses it on the reply inside llm.Complete, so nothing
   downstream sees the substitutes (ant ADR srg-Sgdkm, owner decision
   2026-09-20). Provider-independent on purpose; off, non-azure models

@@ -120,8 +120,9 @@ func TestScrubWarningOnlyOffAndOutsideAzure(t *testing.T) {
 }
 
 // What actually leaves the estate: the provider-bound request carries the
-// scrubbed user message while the system prompt travels untouched, and the
-// decoded reply carries the real names again. Asserted at the wire via the
+// scrubbed user AND system messages (the system prompt can embed the
+// per-host inventory, ait srg-6Vsgx.4), an address in both gets one token,
+// and the decoded reply carries the real names again. Asserted at the wire via the
 // same httptest seam TestAzureRoundTrip uses.
 func TestCompleteScrubsOutAndReversesIn(t *testing.T) {
 	withScrub(t, "1", "gla.example=fake.example", "130.209=192.168")
@@ -160,7 +161,7 @@ func TestCompleteScrubsOutAndReversesIn(t *testing.T) {
 		Fix string `json:"fix"`
 	}
 	err := Complete(context.Background(), "azure/test-model",
-		"host table: web1.gla.example is Ubuntu",
+		"host table: web1.gla.example is Ubuntu, owner ops@gla.example",
 		"Jun 1 web1.gla.example sshd[9]: Failed password for ops@gla.example from 130.209.55.103",
 		"answer", map[string]any{"type": "object"}, &out)
 	if err != nil {
@@ -169,8 +170,12 @@ func TestCompleteScrubsOutAndReversesIn(t *testing.T) {
 	if strings.Contains(gotUser, "gla.example") || strings.Contains(gotUser, "ops@") || strings.Contains(gotUser, "130.209") {
 		t.Errorf("user message still carries real values: %q", gotUser)
 	}
-	if !strings.Contains(gotSystem, "web1.gla.example") {
-		t.Errorf("system prompt must not be scrubbed, got %q", gotSystem)
+	if strings.Contains(gotSystem, "gla.example") || strings.Contains(gotSystem, "ops@") {
+		t.Errorf("system prompt still carries real values: %q", gotSystem)
+	}
+	if !strings.Contains(gotSystem, "web1.fake.example") || !strings.Contains(gotSystem, "<email-1>") ||
+		!strings.Contains(gotUser, "<email-1>") {
+		t.Errorf("one session across both messages: system %q, user %q", gotSystem, gotUser)
 	}
 	if want := "mail ops@gla.example about web1.gla.example (130.209.55.103)"; out.Fix != want {
 		t.Errorf("decoded reply = %q, want %q", out.Fix, want)

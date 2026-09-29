@@ -767,7 +767,7 @@ Read from the environment or a `.env` beside the working directory
   (the resource's v1 endpoint; see the provider routing section)
 - `SYSLOG_REASONING_EFFORT` reasoning effort, see above; unset = `low`
 - `SYSLOG_SCRUB`, `SYSLOG_SCRUB_DOMAINS`, `SYSLOG_SCRUB_IP_PREFIXES`
-  scrub every provider-bound user message and reverse the scrub on the
+  scrub every provider-bound message (system and user, one session) and reverse the scrub on the
   reply, inside `llm.Complete`, so no agent, prompt, store or report ever
   sees the substitutes. With `SYSLOG_SCRUB=1`: every email address
   becomes a numbered token (`<email-1>`, the same address the same token

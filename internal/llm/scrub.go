@@ -9,7 +9,9 @@ package llm
 // Deliberately narrow: three patterns cover machine-written syslog text.
 // This is not general PII scrubbing and the docs must not claim it is;
 // --no-llm remains the route for log classes that forbid external
-// processing. System prompts are not scrubbed: they are ours.
+// processing. System prompts are scrubbed too, in the same session as
+// the user message: some carry log-derived detail, such as the per-host
+// OS inventory with its FQDNs (ait srg-6Vsgx.4).
 
 import (
 	"fmt"
@@ -184,32 +186,44 @@ type scrubSession struct {
 // domain first splits the address and leaks the local part), then
 // domains, then IP prefixes. One count line goes to stderr, never values.
 func scrubOut(text string) (string, *scrubSession) {
+	out, sess := scrubAll(text)
+	return out[0], sess
+}
+
+// scrubAll is scrubOut over every text of one request with a single
+// session, so an address gets the same token in the system and the user
+// message and the reply reverses against both.
+func scrubAll(texts ...string) ([]string, *scrubSession) {
 	scrubMu.RLock()
 	cfg := scrubCfg
 	scrubMu.RUnlock()
 	sess := &scrubSession{}
 	if !cfg.on {
-		return text, sess
+		return texts, sess
 	}
 	index := map[string]int{}
-	text = EmailPattern.ReplaceAllStringFunc(text, func(addr string) string {
-		n, seen := index[addr]
-		if !seen {
-			sess.emails = append(sess.emails, addr)
-			n = len(sess.emails)
-			index[addr] = n
-		}
-		return fmt.Sprintf("<email-%d>", n)
-	})
 	swaps := 0
-	for _, p := range cfg.domains {
-		text = replaceCounted(p.out, text, p.fake, &swaps)
-	}
-	for _, p := range cfg.prefixes {
-		text = replaceCounted(p.out, text, p.fake+".", &swaps)
+	out := make([]string, len(texts))
+	for i, text := range texts {
+		text = EmailPattern.ReplaceAllStringFunc(text, func(addr string) string {
+			n, seen := index[addr]
+			if !seen {
+				sess.emails = append(sess.emails, addr)
+				n = len(sess.emails)
+				index[addr] = n
+			}
+			return fmt.Sprintf("<email-%d>", n)
+		})
+		for _, p := range cfg.domains {
+			text = replaceCounted(p.out, text, p.fake, &swaps)
+		}
+		for _, p := range cfg.prefixes {
+			text = replaceCounted(p.out, text, p.fake+".", &swaps)
+		}
+		out[i] = text
 	}
 	fmt.Fprintf(os.Stderr, "scrub: %d email address(es), %d domain/IP replacement(s) in outbound request\n", len(sess.emails), swaps)
-	return text, sess
+	return out, sess
 }
 
 // ScrubOut is the outbound pass alone, for callers whose reply carries
