@@ -21,7 +21,7 @@ func digestFixture(t *testing.T) (*Digest, *DigestReport) {
 		anomalyFinding(6, "2026-09-03", "db01.example.test", "postgres", "baseline", "Louder than usual"),
 	}
 	runs := dailyRuns("2026-09-01", "2026-09-02", "2026-09-03")
-	d := BuildDigest("2026-09-01", "2026-09-07", runs, findings)
+	d := BuildDigest("2026-09-01", "2026-09-07", runs, findings, nil)
 
 	issue := d.RecurringIssues(10, len(d.RunDays))[0]
 	issue.ID = 101 // as capture would set it
@@ -150,7 +150,7 @@ func TestDigestLLMSkippedRendersFactsOnly(t *testing.T) {
 }
 
 func TestDigestQuietWeek(t *testing.T) {
-	d := BuildDigest("2026-09-01", "2026-09-03", dailyRuns("2026-09-01", "2026-09-03"), nil)
+	d := BuildDigest("2026-09-01", "2026-09-03", dailyRuns("2026-09-01", "2026-09-03"), nil, nil)
 	r := &DigestReport{Digest: d, Model: "openai/gpt-test"}
 	got := r.EmailBody()
 	for _, want := range []string{

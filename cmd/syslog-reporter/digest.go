@@ -129,7 +129,18 @@ func runDigest(args []string) {
 	if err != nil {
 		fatal("reading findings: %v", err)
 	}
-	digest := reporter.BuildDigest(from, until, runs, findings)
+	// Daily issues are LLM prose, so the same fault drifts in title,
+	// service label and host set from day to day; the model groups them
+	// and BuildDigest counts. --no-llm falls back to service + host set.
+	var clusters map[int64]int
+	if !*noLLM {
+		log.Info("Grouping the window's daily issues by problem with %s", digestModel)
+		clusters, err = reporter.NewIssueClusterer(findings, digestModel).Run(context.Background())
+		if err != nil {
+			fatal("grouping the window's issues: %v", err)
+		}
+	}
+	digest := reporter.BuildDigest(from, until, runs, findings, clusters)
 	log.Info("Digest %s to %s: %d daily runs, %d issue groups (%d recurring), %d anomaly groups",
 		from, until, len(digest.RunDays), len(digest.Issues), len(digest.Recurring()), len(digest.Anomalies))
 	if len(digest.MissingDays) > 0 {

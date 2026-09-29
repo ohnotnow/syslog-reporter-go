@@ -41,7 +41,7 @@ func TestBuildDigestGroupsIssuesByServiceAndHostSet(t *testing.T) {
 		issueFinding(4, "2026-09-03", "sshd", "critical", []string{"db01.example.test"}, "SSH on the db box"),
 		issueFinding(5, "2026-09-02", "cron", "low", []string{"db01.example.test"}, "Cron whinge"),
 	}
-	d := BuildDigest("2026-09-01", "2026-09-07", dailyRuns("2026-09-01", "2026-09-02", "2026-09-03"), findings)
+	d := BuildDigest("2026-09-01", "2026-09-07", dailyRuns("2026-09-01", "2026-09-02", "2026-09-03"), findings, nil)
 
 	if len(d.Issues) != 3 {
 		t.Fatalf("issue groups = %d, want 3", len(d.Issues))
@@ -75,7 +75,7 @@ func TestBuildDigestGroupsAnomaliesByHostAndProgram(t *testing.T) {
 		anomalyFinding(3, "2026-09-02", "db01.example.test", "postgres", "baseline", "Louder than usual"),
 		anomalyFinding(4, "2026-09-04", "app01.example.test", "nginx", "temporal", "Busy at 03:00"),
 	}
-	d := BuildDigest("2026-09-01", "2026-09-07", dailyRuns("2026-09-01", "2026-09-02", "2026-09-04"), findings)
+	d := BuildDigest("2026-09-01", "2026-09-07", dailyRuns("2026-09-01", "2026-09-02", "2026-09-04"), findings, nil)
 
 	if len(d.Anomalies) != 2 {
 		t.Fatalf("anomaly groups = %d, want 2", len(d.Anomalies))
@@ -105,12 +105,12 @@ func TestBuildDigestIsOrderIndependent(t *testing.T) {
 		anomalyFinding(5, "2026-09-01", "y.example.test", "sshd", "peer", "y"),
 	}
 	runs := dailyRuns("2026-09-01")
-	forward := BuildDigest("2026-09-01", "2026-09-01", runs, findings)
+	forward := BuildDigest("2026-09-01", "2026-09-01", runs, findings, nil)
 	reversed := make([]*FindingDetail, len(findings))
 	for i, f := range findings {
 		reversed[len(findings)-1-i] = f
 	}
-	backward := BuildDigest("2026-09-01", "2026-09-01", runs, reversed)
+	backward := BuildDigest("2026-09-01", "2026-09-01", runs, reversed, nil)
 
 	var want, got []string
 	for _, g := range forward.Issues {
@@ -131,7 +131,7 @@ func TestBuildDigestIsOrderIndependent(t *testing.T) {
 func TestBuildDigestReportsMissingDays(t *testing.T) {
 	runs := dailyRuns("2026-09-01", "2026-09-02", "2026-09-04")
 	runs = append(runs, &RunSummary{ID: 9, LogDate: "2026-09-03", Kind: RunKindDigest})
-	d := BuildDigest("2026-09-01", "2026-09-05", runs, nil)
+	d := BuildDigest("2026-09-01", "2026-09-05", runs, nil, nil)
 	if !reflect.DeepEqual(d.RunDays, []string{"2026-09-01", "2026-09-02", "2026-09-04"}) {
 		t.Errorf("run days = %v", d.RunDays)
 	}
@@ -161,7 +161,7 @@ func TestDigestAdaptersCarryTheRecurrence(t *testing.T) {
 		anomalyFinding(13, "2026-09-01", "db01.example.test", "postgres", "baseline", "Louder than usual"),
 		anomalyFinding(14, "2026-09-02", "db01.example.test", "postgres", "baseline", "Louder than usual"),
 	}
-	d := BuildDigest("2026-09-01", "2026-09-07", dailyRuns("2026-09-01", "2026-09-02", "2026-09-03"), findings)
+	d := BuildDigest("2026-09-01", "2026-09-07", dailyRuns("2026-09-01", "2026-09-02", "2026-09-03"), findings, nil)
 
 	issue := d.Issues[0].DigestIssue(len(d.RunDays))
 	if issue.ID != 0 {
@@ -200,7 +200,7 @@ func TestDigestIssuesMakeTitlesUnique(t *testing.T) {
 		issueFinding(3, "2026-09-03", "cron", "low", []string{"db01.example.test"}, "Disk filling on /var"),
 		issueFinding(4, "2026-09-03", "sshd", "low", []string{"db01.example.test"}, "SSH noise"),
 	}
-	d := BuildDigest("2026-09-01", "2026-09-03", dailyRuns("2026-09-01", "2026-09-02", "2026-09-03"), findings)
+	d := BuildDigest("2026-09-01", "2026-09-03", dailyRuns("2026-09-01", "2026-09-02", "2026-09-03"), findings, nil)
 	issues := d.DigestIssues(3)
 	got := []string{issues[0].Issue, issues[1].Issue, issues[2].Issue}
 	want := []string{"Disk filling on /var (web01.example.test)", "Disk filling on /var (db01.example.test)", "SSH noise"}
@@ -222,7 +222,7 @@ func TestDigestRecurringAndOneOffs(t *testing.T) {
 		issueFinding(5, "2026-09-03", "backup", "high", []string{"e.example.test"}, "Backup failed on another"),
 		issueFinding(6, "2026-09-03", "cron", "medium", []string{"f.example.test"}, "Cron whinge"),
 	}
-	d := BuildDigest("2026-09-01", "2026-09-03", dailyRuns("2026-09-01", "2026-09-02", "2026-09-03"), findings)
+	d := BuildDigest("2026-09-01", "2026-09-03", dailyRuns("2026-09-01", "2026-09-02", "2026-09-03"), findings, nil)
 
 	recurring := d.Recurring()
 	if len(recurring) != 1 || recurring[0].Service != "sshd" {
@@ -245,7 +245,7 @@ func TestDigestRecurringAndOneOffs(t *testing.T) {
 		t.Errorf("one-off resolution should be the daily run's own, got %q", resolutions[0].RootCause)
 	}
 
-	single := BuildDigest("2026-09-03", "2026-09-03", dailyRuns("2026-09-03"), findings[3:])
+	single := BuildDigest("2026-09-03", "2026-09-03", dailyRuns("2026-09-03"), findings[3:], nil)
 	if single.MinRecurringDays() != 1 || len(single.Recurring()) != 3 || len(single.OneOffs()) != 0 {
 		t.Errorf("single run day: min %d, recurring %d, one-offs %d; want 1/3/0",
 			single.MinRecurringDays(), len(single.Recurring()), len(single.OneOffs()))

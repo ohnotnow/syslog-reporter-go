@@ -3,10 +3,11 @@ package reporter
 // The weekly digest's deterministic heart (ait srg-xiBoC.4, ant ADR
 // srg-WtzbG): group a window's daily findings across days and rank the
 // groups by how many days they recurred. No database, no LLM. The keys are
-// the stable fields only - service plus the sorted host set for issues,
-// host plus program for anomalies - never the title, which is LLM prose
-// that drifts from day to day. Ordering is explicit everywhere so the
-// digest never depends on map iteration order.
+// the IssueClusterer's clusters for issues (srg-tCbyJ: service labels and
+// host sets are LLM prose that drift day to day, so service plus host set
+// almost never matched across days) - or service plus the sorted host set
+// on a --no-llm digest - and host plus program for anomalies. Ordering is
+// explicit everywhere so the digest never depends on map iteration order.
 
 import (
 	"fmt"
@@ -15,11 +16,11 @@ import (
 	"time"
 )
 
-// IssueGroup is one recurring issue: the same service on the same host set
-// on one or more days of the window.
+// IssueGroup is one recurring issue: one cluster (or one service on one
+// host set) on one or more days of the window.
 type IssueGroup struct {
-	Service  string
-	Hosts    []string      // sorted; with Service, the group key
+	Service  string        // the latest day's label
+	Hosts    []string      // sorted union across Days
 	Days     []string      // ISO dates seen, ascending, distinct
 	Severity string        // the most severe seen across Days
 	Latest   *IssuePayload // the most recent day's record
@@ -52,8 +53,9 @@ type Digest struct {
 
 // BuildDigest groups findings (DailyFindings output) by the keys above and
 // ranks the groups. runs is ListRuns output for the window; only daily
-// runs count as run days. from and to are ISO dates, inclusive.
-func BuildDigest(from, to string, runs []*RunSummary, findings []*FindingDetail) *Digest {
+// runs count as run days. from and to are ISO dates, inclusive. clusters
+// is IssueClusterer output; nil groups issues by service plus host set.
+func BuildDigest(from, to string, runs []*RunSummary, findings []*FindingDetail, clusters map[int64]int) *Digest {
 	d := &Digest{From: from, To: to}
 	ran := map[string]bool{}
 	for _, r := range runs {
@@ -77,10 +79,16 @@ func BuildDigest(from, to string, runs []*RunSummary, findings []*FindingDetail)
 			hosts := append([]string{}, f.Issue.AffectedHost...)
 			sort.Strings(hosts)
 			key := f.Service + "\x00" + strings.Join(hosts, "\x00")
+			if c, ok := clusters[f.ID]; ok {
+				key = fmt.Sprint(c)
+			}
 			g, ok := issues[key]
 			if !ok {
-				g = &IssueGroup{Service: f.Service, Hosts: hosts, Severity: f.Severity}
+				g = &IssueGroup{Severity: f.Severity}
 				issues[key] = g
+			}
+			for _, h := range hosts {
+				g.Hosts = appendDistinct(g.Hosts, h)
 			}
 			g.Days = appendDay(g.Days, f.LogDate)
 			if severityRankOf(f.Severity) < severityRankOf(g.Severity) {
@@ -89,6 +97,7 @@ func BuildDigest(from, to string, runs []*RunSummary, findings []*FindingDetail)
 			if g.Latest == nil || f.LogDate > g.latestDate || (f.LogDate == g.latestDate && f.ID > g.LatestID) {
 				g.Latest, g.LatestID = f.Issue, f.ID
 				g.latestDate = f.LogDate
+				g.Service = f.Service
 			}
 		case f.Anomaly != nil:
 			key := f.Anomaly.Host + "\x00" + f.Anomaly.Program
@@ -108,6 +117,7 @@ func BuildDigest(from, to string, runs []*RunSummary, findings []*FindingDetail)
 
 	for _, g := range issues {
 		sort.Strings(g.Days)
+		sort.Strings(g.Hosts)
 		d.Issues = append(d.Issues, g)
 	}
 	sort.Slice(d.Issues, func(i, j int) bool {
@@ -178,6 +188,7 @@ func (g *IssueGroup) DigestIssue(runDays int) *Issue {
 	issue := g.Latest.Issue
 	issue.ID = 0
 	issue.Severity = g.Severity
+	issue.AffectedHost = g.Hosts
 	issue.TimestampFrequency = RecurrenceSentence(g.Days, runDays)
 	return &issue
 }

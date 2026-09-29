@@ -29,6 +29,9 @@ var issueDetectionTemplateRaw string
 //go:embed prompts/issue_dedupe.txt
 var issueDedupePromptRaw string
 
+//go:embed prompts/issue_cluster.txt
+var issueClusterPromptRaw string
+
 //go:embed prompts/anomaly_explanation.txt
 var anomalyExplanationPromptRaw string
 
@@ -227,6 +230,103 @@ func (a *IssueDeduplicatorAgent) Run(ctx context.Context) (*IssueList, error) {
 		return nil, err
 	}
 	return &got, nil
+}
+
+// IssueClusterer groups a digest window's daily issues by underlying
+// problem (ait srg-tCbyJ). Service labels, titles and host sets are LLM
+// prose that drift from day to day, so no deterministic key matches the
+// same fault across days; the model assigns clusters and BuildDigest
+// still does all the counting.
+type IssueClusterer struct {
+	Findings []*FindingDetail
+	Model    string
+}
+
+func NewIssueClusterer(findings []*FindingDetail, model string) *IssueClusterer {
+	return &IssueClusterer{Findings: findings, Model: model}
+}
+
+func issueClusterSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"clusters": map[string]any{"type": "array", "items": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"label": map[string]any{"type": "string"},
+					"ids":   map[string]any{"type": "array", "items": map[string]any{"type": "integer"}},
+				},
+				"required":             []string{"label", "ids"},
+				"additionalProperties": false,
+			}},
+		},
+		"required":             []string{"clusters"},
+		"additionalProperties": false,
+	}
+}
+
+type issueClusters struct {
+	Clusters []struct {
+		Label string  `json:"label"`
+		IDs   []int64 `json:"ids"`
+	} `json:"clusters"`
+}
+
+// Run returns a cluster number for every issue finding's id. The model's
+// answer is checked, not trusted (it has invented ids, listed one twice and
+// left one out in testing): unknown ids are dropped, an id listed twice
+// stays in its first cluster, and an id left out becomes a cluster of its
+// own. Anomaly findings are ignored.
+func (a *IssueClusterer) Run(ctx context.Context) (map[int64]int, error) {
+	type item struct {
+		ID       int64    `json:"id"`
+		Date     string   `json:"date"`
+		Severity string   `json:"severity"`
+		Service  string   `json:"service"`
+		Title    string   `json:"title"`
+		Hosts    []string `json:"hosts"`
+	}
+	var items []item
+	for _, f := range a.Findings {
+		if f.Kind == "issue" && f.Issue != nil {
+			items = append(items, item{f.ID, f.LogDate, f.Severity, f.Service, f.Title, f.Hosts})
+		}
+	}
+	out := make(map[int64]int, len(items))
+	next := 0 // the first cluster number the model did not use
+	if len(items) > 1 {
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		enc.SetEscapeHTML(false)
+		if err := enc.Encode(items); err != nil {
+			return nil, err
+		}
+		var got issueClusters
+		system := strings.TrimSuffix(issueClusterPromptRaw, "\n")
+		if err := llm.Complete(ctx, a.Model, system, strings.TrimSuffix(buf.String(), "\n"),
+			"IssueClusters", issueClusterSchema(), &got); err != nil {
+			return nil, err
+		}
+		known := make(map[int64]bool, len(items))
+		for _, it := range items {
+			known[it.ID] = true
+		}
+		next = len(got.Clusters)
+		for n, c := range got.Clusters {
+			for _, id := range c.IDs {
+				if _, taken := out[id]; known[id] && !taken {
+					out[id] = n
+				}
+			}
+		}
+	}
+	for _, it := range items {
+		if _, ok := out[it.ID]; !ok {
+			out[it.ID] = next
+			next++
+		}
+	}
+	return out, nil
 }
 
 // ResolutionAgent turns each issue into paste-ready investigate/fix commands.

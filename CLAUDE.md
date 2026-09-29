@@ -65,7 +65,7 @@ internal/reporter/
   logcontext.go             LogIndex: per-host surrounding-line windows fed
                             to the resolution writer (raw lines; radius from
                             SYSLOG_CONTEXT_LINES / --context-lines, 0 = off)
-  llmagents.go prompts/     the four LLM agents + embedded system prompts
+  llmagents.go prompts/     the LLM agents + embedded system prompts
   emailer.go                SMTP digest + markdown-attachment sender
   capture.go                files one run's findings into the library
   librarystore.go           findings library store (runs/findings/feedback/users)
@@ -139,7 +139,7 @@ SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.
   downstream sees the substitutes (ant ADR srg-Sgdkm, owner decision
   2026-09-20). Provider-independent on purpose; off, non-azure models
   get a startup warning. SYSLOG_REDACT is gone and refused at startup.
-  Not general PII scrubbing: never claim it is. All four prompts carry a
+  Not general PII scrubbing: never claim it is. Every prompt carries a
   trust-boundary block and both report layouts a paste caution, each
   pinned by tests - keep them.
 - `--send-email` was verified against a local mailhog: recipients ride the
@@ -221,8 +221,14 @@ SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.
   mgmt-report counts daily runs only), and its finding ids are what the
   email prints. Model: `SYSLOG_DIGEST_MODEL` > `SYSLOG_ISSUE_MODEL` >
   `--model`. On digest day the digest REPLACES the daily email
-  (daily-run.sh `--digest`; `--no-email` for the other days). Keys are
-  service + sorted host set and host + program, never titles (LLM prose).
+  (daily-run.sh `--digest`; `--no-email` for the other days). Issues
+  group by an IssueClusterer call (the digest model groups the window's
+  daily issues by underlying problem; srg-tCbyJ: service labels and host
+  sets are LLM prose that drift, so service + host set almost never
+  matched across days). Its answer is repaired, not trusted, and a failed
+  call is fatal - never a silent fall-back to the old key, which only
+  --no-llm uses. BuildDigest still does all the counting; hosts are the
+  union across the week. Anomalies group by host + program.
   Two issue lists, deliberately: recurring (2+ days, top 10, smart model)
   and worst one-offs (single-day critical/high, top 5, the daily run's
   own resolution, no model call); single-day medium/low are attachment

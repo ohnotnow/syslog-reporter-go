@@ -68,7 +68,7 @@ internal/jev/               stdlib client for TypeSafe's System One API
   models.go                 issue / resolution / explained-anomaly models
   logcontext.go             LogIndex: per-host surrounding-line windows for
                             the resolution writer (the grep -C analogue)
-  llmagents.go prompts/     the four LLM agents + embedded system prompts
+  llmagents.go prompts/     the LLM agents + embedded system prompts
   report.go                 both daily report layouts (digest + full attachment)
   digest.go                 weekly digest: cross-day grouping and ranking of
                             library findings, the LLM adapters
@@ -524,7 +524,15 @@ a reader of the library, not a log pipeline:
 ```
 DailyFindings(from, to)  every daily finding in the window, payloads decoded
         |
-BuildDigest              group issues by (service, sorted host set) and
+IssueClusterer           one digest-model call groups the daily issues by
+                         underlying problem (titles, service labels and
+                         host sets drift day to day); the answer is
+                         repaired: unknown ids dropped, a repeated id kept
+                         in its first cluster, a missing id alone. Fatal on
+                         error; --no-llm skips it and keys on (service,
+                         sorted host set)
+        |
+BuildDigest              group issues by cluster (hosts: the union) and
                          anomalies by (host, program); count distinct days;
                          rank by days seen (ties: severity, then names);
                          note the window days with no daily run
