@@ -395,3 +395,75 @@ INSERT INTO runs (id, log_date, created_at, model) VALUES (1, '2026-06-01', '202
 		t.Errorf("runs after migration = %+v, want one daily run", runs)
 	}
 }
+
+// Migration 8 (ait srg-6Vsgx.8): a version-7 file's known_knowns is rebuilt
+// with AUTOINCREMENT, keeping every row's id and provenance and its index.
+func TestMigrateV7FileGainsNonReusableKnownIDs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v7.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v7 := knownKnownsSchema + `
+CREATE TABLE schema_version (id INTEGER PRIMARY KEY CHECK (id = 1), version INTEGER NOT NULL DEFAULT 0);
+INSERT INTO schema_version (id, version) VALUES (1, 7);
+INSERT INTO known_knowns (id, host, program, match, reason, added, expires, source, created_by, token_prefix, finding_id, created_at)
+    VALUES (4, 'web01.example.test', 'cron', '', 'noisy', '2026-09-01', NULL, 'api', 'opsuser', 'abcdefgh', 77, '2026-09-01T10:00:00Z'),
+           (9, '*', '', 'kernel: .*', 'bundled rule', '2026-09-02', '2026-12-31', 'bundled', NULL, NULL, NULL, '2026-09-02T10:00:00Z');
+`
+	// Every earlier table too, so the ladder's later steps find what they expect.
+	if _, err := raw.Exec(baselineSchema + apiTokensSchema + v7); err != nil {
+		t.Fatalf("build v7 db: %v", err)
+	}
+	for _, stmt := range []string{
+		"ALTER TABLE runs ADD COLUMN kind TEXT NOT NULL DEFAULT 'daily'",
+		"ALTER TABLE runs ADD COLUMN budget_reached INTEGER NOT NULL DEFAULT 0",
+		"CREATE TABLE llm_spend (day TEXT PRIMARY KEY, prompt_tokens INTEGER NOT NULL)",
+	} {
+		if _, err := raw.Exec(stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	raw.Close()
+
+	db, err := openDatabase(path)
+	if err != nil {
+		t.Fatalf("migrating open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	var ddl string
+	if err := db.QueryRow("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'known_knowns'").Scan(&ddl); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(ddl, "AUTOINCREMENT") {
+		t.Errorf("known_knowns lacks AUTOINCREMENT: %s", ddl)
+	}
+	var idx int
+	db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_known_knowns_finding'").Scan(&idx)
+	if idx != 1 {
+		t.Errorf("idx_known_knowns_finding missing after the rebuild")
+	}
+	var source, createdBy, prefix string
+	var finding int64
+	if err := db.QueryRow("SELECT source, created_by, token_prefix, finding_id FROM known_knowns WHERE id = 4").
+		Scan(&source, &createdBy, &prefix, &finding); err != nil {
+		t.Fatalf("row 4: %v", err)
+	}
+	if source != "api" || createdBy != "opsuser" || prefix != "abcdefgh" || finding != 77 {
+		t.Errorf("row 4 provenance = %s/%s/%s/%d", source, createdBy, prefix, finding)
+	}
+	var n int
+	db.QueryRow("SELECT count(*) FROM known_knowns").Scan(&n)
+	if n != 2 {
+		t.Errorf("%d rows, want 2", n)
+	}
+	// The sequence starts past the highest existing id.
+	if _, err := db.Exec("INSERT INTO known_knowns (host, reason, added, source, created_at) VALUES ('x', 'r', '2026-09-03', 'cli', 'now')"); err != nil {
+		t.Fatal(err)
+	}
+	var newID int64
+	db.QueryRow("SELECT max(id) FROM known_knowns").Scan(&newID)
+	if newID != 10 {
+		t.Errorf("next id = %d, want 10", newID)
+	}
+}

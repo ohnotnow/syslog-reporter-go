@@ -96,6 +96,7 @@ var migrations = []migration{
 	{5, "known knowns", applyKnownKnowns},
 	{6, "run budget reached", applyRunBudgetReached},
 	{7, "llm spend per day", applyLLMSpend},
+	{8, "non-reusable known-known ids", applyNonReusableKnownIDs},
 }
 
 const baselineSchema = `
@@ -400,5 +401,40 @@ func applyLLMSpend(tx *sql.Tx) error {
     day           TEXT    PRIMARY KEY,   -- local 'YYYY-MM-DD' the tokens were spent on
     prompt_tokens INTEGER NOT NULL
 )`)
+	return err
+}
+
+// Migration 8 (ait srg-6Vsgx.8, the migration 3 fix for known_knowns):
+// with a plain INTEGER PRIMARY KEY a deleted mute's id is handed out again,
+// so a retried 'knowns remove 7' or API delete, after someone added a
+// rule, removed the unrelated new one. Rebuilt with AUTOINCREMENT, ids and
+// every column kept (which also seeds sqlite_sequence to the current
+// maximum). Nothing references known_knowns, so no child rows to park.
+const nonReusableKnownIDsSchema = `
+CREATE TABLE known_knowns_new (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    host         TEXT NOT NULL,            -- glob
+    program      TEXT NOT NULL DEFAULT '', -- glob; '' = none
+    match        TEXT NOT NULL DEFAULT '', -- regex; '' = none
+    reason       TEXT NOT NULL,
+    added        TEXT NOT NULL,            -- YYYY-MM-DD
+    expires      TEXT,                     -- YYYY-MM-DD or NULL
+    source       TEXT NOT NULL,            -- 'api' | 'cli' | 'bundled' | 'jev'
+    created_by   TEXT,                     -- username; NULL for cli
+    token_prefix TEXT,                     -- api_tokens.token_prefix; NULL for cli
+    finding_id   INTEGER,                  -- findings.id; NULL for free-form
+    created_at   TEXT NOT NULL             -- RFC3339 UTC
+);
+INSERT INTO known_knowns_new (id, host, program, match, reason, added, expires, source,
+        created_by, token_prefix, finding_id, created_at)
+    SELECT id, host, program, match, reason, added, expires, source,
+        created_by, token_prefix, finding_id, created_at FROM known_knowns;
+DROP TABLE known_knowns;
+ALTER TABLE known_knowns_new RENAME TO known_knowns;
+CREATE INDEX idx_known_knowns_finding ON known_knowns (finding_id);
+`
+
+func applyNonReusableKnownIDs(tx *sql.Tx) error {
+	_, err := tx.Exec(nonReusableKnownIDsSchema)
 	return err
 }

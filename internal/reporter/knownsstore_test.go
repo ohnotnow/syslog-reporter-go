@@ -160,3 +160,30 @@ func TestKnownsStoreDeleteReportsWhetherARowWent(t *testing.T) {
 		t.Error("second delete should report no row")
 	}
 }
+
+// A deleted mute's id is never handed out again (migration 8, ait
+// srg-6Vsgx.8): a retried delete of an old id, after someone added a new
+// rule, must not remove the new one.
+func TestKnownsStoreIDsAreNotReused(t *testing.T) {
+	s := newTestLibrary(t)
+	first, err := s.AddKnownEntries([]KnownEntryInput{cliInput("web01.example.test", "cron", "", "noisy", nil)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.DeleteKnownEntry(first[0].ID); !ok || err != nil {
+		t.Fatalf("delete: %v %v", ok, err)
+	}
+	second, err := s.AddKnownEntries([]KnownEntryInput{cliInput("db01.example.test", "sshd", "", "scanner", nil)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second[0].ID == first[0].ID {
+		t.Fatalf("id %d reused", first[0].ID)
+	}
+	if ok, _ := s.DeleteKnownEntry(first[0].ID); ok {
+		t.Error("retried delete of the old id removed something")
+	}
+	if ok, _ := s.DeleteKnownEntry(second[0].ID); !ok {
+		t.Error("the newer entry did not survive the retried delete")
+	}
+}
