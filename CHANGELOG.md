@@ -35,7 +35,10 @@ commands of it.
   retries of a run that failed part-way can no longer each spend it again.
 - `install.sh` installs only the binary and no longer needs python3 or
   flock. Its cron lines run `syslog-reporter daily` from the state
-  directory.
+  directory. It no longer runs the backfill or `knowns seed` (a re-run
+  could replace analysed days with free ones); it prints them as next
+  steps. It no longer asks for a cron `MAILTO`: all output goes to
+  `daily-run.log`, so use your own job monitor for alerts.
 - ELK access honours `https_proxy`/`no_proxy` from the `.env`: list the
   cluster in `no_proxy` if it must not go through your proxy.
 

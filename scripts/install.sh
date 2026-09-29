@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 #
-# The "Make it daily" section of GETTING_STARTED.md as one script: a
-# system user, its state directory, the binary, a .env to fill in, two weeks of free history, the hourly cron job and, if you
-# want it, the findings web UI as a systemd service.
+# The files-and-accounts half of GETTING_STARTED.md's "Make it daily" as
+# one script: a system user, its state directory, the binary, a .env to
+# fill in, the hourly cron job and, if you want it, the findings web UI
+# as a systemd service. It runs nothing against your logs: the history
+# backfill and the noise rules are printed as next steps, so a re-run
+# can never overwrite analysed days.
 #
 # Run it as root from a checkout:
 #
@@ -15,11 +18,12 @@
 # build each ask first. With none of those it stops before creating
 # anything.
 #
-# It then asks three things: an address for cron's failure mail, whether
-# to run the backfill now, and whether to install the web UI service.
-# Each question has a default, and with no terminal
-# (`install.sh </dev/null`) the defaults are taken, so it can run
-# unattended.
+# It then asks one thing: whether to install the web UI service. Every
+# question has a default, and with no terminal (`install.sh </dev/null`)
+# the defaults are taken, so it can run unattended. Failures show up in
+# daily-run.log in the state directory; cron mail is not used (the cron
+# lines send all output to that log), so point your own job monitor at
+# it if you want alerts.
 #
 # Re-running is safe: the binary is refreshed and the unit rewritten,
 # while an existing cron file and .env are left exactly as they are
@@ -43,7 +47,6 @@ trap 'on_error "$LINENO" "$BASH_COMMAND"' ERR
 SERVICE_USER=${SERVICE_USER:-syslog-reporter}
 WORK_DIR=${WORK_DIR:-/var/lib/syslog-reporter}
 BIN_DIR=${BIN_DIR:-/usr/local/bin}
-BACKFILL_DAYS=${BACKFILL_DAYS:-14}
 RELEASE_URL=${RELEASE_URL:-https://github.com/ohnotnow/syslog-reporter-go/releases/latest/download}
 
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -155,10 +158,6 @@ else
 fi
 
 step "cron"
-mailto=
-if [ -t 0 ]; then
-    read -r -p "address for cron's failure mail (blank for none): " mailto
-fi
 cron_file=/etc/cron.d/syslog-reporter
 [ -d /etc/cron.d ] || die "/etc/cron.d is missing - install cron (cronie on RHEL) and re-run"
 # An existing schedule is the operator's: a re-run refreshes the binary,
@@ -172,32 +171,11 @@ else
     echo "# on the half hour (daily keeps a .sent marker); on Mondays email the weekly"
     echo "# digest of recurring findings instead of a daily report. For a daily email"
     echo "# instead, use one line with no options: 30 7-17 * * * ... syslog-reporter daily"
-    if [ -n "$mailto" ]; then echo "MAILTO=$mailto"; fi
     echo "30 7-17 * * 0,2-6 $SERVICE_USER cd $WORK_DIR && $BIN_DIR/syslog-reporter daily --no-email >> $WORK_DIR/daily-run.log 2>&1"
     echo "30 7-17 * * 1     $SERVICE_USER cd $WORK_DIR && $BIN_DIR/syslog-reporter daily --digest >> $WORK_DIR/daily-run.log 2>&1"
 } > "$cron_file"
 chmod 644 "$cron_file"
 echo "wrote $cron_file"
-fi
-
-step "history"
-backfill_cmd="cd '$WORK_DIR' && '$BIN_DIR/syslog-reporter' backfill --days $BACKFILL_DAYS"
-if ask "backfill the last $BACKFILL_DAYS days now (free, no LLM)?" y; then
-    runuser -u "$SERVICE_USER" -- sh -c "$backfill_cmd" ||
-        echo "backfill reported failures - check the ELK lines in $env_file and re-run: sudo -u $SERVICE_USER sh -c \"$backfill_cmd\"" >&2
-else
-    echo "skipped - run it later with: sudo -u $SERVICE_USER sh -c \"$backfill_cmd\""
-fi
-
-# The bundled noise rules live in the database (knowns seed is idempotent,
-# so re-running the installer after an upgrade only adds new ones). The
-# database exists only after a run, so this waits for the backfill.
-step "noise rules"
-if [ -e "$WORK_DIR/syslog_aggregates.db" ]; then
-    runuser -u "$SERVICE_USER" -- sh -c "cd '$WORK_DIR' && '$BIN_DIR/syslog-reporter' knowns seed" ||
-        echo "seeding the noise rules failed - re-run: sudo -u $SERVICE_USER sh -c 'cd $WORK_DIR && syslog-reporter knowns seed'" >&2
-else
-    echo "no database yet - after the first run: sudo -u $SERVICE_USER sh -c 'cd $WORK_DIR && syslog-reporter knowns seed'"
 fi
 
 step "web UI"
@@ -211,13 +189,25 @@ if ask "install the findings web UI as a systemd service (127.0.0.1:7373)?" n; t
         echo "  sudo -u $SERVICE_USER $BIN_DIR/syslog-reporter user add <name> <email> --db $WORK_DIR/syslog_aggregates.db"
     else
         systemctl enable syslog-reporter-web
-        echo "enabled syslog-reporter-web but not started: serve needs the database, which the first run creates"
+        echo "enabled syslog-reporter-web but not started: serve needs the database, which the"
+        echo "backfill below creates; then: systemctl start syslog-reporter-web"
     fi
 else
     echo "skipped - scripts/syslog-reporter-web.service has the by-hand steps"
 fi
 
+as_user="sudo -u $SERVICE_USER sh -c 'cd $WORK_DIR && $BIN_DIR/syslog-reporter"
 echo
 echo "done. Cron runs yesterday's logs at 07:30 each day and emails the weekly digest"
-echo "on Mondays ($cron_file has the schedule); to see a day's report now:"
-echo "  sudo -u $SERVICE_USER sh -c 'cd $WORK_DIR && $BIN_DIR/syslog-reporter daily'"
+echo "on Mondays ($cron_file has the schedule)."
+if [ -e "$WORK_DIR/syslog_aggregates.db" ]; then
+    echo "Existing database kept as it is. After an upgrade, add any new bundled noise"
+    echo "rules with (it never removes or duplicates):"
+    echo "  $as_user knowns seed'"
+else
+    echo "Next, for a fresh install:"
+    echo "  $as_user backfill --days 14'   # two weeks of free history (no LLM)"
+    echo "  $as_user knowns seed'          # the bundled noise rules (needs the database)"
+    echo "then, to see a day's report now:"
+    echo "  $as_user daily'"
+fi

@@ -302,16 +302,24 @@ It does the following:
 5. Writes `/etc/cron.d/syslog-reporter`: `syslog-reporter daily
    --no-email` at 07:30 every day, retried on the half hour, and `daily
    --digest` on Mondays, logging to `daily-run.log` in the state
-   directory. It asks for a `MAILTO` address. An existing cron file is
-   kept; delete it first to get this schedule.
-6. Asks whether to run `syslog-reporter backfill` now: the last
-   fortnight through `--no-llm` (free), then loads the bundled noise
-   rules into the new database with `knowns seed`.
-7. Asks whether to install the findings web UI as a systemd service
+   directory. An existing cron file is kept; delete it first to get
+   this schedule.
+6. Asks whether to install the findings web UI as a systemd service
    (section 5).
+7. Prints the next steps. It runs nothing against your logs itself, so
+   re-running it can never overwrite analysed days. On a fresh install
+   those are `syslog-reporter backfill --days 14` (the last fortnight
+   through `--no-llm`, free, so the history-based detectors have
+   something to compare against) and then `syslog-reporter knowns seed`
+   (the bundled noise rules, which need the database the backfill
+   creates), each run as the `syslog-reporter` user from the state
+   directory.
 
 Each question has a default, so `install.sh </dev/null` runs it
-unattended. Read the script if you would rather do it by hand. The
+unattended. Failures land in `daily-run.log`: cron mail is not used,
+because the cron lines send all output to that log, so point your own
+job monitor at the job if you want alerts. Read the script if you would
+rather do it by hand. The
 commands find the `.env` and the database in their working directory,
 so run them from the state directory; trying one from a checkout looks
 like:
@@ -361,8 +369,8 @@ binary directly:
   --send-email >> /var/lib/syslog-reporter/daily-run.log 2>&1
 ```
 
-There is no retry this way: a failed attempt is cron mail and a re-run
-by hand.
+There is no retry this way: a failed attempt shows up in the log (and
+in your job monitor, if you have one) and needs a re-run by hand.
 
 **Behind a proxy?** The LLM calls need the standard proxy variables, and
 they need to be where the *binary's* process can see them. `sudo -u`
