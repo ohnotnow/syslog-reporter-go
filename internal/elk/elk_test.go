@@ -34,7 +34,7 @@ type fakeES struct {
 	partialPage  int
 	partialKind  string
 	pitShardFail bool
-	allowPartial any // allow_partial_search_results as last sent
+	allowPartial string // allow_partial_search_results URL parameter as last sent
 	mu           sync.Mutex
 	pages        int
 	pitIDs       []string // pit id each search carried
@@ -67,7 +67,13 @@ func (f *fakeES) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		pit := body["pit"].(map[string]any)
 		f.pitIDs = append(f.pitIDs, pit["id"].(string))
 		f.lastQuery = body["query"].(map[string]any)
-		f.allowPartial = body["allow_partial_search_results"]
+		// Real Elasticsearch answers 400 parsing_exception to this key in
+		// the body; it is a URL parameter only.
+		if _, ok := body["allow_partial_search_results"]; ok {
+			http.Error(w, `{"error":{"type":"parsing_exception"}}`, http.StatusBadRequest)
+			return
+		}
+		f.allowPartial = r.URL.Query().Get("allow_partial_search_results")
 		start := 0
 		if sa, ok := body["search_after"].([]any); ok {
 			start = int(sa[0].(float64)) + 1
@@ -336,7 +342,7 @@ func TestDumpAsksForNoPartialResults(t *testing.T) {
 	if _, err := Dump(context.Background(), cfg, out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if f.allowPartial != false {
-		t.Errorf("allow_partial_search_results = %v, want false", f.allowPartial)
+	if f.allowPartial != "false" {
+		t.Errorf("allow_partial_search_results = %q, want \"false\"", f.allowPartial)
 	}
 }

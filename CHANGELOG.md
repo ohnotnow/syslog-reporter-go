@@ -50,6 +50,10 @@ commands of it.
 ### Fixed
 - An Elasticsearch search that timed out or lost a shard could be saved
   as a complete day; it now fails and is retried.
+- `fetch` failed every search with HTTP 400 (`parsing_exception`) in
+  v0.33.0, so `daily` fetched nothing: it sent
+  `allow_partial_search_results` in the request body, where Elasticsearch
+  rejects it. It is now a URL parameter (v0.33.1).
 - A run whose findings could not be saved to the library still counted as
   done, leaving the day out of the weekly digest. It now fails after
   writing and sending its report, so the next hourly attempt files it.

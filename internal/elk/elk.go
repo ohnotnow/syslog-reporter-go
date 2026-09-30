@@ -259,16 +259,16 @@ func Dump(ctx context.Context, cfg Config, out string, logw io.Writer) (res Resu
 			"pit":              map[string]any{"id": pitID, "keep_alive": pitKeepAlive},
 			"sort":             []any{map[string]any{"@timestamp": "asc"}},
 			"track_total_hits": first,
-			// Refuse a subset rather than detect it afterwards; the checks
-			// below cover clusters that ignore this.
-			"allow_partial_search_results": false,
 		}
 		if searchAfter != nil {
 			body["search_after"] = searchAfter
 		}
 		var sr searchResponse
 		c.searches++
-		if err := c.do(ctx, http.MethodPost, "/_search", body, &sr); err != nil {
+		// Refuse a subset rather than detect it afterwards; the checks
+		// below cover clusters that ignore this. It is a URL parameter
+		// only: in the body Elasticsearch rejects the whole request.
+		if err := c.do(ctx, http.MethodPost, "/_search?allow_partial_search_results=false", body, &sr); err != nil {
 			return res, fmt.Errorf("after %d documents: %w", res.Written, err)
 		}
 		if sr.PitID != "" {
