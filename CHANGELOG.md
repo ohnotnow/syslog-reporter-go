@@ -126,4 +126,4 @@ Releases before 1.0.0 were pre-release; their history is in the git tags.
 
 [Unreleased]: https://github.com/ohnotnow/syslog-reporter-go/compare/v1.0.1...HEAD
 [1.0.1]: https://github.com/ohnotnow/syslog-reporter-go/compare/v1.0.0...v1.0.1
-[1.0.0]: https://github.com/ohnotnow/syslog-reporter-go/compare/v0.32.0...v1.0.0
+[1.0.0]: https://github.com/ohnotnow/syslog-reporter-go/compare/v0.34.0...v1.0.0
