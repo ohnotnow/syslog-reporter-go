@@ -31,8 +31,10 @@ commands of it.
 - `knowns discover --decisions-model azure/<deployment>` (or
   `SYSLOG_DECISIONS_MODEL`): score message shapes with the Azure OpenAI
   Decisions API on a gpt-6-luna deployment instead of Jev, so they stay
-  in Azure. Entries get source `decisions`. Needs `--preview` or an
-  explicit `--threshold`, because the 0.1 default was measured on Jev.
+  in Azure. Entries get source `decisions`. Its defaults are its own: a
+  0.2 threshold, 2 parallel calls, and a per-run cap of 2M prompt
+  tokens (`--max-prompt-tokens`, separate from the daily budget) past
+  which it stops and adds nothing.
 
 ### Changed
 - `SYSLOG_MAX_PROMPT_TOKENS` is now a budget per calendar day, shared by

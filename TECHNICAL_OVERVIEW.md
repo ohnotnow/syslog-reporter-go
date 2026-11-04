@@ -164,9 +164,11 @@ Jev, add the routine recurring ones; `--preview` asks first on a
 terminal and only prints elsewhere) or `decisions` (the same finder with
 `--decisions-model azure/<deployment>`, scoring through the Azure OpenAI
 Decisions API in internal/llm/decisions.go so the shapes stay in Azure;
-it refuses to auto-add without `--preview` or an explicit `--threshold`,
-because the 0.1 default was measured on Jev's scores, and a refused shape
-scores 1 so it is never muted). The evaluation behind the finder,
+its defaults are threshold 0.2 and 2 workers against Jev's 0.1 and 8,
+and a per-run `--max-prompt-tokens` cap (default 2M) stops it with
+nothing added; the cap is not recorded in `llm_spend`, so it never
+eats the daily run's budget. A refused shape scores 1 so it is never
+muted). The evaluation behind the finder,
 and why a Jev gate before the issue detector is deferred rather than
 rejected, is ant ADR srg-FGSKN.
 

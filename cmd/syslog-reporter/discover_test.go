@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -207,5 +208,30 @@ func TestCandidateInputsCarryTheScorersSource(t *testing.T) {
 	}
 	if len(inputs) != 1 || inputs[0].Source != reporter.KnownSourceDecisions || !strings.HasPrefix(inputs[0].Reason, "decisions: score 0.03, ") {
 		t.Errorf("inputs = %+v", inputs)
+	}
+}
+
+// The per-run cap stops scoring with ErrBudget, which runKnownsDiscover
+// turns into "nothing added".
+func TestDecisionsScorerStopsAtTheTokenCap(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"model":"m","answers":[{"type":"predicate","name":"q","probability":0.01}],"usage":{"input_tokens":1000,"output_tokens":0,"total_tokens":1000}}`))
+	}))
+	defer server.Close()
+	t.Setenv("AZURE_OPENAI_ENDPOINT", server.URL+"/openai/v1")
+	t.Setenv("AZURE_OPENAI_API_KEY", "test-key")
+	llm.SetBudget(1500, 0, nil)
+	t.Cleanup(func() { llm.SetBudget(0, 0, nil) })
+
+	shapes := accumulateFixture(t)
+	_, _, err := scoreShapes(context.Background(), shapes, 1, decisionsScorer(&logger{}, "azure/d"))
+	if !errors.Is(err, llm.ErrBudget) {
+		t.Fatalf("want ErrBudget, got %v", err)
+	}
+	if calls != 2 {
+		t.Errorf("%d requests sent, want 2 (the second crosses 1500)", calls)
 	}
 }

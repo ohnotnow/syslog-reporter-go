@@ -202,8 +202,10 @@ usage: syslog-reporter knowns <list|add|remove|seed|hits|discover|import>
                         --decisions-model azure/<deployment> (or
                         SYSLOG_DECISIONS_MODEL) scores with the Azure OpenAI
                         Decisions API on a gpt-6-luna deployment instead,
-                        source 'decisions'; it needs --preview or an
-                        explicit --threshold (0.1 was measured on Jev)
+                        source 'decisions', defaults --threshold 0.2,
+                        --workers 2, and stops adding nothing past
+                        --max-prompt-tokens (2M, per run, separate from
+                        the daily budget)
   import <file.toml>    read the pre-database known_knowns.toml once and add
                         every [[known]] entry (leaves the file alone; does
                         not dedupe, so import a file once)

@@ -80,6 +80,19 @@ var attentionInstructions = attentionAsk + " Inspect log.message in the input; t
 	attentionFocus + "\n\nAnswer yes when it: " + attentionYesWhat + ". This does not cover: " + attentionYesNotFor + ". For example:\n- " + strings.Join(attentionYesExamples, "\n- ") +
 	"\n\nAnswer no when it is: " + attentionNoWhat + ". For example:\n- " + strings.Join(attentionNoExamples, "\n- ")
 
+// Defaults that differ by scorer. Jev's come from the evaluation
+// (srg-FGSKN). Decisions scores are far more extreme (1,356 shapes under
+// 0.05 against Jev's 226 on the 2026-09-08 dump), so 0.2 mutes about what
+// Jev mutes at 0.2, the owner's choice to lean towards filtering
+// (2026-11-04); 8 parallel calls were throttled on the shared Azure
+// deployment, 2 were not.
+const (
+	jevThreshold       = 0.1
+	jevWorkers         = 8
+	decisionsThreshold = 0.2
+	decisionsWorkers   = 2
+)
+
 // shape is one message template's tally across the window.
 type shape struct {
 	Program, Template string
@@ -100,10 +113,12 @@ func runKnownsDiscover(args []string) {
 	fs, dbPath := knownsFlagSet("knowns discover")
 	days := fs.Int("days", 30, "Days of dumps to read, ending yesterday")
 	dumpDir := fs.String("dump-dir", defaultDumpDir(), "Where daily keeps syslog-YYYY-MM-DD.ndjson.gz (default: $WORK_DIR/dumps)")
-	threshold := fs.Float64("threshold", 0.1, "Add a shape only when its attention score is below this (the default was measured on Jev)")
+	threshold := fs.Float64("threshold", jevThreshold, "Add a shape only when its attention score is below this (default 0.1 on Jev, 0.2 with --decisions-model)")
 	minDays := fs.Int("min-days", 3, "Add a shape only when it appeared on at least this many days")
 	minLines := fs.Int("min-lines", 1, "Add a shape only when it produced at least this many lines in the window")
-	workers := fs.Int("workers", 8, "Parallel scoring calls")
+	workers := fs.Int("workers", jevWorkers, "Parallel scoring calls (default 8 on Jev, 2 with --decisions-model)")
+	maxPromptTokens := fs.Int64("max-prompt-tokens", llm.DefaultMaxPromptTokens,
+		"With --decisions-model: most prompt tokens this run may send; past it the run stops and adds nothing (0 = no cap). Separate from the daily run's budget")
 	decisionsModel := fs.String("decisions-model", os.Getenv("SYSLOG_DECISIONS_MODEL"),
 		"Score with the Azure OpenAI Decisions API on this azure/<deployment> (a gpt-6-luna deployment) instead of Jev")
 	preview := fs.Bool("preview", false, "Print the candidates and ask before adding (prints only when stdin is not a terminal)")
@@ -111,27 +126,30 @@ func runKnownsDiscover(args []string) {
 	if extra := cli.ParseFlagsAnywhere(fs, args); len(extra) > 0 {
 		fatal("knowns discover takes flags only (got %s)", strings.Join(extra, " "))
 	}
-	if *days < 1 || *workers < 1 || *threshold <= 0 || *threshold > 1 {
-		fatal("--days and --workers must be at least 1; --threshold must be in (0, 1]")
-	}
 	log := &logger{debugEnabled: *debug}
 	backend, source, score := "Jev", reporter.KnownSourceJev, jevScorer(log)
 	if *decisionsModel != "" {
 		if err := llm.CheckDecisionsModel(*decisionsModel); err != nil {
 			fatal("%v", err)
 		}
-		// The 0.1 default came from Jev's score distribution (srg-FGSKN);
-		// another model's scores spread differently, so auto-adding on it
-		// would mute on an unmeasured cut. A human looks first, or names
-		// the cut.
-		if !*preview && !flagSet(fs, "threshold") {
-			fatal("--decisions-model needs --preview or an explicit --threshold: the 0.1 default was measured on Jev, not on %s", *decisionsModel)
+		if !flagSet(fs, "threshold") {
+			*threshold = decisionsThreshold
 		}
+		if !flagSet(fs, "workers") {
+			*workers = decisionsWorkers
+		}
+		// Its own cap, not the daily run's: llm_spend is one row a day that
+		// run reads at startup, so spend recorded there would leave that
+		// day's report degraded. Nothing is recorded; the cap is per run.
+		llm.SetBudget(*maxPromptTokens, 0, nil)
 		llm.SetLogger(log.Warn)
 		llm.SetDebugLogger(log.Debug)
 		backend, source, score = *decisionsModel, reporter.KnownSourceDecisions, decisionsScorer(log, *decisionsModel)
 	} else if err := jev.CheckCredentials(); err != nil {
 		fatal("%v", err)
+	}
+	if *days < 1 || *workers < 1 || *threshold <= 0 || *threshold > 1 {
+		fatal("--days and --workers must be at least 1; --threshold must be in (0, 1]")
 	}
 	lib := openUserStore(*dbPath)
 	defer lib.Close()
@@ -162,6 +180,11 @@ func runKnownsDiscover(args []string) {
 
 	ctx := context.Background()
 	usage, elapsed, err := scoreShapes(ctx, shapes, *workers, score)
+	if errors.Is(err, llm.ErrBudget) {
+		// Unscored shapes sit at 0, which reads as "routine", so a partial
+		// run must never add anything.
+		fatal("stopped at --max-prompt-tokens %d after %d prompt tokens; nothing added. Raise it or use a smaller --days", *maxPromptTokens, usage.PromptTokens)
+	}
 	if err != nil {
 		fatal("%v", err)
 	}

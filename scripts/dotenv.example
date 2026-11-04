@@ -78,7 +78,8 @@ OPENAI_API_KEY=sk-...
 #TYPESAFE_API_KEY=
 # Optional: score 'knowns discover' with the Azure OpenAI Decisions API
 # instead of Jev, on a gpt-6-luna deployment, using the AZURE_OPENAI_*
-# credentials above. Pass --preview or --threshold with it.
+# credentials above. Defaults: threshold 0.2, 2 parallel calls, and a
+# per-run cap of 2M prompt tokens (--max-prompt-tokens).
 #SYSLOG_DECISIONS_MODEL=azure/gpt-6-luna
 
 # Where fetch (and so daily and backfill) gets yesterday's logs from.

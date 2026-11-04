@@ -218,8 +218,13 @@ SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.
   the Jev-scored noise finder (auto-add, `--preview` asks on a terminal);
   `--decisions-model azure/<deployment>` scores it through the Azure
   OpenAI Decisions API instead (internal/llm/decisions.go, openai-go's
-  Decisions service), refusing auto-add without `--preview` or an explicit
-  `--threshold` because 0.1 was measured on Jev.
+  Decisions service), with its own defaults (threshold 0.2, owner's
+  call to lean towards filtering; 2 workers, as 8 were throttled on the
+  Azure deployment production shares) and its own per-run
+  `--max-prompt-tokens` cap (2M). That cap never touches llm_spend: the
+  ledger is one row a day that run reads at startup, so discover's spend
+  there would degrade that day's report. A capped run adds nothing,
+  because unscored shapes sit at score 0.
   A Jev gate before the issue detector is deferred, NOT rejected: it will
   be built when the trigger in ant ADR srg-FGSKN fires. TypeSafe's terms
   forbid publishing benchmarks; the evaluation numbers stay in ant.
