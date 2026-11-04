@@ -435,7 +435,11 @@ them.
 
 [HOW_IT_WORKS.md](HOW_IT_WORKS.md) is a tour with screenshots. For a
 shared box on a LAN, `--listen` and the TLS flags are in
-[TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md).
+[TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md). To put nginx in front
+(HTTPS, an allow-list of client addresses, rate limiting),
+[scripts/nginx-syslog-reporter.conf.example](scripts/nginx-syslog-reporter.conf.example)
+is a working starting point; add `--secure-cookies` to `serve` when you
+use it.
 
 **From the terminal.** The same library, no browser:
 

@@ -1,0 +1,78 @@
+# nginx in front of the syslog-reporter web UI: HTTPS, an optional IP
+# allow-list and rate limiting, proxying to serve on 127.0.0.1:7373.
+#
+# Install (paths are the Debian/Ubuntu and RHEL defaults):
+#   sudo cp scripts/nginx-syslog-reporter.conf.example /etc/nginx/conf.d/syslog-reporter.conf
+#   edit server_name, the certificate paths and the allow-list below
+#   sudo nginx -t && sudo systemctl reload nginx
+#
+# serve stays on loopback (the unit's default --listen 127.0.0.1:7373) with
+# --auth local. Add --secure-cookies to its ExecStart (or set
+# SYSLOG_WEB_SECURE_COOKIES=1): nginx owns TLS, so serve sees plain HTTP and
+# would otherwise leave the session cookie's Secure flag off.
+#
+# serve never reads X-Forwarded-For, so its login throttle sees every
+# client as 127.0.0.1: a run of failed logins from anyone briefly locks
+# out everyone. The per-client login limit below is the proxy's share of
+# that job.
+
+# Per-client request rates, keyed on the real client address. 10m holds
+# about 160,000 addresses.
+limit_req_zone $binary_remote_addr zone=syslog_reporter:10m rate=10r/s;
+limit_req_zone $binary_remote_addr zone=syslog_reporter_login:10m rate=10r/m;
+limit_req_status 429;
+
+server {
+    listen 80;
+    server_name syslog-reporter.example.ac.uk;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    http2 on;               # nginx 1.25.1+; older: "listen 443 ssl http2;"
+    server_name syslog-reporter.example.ac.uk;
+
+    # Certificates. With files your own renewal job downloads (for example
+    # a curl from an internal ACME service), nginx reads them at start and
+    # on reload only, so end the renewal job with:
+    #   nginx -t && systemctl reload nginx
+    # A reload is graceful: open connections finish on the old certificate.
+    ssl_certificate     /etc/ssl/syslog-reporter/fullchain.pem;
+    ssl_certificate_key /etc/ssl/syslog-reporter/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+
+    # Allow-list: uncomment to admit only these addresses; everyone else
+    # gets a 403. Rules are checked in order and the first match wins, so
+    # keep "deny all" last. The list lives in this file, so it moves with
+    # the config to a new server; a host firewall rule as well does no harm.
+    # allow 192.0.2.10;        # ops desktop
+    # allow 192.0.2.11;
+    # allow 198.51.100.0/28;   # admin VLAN
+    # deny  all;
+
+    # Forms here are a login, a vote and a ten-row noise review; API
+    # bodies are small JSON. Anything bigger is not for this app.
+    client_max_body_size 64k;
+
+    # Common proxy settings for both locations. Host must be the name the
+    # browser used: serve's cross-origin check compares it with the
+    # request's Origin, and a mismatch refuses every form POST.
+    proxy_http_version 1.1;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    # The noise review's "Model's view" waits on a model call (serve gives
+    # up after 90s); keep nginx from giving up first.
+    proxy_read_timeout 120s;
+
+    location = /login {
+        limit_req zone=syslog_reporter_login burst=5 nodelay;
+        proxy_pass http://127.0.0.1:7373;
+    }
+
+    location / {
+        limit_req zone=syslog_reporter burst=40 nodelay;
+        proxy_pass http://127.0.0.1:7373;
+    }
+}

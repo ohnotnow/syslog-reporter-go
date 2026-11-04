@@ -552,7 +552,13 @@ flag the browser-facing transport deserves; without it the flag is
 derived from the built-in TLS setting alone. The app never reads
 forwarded/client-IP headers, so the login throttle sees the proxy's
 address - keep any per-client rate limiting at the proxy if you need it
-there.
+there. Behind a proxy that also means a run of failed logins from any
+client briefly locks out every client. `scripts/nginx-syslog-reporter.conf.example`
+is a tested nginx front end (checked with nginx 1.27.5): HTTPS from
+certificate files (nginx needs a reload after renewal, unlike serve's
+own TLS), an optional allow-list, per-client limits including a strict
+one on `/login`, and `Host` passed through, which the cross-origin check
+needs to accept form POSTs.
 
 ### The findings CLI
 

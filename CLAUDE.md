@@ -109,7 +109,9 @@ internal/elk/               stdlib Elasticsearch client behind fetch (PIT +
 scripts/                    install.sh (one-shot deploy: binary, user, .env,
                             cron lines that cd into /var/lib/syslog-reporter
                             so the cwd-relative .env and db resolve), the
-                            web UI unit and dotenv.example - deploy
+                            web UI unit, dotenv.example and
+                            nginx-syslog-reporter.conf.example (owner
+                            chose nginx over Caddy, 2026-11-04) - deploy
                             walkthrough in GETTING_STARTED.md
 
 ```

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `scripts/nginx-syslog-reporter.conf.example`: nginx in front of the
+  web UI with HTTPS from certificate files, an optional allow-list of
+  client addresses and per-client rate limits.
+
 ## [1.0.0] - 2026-11-04
 
 The first stable release. syslog-reporter turns an organisation's syslog
