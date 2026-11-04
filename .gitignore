@@ -6,6 +6,8 @@
 .ait/
 .impeccable.md
 *.db
+*.db-wal
+*.db-shm
 *.log
 *.ndjson
 *.ndjson.gz
