@@ -101,6 +101,7 @@ const (
 type shape struct {
 	Program, Template string
 	Example           string // one 'program[pid]: message' this shape came from
+	ExampleHost       string // the host Example came from
 	Lines             int
 	Hosts             map[string]bool
 	Days              map[string]bool
@@ -264,7 +265,7 @@ func accumulate(shapes map[string]*shape, lines []string, day string) int {
 			s = have
 		} else {
 			s.Hosts, s.Days = map[string]bool{}, map[string]bool{}
-			s.Example = rest
+			s.Example, s.ExampleHost = rest, strings.Fields(line)[3]
 			shapes[s.key()] = s
 		}
 		s.Lines++

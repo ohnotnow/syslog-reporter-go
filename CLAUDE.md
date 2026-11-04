@@ -171,7 +171,9 @@ SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.
   schema_version migration ladder. Schema changes are new numbered
   migrations in migrate.go - never inline DDL in the stores. The file is
   WAL, so a plain cp of a live db loses the -wal sidecar; use
-  sqlite3 .backup.
+  sqlite3 .backup. A storing run also writes the day's surviving message
+  shapes to noise_shapes (migration 9, one day held, older dates never
+  replace newer) for the web UI's noise review page.
 - Findings capture is idempotent per day - re-running a date REPLACES that
   day's run, findings AND feedback votes. Feedback is one vote per user
   per finding (anonymous is a shared singleton); a re-vote updates the

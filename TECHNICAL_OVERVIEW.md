@@ -105,6 +105,8 @@ Raw lines feed two branches that merge at the report:
 raw log lines
    |
    +-- LogFilter --> filtered lines --> CollapseRepeats --> IssueDetector --> IssueList
+   |                      |                 |
+   |                      +--> noise_shapes (templated, for the web UI's noise review)
    |                                        |
    |                                  IssueDeduplicator (merges cross-chunk dupes)
    |                                        |
@@ -129,6 +131,14 @@ raw log lines
                                                  |
                                      EmailAgent (--send-email)
 ```
+
+The filtered lines are also templated into message shapes (the same
+templating as `knowns discover`) and written to `noise_shapes` (migration
+9) as the pool for the web UI's noise review page, so `serve` never reads
+a dump. Only when the run stores (not `--no-store`; `--dump-filtered`
+returns first). The table holds one day: an older date, such as a
+backfill or a hand re-run, never replaces a newer pool, and a failed
+write only warns.
 
 Anomaly detection runs on the RAW log, upstream of the filter, so it can see
 the high-volume programs the filter removes. Everything else runs on the

@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -838,6 +839,13 @@ func run(cfg runConfig) {
 		return
 	}
 
+	// The web UI's noise review page samples from these (ait srg-OymJL.2),
+	// so serve never has to read a dump. Not with --no-store, which writes
+	// nothing; --dump-filtered has already returned above.
+	if cfg.storeOn {
+		storeNoiseShapes(log, cfg.dbPath, logDate, filteredLines)
+	}
+
 	if cfg.llmOn {
 		spendLib, err := reporter.OpenLibraryStore(cfg.dbPath)
 		if err != nil {
@@ -1103,6 +1111,48 @@ func captureDaily(log *logger, dbPath string, logDate time.Time, model string, r
 		}
 	}
 	return nil
+}
+
+// storeNoiseShapes templates the day's surviving lines the way 'knowns
+// discover' does, so a web mute and a discover mute of one shape share a
+// regex, and makes them the review page's pool. A failure only warns: the
+// shapes are a convenience, and failing the run would set daily's hourly
+// retry going.
+func storeNoiseShapes(log *logger, dbPath string, logDate time.Time, filtered []string) {
+	shapes := map[string]*shape{}
+	accumulate(shapes, filtered, logDate.Format("2006-01-02"))
+	lib, err := reporter.OpenLibraryStore(dbPath)
+	if err != nil {
+		log.Warn("noise shapes not stored for the review page: opening %s: %v", dbPath, err)
+		return
+	}
+	defer lib.Close()
+	stored, err := lib.ReplaceNoiseShapes(logDate, noiseShapes(shapes))
+	switch {
+	case err != nil:
+		log.Warn("noise shapes not stored for the review page: %v", err)
+	case !stored:
+		log.Info("Noise shapes: kept the newer day already stored")
+	default:
+		log.Info("Stored %d noise shapes for the review page", len(shapes))
+	}
+}
+
+// noiseShapes converts accumulated shapes for the store, sorted by
+// program then template so the write order never depends on the map.
+func noiseShapes(shapes map[string]*shape) []reporter.NoiseShape {
+	out := make([]reporter.NoiseShape, 0, len(shapes))
+	for _, s := range shapes {
+		out = append(out, reporter.NoiseShape{Program: s.Program, Template: s.Template,
+			Example: s.Example, ExampleHost: s.ExampleHost, Lines: s.Lines, Hosts: len(s.Hosts)})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Program != out[j].Program {
+			return out[i].Program < out[j].Program
+		}
+		return out[i].Template < out[j].Template
+	})
+	return out
 }
 
 // loadKnowns opens the library store just long enough to read the
