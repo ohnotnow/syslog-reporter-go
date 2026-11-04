@@ -17,6 +17,7 @@ func TestPromptsCarryTrustBoundary(t *testing.T) {
 		"anomaly_explanation.txt": anomalyExplanationPromptRaw,
 		"resolution.tmpl":         resolutionTemplateRaw,
 		"issue_cluster.txt":       issueClusterPromptRaw,
+		"noise_explanation.txt":   noiseExplanationPromptRaw,
 	}
 	for name, text := range prompts {
 		if !strings.Contains(text, "Trust boundary") {

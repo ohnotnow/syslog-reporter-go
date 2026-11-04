@@ -14,7 +14,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -33,52 +32,6 @@ import (
 	"github.com/ohnotnow/syslog-reporter-go/internal/reporter"
 	"golang.org/x/term"
 )
-
-// The attention question's parts, shared by both scorers. Jev takes them
-// in its object form (attentionQuestion); the Decisions API takes one
-// instructions string (attentionInstructions). The not_for sits on the
-// yes side: a message is not worth attention merely for containing the
-// word error. The evaluation (srg-FGSKN) had it on the no side, which
-// says the opposite, so the 0.1 threshold measured there predates the
-// fix; re-measure with --preview.
-const (
-	attentionAsk       = "Should this system log message be brought to a system administrator's attention?"
-	attentionFocus     = "Judge whether an admin would want to know or act, given how many lines, hosts and days produced it."
-	attentionYesWhat   = "Indicates a failure, error, security event, resource problem, hardware fault or misconfiguration an administrator should act on or know about"
-	attentionNoWhat    = "Routine operational chatter: successful or expected events, informational start/stop messages, scheduled jobs running normally, debug output"
-	attentionYesNotFor = "A message that merely contains the word error or warning but describes normal behaviour"
-)
-
-var (
-	attentionYesExamples = []string{
-		"kernel: EXT4-fs error (device sda1): ext4_find_entry: reading directory lblock 0",
-		"sshd: Failed password for invalid user <user> from <ip> port <n> ssh2",
-		"systemd: <fqdn>.service: Main process exited, code=exited, status=1/FAILURE",
-	}
-	attentionNoExamples = []string{
-		"systemd: Started Daily apt download activities.",
-		"sshd: Accepted publickey for <user> from <ip> port <n> ssh2",
-		"CRON: (<user>) CMD (/usr/lib/<fqdn> --cron)",
-	}
-)
-
-var attentionQuestion = map[string]jev.Question{"attention": {
-	Type: "noul",
-	Instructions: map[string]any{
-		"question": attentionAsk,
-		"inspect":  "`log.message`",
-		"focus":    attentionFocus,
-	},
-	Criteria: map[string]any{
-		"true":  map[string]any{"what": attentionYesWhat, "not_for": attentionYesNotFor, "examples": attentionYesExamples},
-		"false": map[string]any{"what": attentionNoWhat, "examples": attentionNoExamples},
-	},
-}}
-
-// attentionInstructions is the same question as prose.
-var attentionInstructions = attentionAsk + " Inspect log.message in the input; the input also gives how many lines, hosts and days produced it. " +
-	attentionFocus + "\n\nAnswer yes when it: " + attentionYesWhat + ". This does not cover: " + attentionYesNotFor + ". For example:\n- " + strings.Join(attentionYesExamples, "\n- ") +
-	"\n\nAnswer no when it is: " + attentionNoWhat + ". For example:\n- " + strings.Join(attentionNoExamples, "\n- ")
 
 // Defaults that differ by scorer. Jev's come from the evaluation
 // (srg-FGSKN). Decisions scores are far more extreme (1,356 shapes under
@@ -132,7 +85,7 @@ func runKnownsDiscover(args []string) {
 		fatal("knowns discover takes flags only (got %s)", strings.Join(extra, " "))
 	}
 	log := &logger{debugEnabled: *debug}
-	backend, source, score := "Jev", reporter.KnownSourceJev, jevScorer(log)
+	backend, source, score := "Jev", reporter.KnownSourceJev, attentionScorer(log, "")
 	if *decisionsModel != "" {
 		if err := llm.CheckDecisionsModel(*decisionsModel); err != nil {
 			fatal("%v", err)
@@ -149,7 +102,7 @@ func runKnownsDiscover(args []string) {
 		llm.SetBudget(*maxPromptTokens, 0, nil)
 		llm.SetLogger(log.Warn)
 		llm.SetDebugLogger(log.Debug)
-		backend, source, score = *decisionsModel, reporter.KnownSourceDecisions, decisionsScorer(log, *decisionsModel)
+		backend, source, score = *decisionsModel, reporter.KnownSourceDecisions, attentionScorer(log, *decisionsModel)
 	} else if err := jev.CheckCredentials(); err != nil {
 		fatal("%v", err)
 	}
@@ -275,48 +228,20 @@ func accumulate(shapes map[string]*shape, lines []string, day string) int {
 	return n
 }
 
-// shapeState is what a scorer is shown about one shape: the counts ride
-// along so the model judges "this shape, this often, this widely", as in
-// the evaluation.
-func shapeState(s *shape) map[string]any {
-	return map[string]any{"log": map[string]any{
-		"program": s.Program, "message": s.Template,
-		"lines_seen": s.Lines, "hosts_seen": len(s.Hosts), "days_seen": len(s.Days),
-	}}
-}
-
 func logScore(log *logger, score float64, s *shape) {
 	log.Debug("%.2f %5d lines %3d hosts %2d days  %s: %s", score, s.Lines, len(s.Hosts), len(s.Days), s.Program, s.Template)
 }
 
-// jevScorer asks TypeSafe's Jev.
-func jevScorer(log *logger) scorer {
+// attentionScorer asks Jev, or the Azure OpenAI Decisions API when
+// decisionsModel is set, through reporter.ScoreAttention (the question
+// the web UI's model view asks too). A refused shape scores 1, so it can
+// never become a candidate: a refusal is not a "routine".
+func attentionScorer(log *logger, decisionsModel string) scorer {
 	return func(ctx context.Context, s *shape) (float64, llm.Usage, error) {
-		resp, err := jev.Ask(ctx, shapeState(s), attentionQuestion)
-		if err != nil {
-			return 0, llm.Usage{}, err
-		}
-		score, err := jev.Noul(resp, "attention")
-		if err != nil {
-			return 0, llm.Usage{}, err
-		}
-		logScore(log, score, s)
-		return score, llm.Usage{PromptTokens: int64(resp.Usage.InputTokens), CompletionTokens: int64(resp.Usage.OutputTokens)}, nil
-	}
-}
-
-// decisionsScorer asks the Azure OpenAI Decisions API, with the same
-// state (as JSON text) and the question as prose. A refused shape scores
-// 1, so it can never become a candidate: a refusal is not a "routine".
-func decisionsScorer(log *logger, model string) scorer {
-	return func(ctx context.Context, s *shape) (float64, llm.Usage, error) {
-		input, err := json.Marshal(shapeState(s))
-		if err != nil {
-			return 0, llm.Usage{}, err
-		}
-		score, usage, err := llm.Predicate(ctx, model, string(input), attentionInstructions)
+		score, usage, err := reporter.ScoreAttention(ctx, decisionsModel, reporter.AttentionShape{
+			Program: s.Program, Template: s.Template, Lines: s.Lines, Hosts: len(s.Hosts), Days: len(s.Days)})
 		if errors.Is(err, llm.ErrRefused) {
-			log.Info("%s refused to score %s: %s; kept visible", model, s.Program, s.Template)
+			log.Info("%s refused to score %s: %s; kept visible", decisionsModel, s.Program, s.Template)
 			return 1, usage, nil
 		}
 		if err != nil {

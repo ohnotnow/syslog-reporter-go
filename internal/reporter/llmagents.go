@@ -38,6 +38,9 @@ var anomalyExplanationPromptRaw string
 //go:embed prompts/resolution.tmpl
 var resolutionTemplateRaw string
 
+//go:embed prompts/noise_explanation.txt
+var noiseExplanationPromptRaw string
+
 var (
 	issueDetectionTmpl = template.Must(template.New("issue_detection").Parse(issueDetectionTemplateRaw))
 	resolutionTmpl     = template.Must(template.New("resolution").Parse(resolutionTemplateRaw))
@@ -617,4 +620,27 @@ func quoteField(s string) string {
 	}
 	b.WriteRune(quote)
 	return b.String()
+}
+
+// ExplainNoiseShape asks model for a two-to-three sentence explanation of
+// one message shape, for the web UI's noise review "model's view" (ait
+// srg-OymJL.4): what writes it, whether it is usually routine, and what
+// the worrying version looks like. One call per shape; the caller caches.
+func ExplainNoiseShape(ctx context.Context, model string, sh NoiseShape) (string, error) {
+	system := strings.TrimSuffix(noiseExplanationPromptRaw, "\n")
+	user := fmt.Sprintf("program=%s template=%s example=%s lines=%d hosts=%d",
+		quoteField(sh.Program), quoteField(sh.Template), quoteField(sh.Example), sh.Lines, sh.Hosts)
+	schema := map[string]any{
+		"type":                 "object",
+		"properties":           map[string]any{"explanation": map[string]any{"type": "string"}},
+		"required":             []string{"explanation"},
+		"additionalProperties": false,
+	}
+	var out struct {
+		Explanation string `json:"explanation"`
+	}
+	if err := llm.Complete(ctx, model, system, user, "NoiseExplanation", schema, &out); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out.Explanation), nil
 }

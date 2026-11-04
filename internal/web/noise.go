@@ -31,6 +31,7 @@ type noiseView struct {
 	Status    string   // after a save: what happened
 	Errors    []string // shapes that could not be muted
 	AutoFocus bool     // after an htmx save, focus the first fresh row
+	ModelView bool     // rows get a "Model's view" reveal (logged in, and a model configured)
 }
 
 // noiseSample draws a fresh set, leaving out shapes a current mute
@@ -64,6 +65,7 @@ func (s *Server) handleNoise(w http.ResponseWriter, r *http.Request) {
 	}
 	user := s.auth.CurrentUser(r)
 	view.CanSave = user != nil
+	view.ModelView = user != nil && s.modelViewAvailable()
 	render(w, "noise.html", pageData{Version: s.cfg.Version, Path: r.URL.Path, User: user, Data: view})
 }
 
@@ -139,6 +141,7 @@ func (s *Server) handleNoiseSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	view.CanSave, view.Errors, view.AutoFocus = true, problems, true
+	view.ModelView = s.modelViewAvailable()
 	view.Status = fmt.Sprintf("Muted %d, kept %d.", len(mute), len(keep))
 	renderBlock(w, "noise.html", "noise-partial", pageData{Version: s.cfg.Version, Path: "/noise", User: user, Data: view})
 }

@@ -41,7 +41,7 @@ func runDigest(args []string) {
 	fs := flag.NewFlagSet("digest", flag.ExitOnError)
 	setUsage(fs, digestHelpIntro, digestHelpEnv)
 	days := fs.Int("days", 7, "Number of days the digest covers, ending yesterday")
-	model := fs.String("model", getenvDefault("SYSLOG_DEFAULT_MODEL", "openai/gpt-5.6-luna"),
+	model := fs.String("model", getenvDefault("SYSLOG_DEFAULT_MODEL", llm.DefaultModel),
 		"Fallback model (litellm format); SYSLOG_DIGEST_MODEL, then SYSLOG_ISSUE_MODEL, override it")
 	maxIssues := fs.Int("max-issues", defaultDigestIssues,
 		"Recurring issue groups sent to the resolution writer and shown in the email")

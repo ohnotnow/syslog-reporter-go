@@ -35,6 +35,10 @@ import (
 // retries x delay cap, after which the run still fails loudly for cron.
 // The Anthropic SDK honours Retry-After uncapped, so it only needs the
 // retry count raised.
+// DefaultModel is the model every command falls back to when
+// SYSLOG_DEFAULT_MODEL is unset (owner decision 2026-09-02).
+const DefaultModel = "openai/gpt-5.6-luna"
+
 const (
 	llmMaxRetries    = 8
 	llmMaxRetryDelay = 2 * time.Minute

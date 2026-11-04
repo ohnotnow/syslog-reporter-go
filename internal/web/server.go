@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/ohnotnow/syslog-reporter-go/internal/cli"
+	"github.com/ohnotnow/syslog-reporter-go/internal/llm"
 	"github.com/ohnotnow/syslog-reporter-go/internal/reporter"
 )
 
@@ -56,8 +57,15 @@ type Config struct {
 	// 24 hours, so a leaked token or a looping script cannot silence the
 	// estate in one go.
 	MuteLimit int
-	Debug     bool   // log one line per request via Logger
-	Logger    Logger // nil silences request and login logging
+	// The noise review page's on-demand model view (ait srg-OymJL.4):
+	// DecisionsModel (SYSLOG_DECISIONS_MODEL, azure/<deployment>) scores a
+	// shape, else Jev when TYPESAFE_API_KEY is set; ExplainModel
+	// (SYSLOG_ISSUE_MODEL, else SYSLOG_DEFAULT_MODEL, else
+	// llm.DefaultModel, as run resolves its issue model) explains it.
+	DecisionsModel string
+	ExplainModel   string
+	Debug          bool   // log one line per request via Logger
+	Logger         Logger // nil silences request and login logging
 }
 
 // ConfigFromEnv reads the SYSLOG_WEB_* settings into a Config. Flags layer
@@ -75,13 +83,16 @@ func ConfigFromEnv() (Config, error) {
 	}
 	return Config{
 		// Port 7373: 73 kilos is what Vila weighs (owner's choice, Blake's 7).
-		Listen:        getenvDefault("SYSLOG_WEB_LISTEN", "127.0.0.1:7373"),
-		CertFile:      os.Getenv("SYSLOG_WEB_TLS_CERT"),
-		KeyFile:       os.Getenv("SYSLOG_WEB_TLS_KEY"),
-		DBPath:        getenvDefault("SYSLOG_DB_PATH", "syslog_aggregates.db"),
-		AuthMode:      getenvDefault("SYSLOG_AUTH_MODE", "none"),
-		SecureCookies: secure,
-		MuteLimit:     muteLimit,
+		Listen:         getenvDefault("SYSLOG_WEB_LISTEN", "127.0.0.1:7373"),
+		CertFile:       os.Getenv("SYSLOG_WEB_TLS_CERT"),
+		KeyFile:        os.Getenv("SYSLOG_WEB_TLS_KEY"),
+		DBPath:         getenvDefault("SYSLOG_DB_PATH", "syslog_aggregates.db"),
+		AuthMode:       getenvDefault("SYSLOG_AUTH_MODE", "none"),
+		SecureCookies:  secure,
+		MuteLimit:      muteLimit,
+		DecisionsModel: os.Getenv("SYSLOG_DECISIONS_MODEL"),
+		ExplainModel: getenvDefault("SYSLOG_ISSUE_MODEL",
+			getenvDefault("SYSLOG_DEFAULT_MODEL", llm.DefaultModel)),
 	}, nil
 }
 
@@ -268,6 +279,7 @@ func New(cfg Config, auth Authenticator, lib *reporter.LibraryStore) (*Server, e
 	s.mux.HandleFunc("POST /findings/{id}/feedback", s.handleFeedback)
 	s.mux.HandleFunc("GET /noise", s.handleNoise)
 	s.mux.HandleFunc("POST /noise", s.handleNoiseSave)
+	s.mux.HandleFunc("GET /noise/{id}/model-view", s.handleNoiseModelView)
 	s.mux.Handle("GET /static/", http.FileServerFS(staticFS))
 	s.mux.HandleFunc("GET /api/me", s.handleMe)
 	s.mux.HandleFunc("GET /api/findings", s.handleAPIFindings)

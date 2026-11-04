@@ -425,8 +425,13 @@ sudo -u syslog-reporter syslog-reporter user add jbloggs jbloggs@example.ac.uk
 **Noise review.** The web UI's Noise review page shows ten random
 message shapes that got past the filters on the latest run. Tick the
 noise and save: ticked shapes are muted on every host, and the ones
-nobody picks are not shown again, to anyone, for 30 days. Saving needs a login. Undo a mute
-with `knowns hits <dump> --source web` and `knowns remove <id>`.
+nobody picks are not shown again, to anyone, for 30 days. Saving needs
+a login. Undo a mute with `knowns hits <dump> --source web` and
+`knowns remove <id>`. Each row's "Model's view" asks a model, on
+demand, how likely the line is to need attention and what it usually
+means. It uses the same model settings and `.env` as the daily run
+(including `https_proxy`), so restart the web service after changing
+them.
 
 [HOW_IT_WORKS.md](HOW_IT_WORKS.md) is a tour with screenshots. For a
 shared box on a LAN, `--listen` and the TLS flags are in

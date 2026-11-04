@@ -441,6 +441,26 @@ mode `none` the page shows the shapes and a login notice instead of
 Save, and `POST /noise` is a 403. No per-user mute cap and no undo on the
 page: `knowns hits --source web` and `knowns remove` cover that.
 
+Each row also has a "Model's view" reveal (a `<details>` that htmx fills
+on first open from `GET /noise/{id}/model-view`), shown only to a
+logged-in user and only when a model is usable. It holds the attention
+score `knowns discover` would give the shape (`reporter.ScoreAttention`:
+Decisions when `SYSLOG_DECISIONS_MODEL` is set, else Jev when
+`TYPESAFE_API_KEY` is), worded as "rated N% likely to need attention",
+and a two-to-three sentence explanation from the issue model
+(`SYSLOG_ISSUE_MODEL`, else `SYSLOG_DEFAULT_MODEL`;
+`prompts/noise_explanation.txt`, with the Trust boundary block). A
+complete answer is cached in `noise_model_views`, so a shape costs one
+set of calls; a part that failed is shown as "could not fetch" (the
+error goes to the log, never the page, since it can carry the provider
+URL) and retried on the next open. These calls are not under the daily
+prompt-token budget and are not recorded in `llm_spend`. So `serve` now
+makes outbound calls: its environment needs the same model credentials
+as the daily run, and a proxy comes from `https_proxy` in the `.env`
+that `serve` loads from its working directory (the unit's
+WorkingDirectory). Go reads the proxy once, so a change needs a restart
+of the web service.
+
 ### The sysadmin API
 
 `/api/` paths on the same `serve` process take a separate middleware stack
@@ -844,12 +864,12 @@ Read from the environment or a `.env` beside the working directory
   sidecar, so back up with `sqlite3 <file> ".backup <dest>"`; see
   "Backing up the database" under the findings library section
 - `SYSLOG_DB_KEEP_DAYS` store retention, pruned each run (default 90)
-- `TYPESAFE_API_KEY` the Jev key, read only by `knowns discover`;
-  `SYSLOG_JEV_MODEL` pins a model id (default `jev-latest`).
-  `SYSLOG_DECISIONS_MODEL` (`azure/<deployment>`, a gpt-6-luna
-  deployment) makes `knowns discover` score through the Azure OpenAI
+- `TYPESAFE_API_KEY` the Jev key, read by `knowns discover` and by
+  `serve`'s noise review model view; `SYSLOG_JEV_MODEL` pins a model id
+  (default `jev-latest`). `SYSLOG_DECISIONS_MODEL` (`azure/<deployment>`,
+  a gpt-6-luna deployment) makes both score through the Azure OpenAI
   Decisions API instead, with the AZURE_OPENAI_* credentials;
-  `--decisions-model` overrides it. A run that
+  `--decisions-model` overrides it for `knowns discover`. A run that
   still has `SYSLOG_BLANKET_IGNORE` set warns that it is no longer read;
   each entry becomes a `knowns add --host '*' --match ...`
 - `SYSLOG_API_MUTE_LIMIT` mutes allowed per API token per 24 hours

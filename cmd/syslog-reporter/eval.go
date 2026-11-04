@@ -63,7 +63,7 @@ func parseEvalFlags(args []string, output io.Writer) (evalConfig, error) {
 	fs := flag.NewFlagSet("eval", flag.ContinueOnError)
 	fs.SetOutput(output)
 	setUsage(fs, evalHelpIntro, evalHelpEnv)
-	model := fs.String("model", getenvDefault("SYSLOG_DEFAULT_MODEL", "openai/gpt-5.6-luna"), "Fallback model; stage environment variables override it.")
+	model := fs.String("model", getenvDefault("SYSLOG_DEFAULT_MODEL", llm.DefaultModel), "Fallback model; stage environment variables override it.")
 	scan := fs.String("scan-model", os.Getenv("SYSLOG_LOGSCAN_MODEL"), "Detection and deduplication model (default: SYSLOG_LOGSCAN_MODEL, then --model).")
 	issue := fs.String("issue-model", os.Getenv("SYSLOG_ISSUE_MODEL"), "Resolution model (default: SYSLOG_ISSUE_MODEL, then --model).")
 	input := fs.String("input", "", "File of log lines to analyse, raw or filtered (default: the bundled sample).")

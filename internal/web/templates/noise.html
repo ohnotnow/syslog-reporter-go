@@ -35,12 +35,19 @@
             <input type="hidden" name="shown" value="{{$r.ID}}">
             <label class="noise-pick">
               <input type="checkbox" name="noise" value="{{$r.ID}}" aria-describedby="shape-{{$r.ID}}"{{if and $.Data.AutoFocus (eq $i 0)}} autofocus{{end}}>
-              This is noise
+              Noise?
             </label>
             <div id="shape-{{$r.ID}}" class="noise-shape">
               <p class="noise-meta"><strong>{{$r.Program}}</strong> - {{$r.Lines}} {{if eq $r.Lines 1}}line{{else}}lines{{end}} on {{$r.Hosts}} {{if eq $r.Hosts 1}}host{{else}}hosts{{end}}</p>
               <pre><code>{{$r.Template}}</code></pre>
               <p class="noise-example"><span class="quiet">Example:</span> <code>{{$r.Example}}</code></p>
+              {{if $.Data.ModelView}}
+              <details class="model-view" hx-get="/noise/{{$r.ID}}/model-view" hx-trigger="toggle once"
+                       hx-target="find .model-view__body" hx-swap="innerHTML">
+                <summary>Model's view</summary>
+                <div class="model-view__body" aria-live="polite"><p class="quiet">Asking the model...</p></div>
+              </details>
+              {{end}}
             </div>
           </li>
           {{end}}
@@ -54,3 +61,13 @@
       {{end}}
     </section>
 {{end}}
+
+{{define "model-view"}}{{with .Data}}
+{{if .Message}}<p>{{.Message}}</p>{{else}}
+{{if .Refused}}<p>The model declined to score this line.</p>
+{{else if .Percent}}<p><strong>Rated {{.Percent}} likely to need attention</strong> <span class="quiet">({{.ScoreModel}})</span></p>
+{{else if .ScoreFailed}}<p>Could not fetch the model's score.</p>{{end}}
+{{if .Explanation}}<p>{{.Explanation}}</p><p class="quiet">Explanation by {{.ExplainModel}}.</p>
+{{else if .ExplainFailed}}<p>Could not fetch the model's explanation.</p>{{end}}
+<p class="quiet">The model's opinion, not a verdict: check it against the example line.</p>
+{{end}}{{end}}{{end}}

@@ -586,6 +586,28 @@ h3 {
   font-weight: 600;
 }
 
+.model-view {
+  margin-top: var(--space-2);
+}
+
+.model-view summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--blue);
+  padding: var(--space-1) 0;
+}
+
+.model-view__body {
+  margin-top: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  background-color: var(--blue-10);
+  border-left: 4px solid var(--blue);
+}
+
+.model-view__body p {
+  margin: 0 0 var(--space-2);
+}
+
 /* Narrow screens: the tick box above the shape, not beside it, so the
    shape keeps the full width. */
 @media (max-width: 40rem) {

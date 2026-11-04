@@ -502,7 +502,7 @@ func userAdd(dbPath, username, email, password string) error {
 }
 
 func runBatch(cliArgs []string) {
-	defaultModel := getenvDefault("SYSLOG_DEFAULT_MODEL", "openai/gpt-5.6-luna")
+	defaultModel := getenvDefault("SYSLOG_DEFAULT_MODEL", llm.DefaultModel)
 	defaultDBPath := getenvDefault("SYSLOG_DB_PATH", "syslog_aggregates.db")
 	keepDays, err := strconv.Atoi(getenvDefault("SYSLOG_DB_KEEP_DAYS", "90"))
 	if err != nil {

@@ -63,7 +63,10 @@ internal/reporter/
   knownsstore.go            known_knowns table (migration 5): add, list,
                             delete, load; the only store of suppressions
   template.go               message templating for the noise finder (mask,
-                            Template, TemplateRegex)
+                            Template, TemplateRegex, ShapeMatch)
+  attention.go              the attention question and ScoreAttention (Jev
+                            or Decisions), shared by discover and the web
+                            UI's noise review model view
   anomaly.go                ParseLine / RobustZ / peer detector / CombineAnomalies
   store.go                  SQLite daily-aggregate store
   baseline.go temporal.go   history-based detectors
@@ -216,7 +219,10 @@ SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.
   ADR srg-uHwCr, owner decision 2026-09-18), plus decisions (ait
   srg-uh92Y) and web (the web UI's noise review page, ait srg-OymJL.3:
   ticked shapes become host * mutes via reporter.ShapeMatch, shared with
-  discover; saving needs a login, owner decision 2026-11-04): the bundled noise rules
+  discover; saving needs a login, owner decision 2026-11-04; each row's
+  on-demand "Model's view" is reporter.ScoreAttention plus
+  ExplainNoiseShape, cached in noise_model_views, login only, outside
+  the daily budget, ait srg-OymJL.4): the bundled noise rules
   that used to be compiled in now ship as internal/reporter/noise-rules.txt
   and `knowns seed` loads them (idempotent, never deletes); SYSLOG_BLANKET_IGNORE
   is gone. The email body shows one count line for known-knowns, the

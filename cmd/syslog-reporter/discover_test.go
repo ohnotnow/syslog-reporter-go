@@ -189,7 +189,7 @@ func TestDecisionsScorerKeepsRefusalsVisible(t *testing.T) {
 	t.Setenv("AZURE_OPENAI_API_KEY", "test-key")
 
 	shapes := accumulateFixture(t)
-	if _, _, err := scoreShapes(context.Background(), shapes, 2, decisionsScorer(&logger{}, "azure/d")); err != nil {
+	if _, _, err := scoreShapes(context.Background(), shapes, 2, attentionScorer(&logger{}, "azure/d")); err != nil {
 		t.Fatal(err)
 	}
 	if got := selectCandidates(shapes, 1, 1, 1); len(got) != 0 {
@@ -227,7 +227,7 @@ func TestDecisionsScorerStopsAtTheTokenCap(t *testing.T) {
 	t.Cleanup(func() { llm.SetBudget(0, 0, nil) })
 
 	shapes := accumulateFixture(t)
-	_, _, err := scoreShapes(context.Background(), shapes, 1, decisionsScorer(&logger{}, "azure/d"))
+	_, _, err := scoreShapes(context.Background(), shapes, 1, attentionScorer(&logger{}, "azure/d"))
 	if !errors.Is(err, llm.ErrBudget) {
 		t.Fatalf("want ErrBudget, got %v", err)
 	}
