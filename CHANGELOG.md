@@ -28,6 +28,11 @@ commands of it.
 - `backfill`: run the last N days (default 14) through the pipeline with
   no LLM, fetching missing dumps and skipping days that fail.
 - `budget`: show today's LLM prompt-token spend; `budget reset` clears it.
+- `knowns discover --decisions-model azure/<deployment>` (or
+  `SYSLOG_DECISIONS_MODEL`): score message shapes with the Azure OpenAI
+  Decisions API on a gpt-6-luna deployment instead of Jev, so they stay
+  in Azure. Entries get source `decisions`. Needs `--preview` or an
+  explicit `--threshold`, because the 0.1 default was measured on Jev.
 
 ### Changed
 - `SYSLOG_MAX_PROMPT_TOKENS` is now a budget per calendar day, shared by

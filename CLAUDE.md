@@ -208,13 +208,18 @@ SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.
   caution about hand-rolled curl escaping, not a rule - do not
   reintroduce it. Every row carries source, created_by, token_prefix,
   finding_id and created_at. Sources are api, cli, bundled and jev (ant
-  ADR srg-uHwCr, owner decision 2026-09-18): the bundled noise rules
+  ADR srg-uHwCr, owner decision 2026-09-18), plus decisions (ait
+  srg-uh92Y): the bundled noise rules
   that used to be compiled in now ship as internal/reporter/noise-rules.txt
   and `knowns seed` loads them (idempotent, never deletes); SYSLOG_BLANKET_IGNORE
   is gone. The email body shows one count line for known-knowns, the
   attachment the per-entry list with bundled folded into one item;
   `knowns hits <dump>` shows what an entry caught. `knowns discover` is
-  the Jev-scored noise finder (auto-add, `--preview` asks on a terminal).
+  the Jev-scored noise finder (auto-add, `--preview` asks on a terminal);
+  `--decisions-model azure/<deployment>` scores it through the Azure
+  OpenAI Decisions API instead (internal/llm/decisions.go, openai-go's
+  Decisions service), refusing auto-add without `--preview` or an explicit
+  `--threshold` because 0.1 was measured on Jev.
   A Jev gate before the issue detector is deferred, NOT rejected: it will
   be built when the trigger in ant ADR srg-FGSKN fires. TypeSafe's terms
   forbid publishing benchmarks; the evaluation numbers stay in ant.

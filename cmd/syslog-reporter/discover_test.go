@@ -5,6 +5,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -12,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ohnotnow/syslog-reporter-go/internal/jev"
+	"github.com/ohnotnow/syslog-reporter-go/internal/llm"
 	"github.com/ohnotnow/syslog-reporter-go/internal/reporter"
 )
 
@@ -87,12 +89,12 @@ func TestAccumulateCountsLinesHostsAndDaysPerShape(t *testing.T) {
 
 // fakeScorer scores by program: fwupd and motd-news are routine, kernel
 // errors are not; it also tallies usage the way the real one does.
-func fakeScorer(ctx context.Context, s *shape) (float64, jev.Usage, error) {
+func fakeScorer(ctx context.Context, s *shape) (float64, llm.Usage, error) {
 	switch s.Program {
 	case "fwupd", "motd-news":
-		return 0.03, jev.Usage{InputTokens: 100, OutputTokens: 10}, nil
+		return 0.03, llm.Usage{PromptTokens: 100, CompletionTokens: 10}, nil
 	default:
-		return 0.9, jev.Usage{InputTokens: 100, OutputTokens: 10}, nil
+		return 0.9, llm.Usage{PromptTokens: 100, CompletionTokens: 10}, nil
 	}
 }
 
@@ -102,7 +104,7 @@ func TestCandidatesRespectThresholdsAndBuildWorkingRegexes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if usage.InputTokens != 300 {
+	if usage.PromptTokens != 300 {
 		t.Errorf("usage not summed: %+v", usage)
 	}
 	// fwupd: 3 days, motd-news: 2 days, kernel: low score fails
@@ -114,7 +116,7 @@ func TestCandidatesRespectThresholdsAndBuildWorkingRegexes(t *testing.T) {
 	if len(got) != 2 || got[0].Program != "fwupd" || got[1].Program != "motd-news" {
 		t.Fatalf("min-days 2 should give fwupd then motd-news by lines, got %+v", got)
 	}
-	inputs, err := candidateInputs(got)
+	inputs, err := candidateInputs(got, reporter.KnownSourceJev)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,8 +142,8 @@ func TestCandidatesRespectThresholdsAndBuildWorkingRegexes(t *testing.T) {
 
 func TestScoreShapesStopsOnTheFirstError(t *testing.T) {
 	shapes := accumulateFixture(t)
-	failing := func(ctx context.Context, s *shape) (float64, jev.Usage, error) {
-		return 0, jev.Usage{}, context.DeadlineExceeded
+	failing := func(ctx context.Context, s *shape) (float64, llm.Usage, error) {
+		return 0, llm.Usage{}, context.DeadlineExceeded
 	}
 	if _, _, err := scoreShapes(context.Background(), shapes, 3, failing); err == nil {
 		t.Error("expected the scorer's error")
@@ -154,7 +156,7 @@ func TestPreviewPrintsAndConfirmReadsYes(t *testing.T) {
 		t.Fatal(err)
 	}
 	candidates := selectCandidates(shapes, 0.1, 2, 1)
-	inputs, err := candidateInputs(candidates)
+	inputs, err := candidateInputs(candidates, reporter.KnownSourceJev)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,5 +173,39 @@ func TestPreviewPrintsAndConfirmReadsYes(t *testing.T) {
 		if got := confirm(strings.NewReader(in), &bytes.Buffer{}, "? "); got != want {
 			t.Errorf("confirm(%q) = %v", in, got)
 		}
+	}
+}
+
+// A refusal must never turn a shape into a mute candidate, and entries
+// from the Decisions scorer carry their own source.
+func TestDecisionsScorerKeepsRefusalsVisible(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"model":"m","answers":[{"type":"refusal","name":"q"}],"usage":{"input_tokens":5,"output_tokens":0,"total_tokens":5}}`))
+	}))
+	defer server.Close()
+	t.Setenv("AZURE_OPENAI_ENDPOINT", server.URL+"/openai/v1")
+	t.Setenv("AZURE_OPENAI_API_KEY", "test-key")
+
+	shapes := accumulateFixture(t)
+	if _, _, err := scoreShapes(context.Background(), shapes, 2, decisionsScorer(&logger{}, "azure/d")); err != nil {
+		t.Fatal(err)
+	}
+	if got := selectCandidates(shapes, 1, 1, 1); len(got) != 0 {
+		t.Errorf("refused shapes became candidates: %+v", got)
+	}
+}
+
+func TestCandidateInputsCarryTheScorersSource(t *testing.T) {
+	shapes := accumulateFixture(t)
+	if _, _, err := scoreShapes(context.Background(), shapes, 2, fakeScorer); err != nil {
+		t.Fatal(err)
+	}
+	inputs, err := candidateInputs(selectCandidates(shapes, 0.1, 3, 1), reporter.KnownSourceDecisions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inputs) != 1 || inputs[0].Source != reporter.KnownSourceDecisions || !strings.HasPrefix(inputs[0].Reason, "decisions: score 0.03, ") {
+		t.Errorf("inputs = %+v", inputs)
 	}
 }

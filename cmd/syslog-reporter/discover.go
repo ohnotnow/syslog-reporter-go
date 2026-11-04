@@ -1,10 +1,12 @@
 package main
 
-// knowns discover: the Jev-scored noise finder (ait srg-M3Yny.9, ant ADR
+// knowns discover: the scored noise finder (ait srg-M3Yny.9, ant ADR
 // srg-uHwCr, evaluation in srg-FGSKN). Templates a window of the dumps
-// daily keeps, asks Jev once per message shape whether an admin
+// daily keeps, asks a scorer once per message shape whether an admin
 // would want to see it, and adds the confidently routine, recurring
-// shapes to known_knowns with source jev. Auto-add is the default;
+// shapes to known_knowns. The scorer is Jev (source jev) by default, or
+// the Azure OpenAI Decisions API with --decisions-model (source
+// decisions, ait srg-uh92Y). Auto-add is the default;
 // --preview shows the candidates first and asks y/n on a terminal, and on
 // anything that is not a terminal (cron, an agent) prints and adds
 // nothing. The admin reviews the result with 'knowns hits'.
@@ -12,6 +14,9 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
+	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -24,39 +29,56 @@ import (
 
 	"github.com/ohnotnow/syslog-reporter-go/internal/cli"
 	"github.com/ohnotnow/syslog-reporter-go/internal/jev"
+	"github.com/ohnotnow/syslog-reporter-go/internal/llm"
 	"github.com/ohnotnow/syslog-reporter-go/internal/reporter"
 	"golang.org/x/term"
 )
 
-// attentionQuestion is the one question, unchanged from the evaluation
-// (srg-FGSKN) so the thresholds measured there still apply.
+// The attention question's parts, shared by both scorers. Jev takes them
+// in its object form (attentionQuestion); the Decisions API takes one
+// instructions string (attentionInstructions). The not_for sits on the
+// yes side: a message is not worth attention merely for containing the
+// word error. The evaluation (srg-FGSKN) had it on the no side, which
+// says the opposite, so the 0.1 threshold measured there predates the
+// fix; re-measure with --preview.
+const (
+	attentionAsk       = "Should this system log message be brought to a system administrator's attention?"
+	attentionFocus     = "Judge whether an admin would want to know or act, given how many lines, hosts and days produced it."
+	attentionYesWhat   = "Indicates a failure, error, security event, resource problem, hardware fault or misconfiguration an administrator should act on or know about"
+	attentionNoWhat    = "Routine operational chatter: successful or expected events, informational start/stop messages, scheduled jobs running normally, debug output"
+	attentionYesNotFor = "A message that merely contains the word error or warning but describes normal behaviour"
+)
+
+var (
+	attentionYesExamples = []string{
+		"kernel: EXT4-fs error (device sda1): ext4_find_entry: reading directory lblock 0",
+		"sshd: Failed password for invalid user <user> from <ip> port <n> ssh2",
+		"systemd: <fqdn>.service: Main process exited, code=exited, status=1/FAILURE",
+	}
+	attentionNoExamples = []string{
+		"systemd: Started Daily apt download activities.",
+		"sshd: Accepted publickey for <user> from <ip> port <n> ssh2",
+		"CRON: (<user>) CMD (/usr/lib/<fqdn> --cron)",
+	}
+)
+
 var attentionQuestion = map[string]jev.Question{"attention": {
 	Type: "noul",
 	Instructions: map[string]any{
-		"question": "Should this system log message be brought to a system administrator's attention?",
+		"question": attentionAsk,
 		"inspect":  "`log.message`",
-		"focus":    "Judge whether an admin would want to know or act, given how many lines, hosts and days produced it.",
+		"focus":    attentionFocus,
 	},
 	Criteria: map[string]any{
-		"true": map[string]any{
-			"what": "Indicates a failure, error, security event, resource problem, hardware fault or misconfiguration an administrator should act on or know about",
-			"examples": []string{
-				"kernel: EXT4-fs error (device sda1): ext4_find_entry: reading directory lblock 0",
-				"sshd: Failed password for invalid user <user> from <ip> port <n> ssh2",
-				"systemd: <fqdn>.service: Main process exited, code=exited, status=1/FAILURE",
-			},
-		},
-		"false": map[string]any{
-			"what":    "Routine operational chatter: successful or expected events, informational start/stop messages, scheduled jobs running normally, debug output",
-			"not_for": "A message that merely contains the word error or warning but describes normal behaviour",
-			"examples": []string{
-				"systemd: Started Daily apt download activities.",
-				"sshd: Accepted publickey for <user> from <ip> port <n> ssh2",
-				"CRON: (<user>) CMD (/usr/lib/<fqdn> --cron)",
-			},
-		},
+		"true":  map[string]any{"what": attentionYesWhat, "not_for": attentionYesNotFor, "examples": attentionYesExamples},
+		"false": map[string]any{"what": attentionNoWhat, "examples": attentionNoExamples},
 	},
 }}
+
+// attentionInstructions is the same question as prose.
+var attentionInstructions = attentionAsk + " Inspect log.message in the input; the input also gives how many lines, hosts and days produced it. " +
+	attentionFocus + "\n\nAnswer yes when it: " + attentionYesWhat + ". This does not cover: " + attentionYesNotFor + ". For example:\n- " + strings.Join(attentionYesExamples, "\n- ") +
+	"\n\nAnswer no when it is: " + attentionNoWhat + ". For example:\n- " + strings.Join(attentionNoExamples, "\n- ")
 
 // shape is one message template's tally across the window.
 type shape struct {
@@ -71,17 +93,19 @@ type shape struct {
 func (s *shape) key() string { return s.Program + "\x00" + s.Template }
 
 // scorer asks for the attention score of one shape and reports the tokens
-// it cost; a type so tests can stand in for Jev.
-type scorer func(ctx context.Context, s *shape) (float64, jev.Usage, error)
+// it cost; a type so tests can stand in for Jev and the Decisions API.
+type scorer func(ctx context.Context, s *shape) (float64, llm.Usage, error)
 
 func runKnownsDiscover(args []string) {
 	fs, dbPath := knownsFlagSet("knowns discover")
 	days := fs.Int("days", 30, "Days of dumps to read, ending yesterday")
 	dumpDir := fs.String("dump-dir", defaultDumpDir(), "Where daily keeps syslog-YYYY-MM-DD.ndjson.gz (default: $WORK_DIR/dumps)")
-	threshold := fs.Float64("threshold", 0.1, "Add a shape only when its attention score is below this")
+	threshold := fs.Float64("threshold", 0.1, "Add a shape only when its attention score is below this (the default was measured on Jev)")
 	minDays := fs.Int("min-days", 3, "Add a shape only when it appeared on at least this many days")
 	minLines := fs.Int("min-lines", 1, "Add a shape only when it produced at least this many lines in the window")
-	workers := fs.Int("workers", 8, "Parallel Jev calls")
+	workers := fs.Int("workers", 8, "Parallel scoring calls")
+	decisionsModel := fs.String("decisions-model", os.Getenv("SYSLOG_DECISIONS_MODEL"),
+		"Score with the Azure OpenAI Decisions API on this azure/<deployment> (a gpt-6-luna deployment) instead of Jev")
 	preview := fs.Bool("preview", false, "Print the candidates and ask before adding (prints only when stdin is not a terminal)")
 	debug := fs.Bool("debug", false, "Log each shape's score")
 	if extra := cli.ParseFlagsAnywhere(fs, args); len(extra) > 0 {
@@ -90,10 +114,25 @@ func runKnownsDiscover(args []string) {
 	if *days < 1 || *workers < 1 || *threshold <= 0 || *threshold > 1 {
 		fatal("--days and --workers must be at least 1; --threshold must be in (0, 1]")
 	}
-	if err := jev.CheckCredentials(); err != nil {
+	log := &logger{debugEnabled: *debug}
+	backend, source, score := "Jev", reporter.KnownSourceJev, jevScorer(log)
+	if *decisionsModel != "" {
+		if err := llm.CheckDecisionsModel(*decisionsModel); err != nil {
+			fatal("%v", err)
+		}
+		// The 0.1 default came from Jev's score distribution (srg-FGSKN);
+		// another model's scores spread differently, so auto-adding on it
+		// would mute on an unmeasured cut. A human looks first, or names
+		// the cut.
+		if !*preview && !flagSet(fs, "threshold") {
+			fatal("--decisions-model needs --preview or an explicit --threshold: the 0.1 default was measured on Jev, not on %s", *decisionsModel)
+		}
+		llm.SetLogger(log.Warn)
+		llm.SetDebugLogger(log.Debug)
+		backend, source, score = *decisionsModel, reporter.KnownSourceDecisions, decisionsScorer(log, *decisionsModel)
+	} else if err := jev.CheckCredentials(); err != nil {
 		fatal("%v", err)
 	}
-	log := &logger{debugEnabled: *debug}
 	lib := openUserStore(*dbPath)
 	defer lib.Close()
 
@@ -122,15 +161,15 @@ func runKnownsDiscover(args []string) {
 	}
 
 	ctx := context.Background()
-	usage, elapsed, err := scoreShapes(ctx, shapes, *workers, jevScorer(log))
+	usage, elapsed, err := scoreShapes(ctx, shapes, *workers, score)
 	if err != nil {
 		fatal("%v", err)
 	}
-	log.Info("Jev: %d shapes scored in %s, %d input tokens, %d output tokens",
-		len(shapes), elapsed.Round(time.Second), usage.InputTokens, usage.OutputTokens)
+	log.Info("%s: %d shapes scored in %s, %d input tokens, %d output tokens",
+		backend, len(shapes), elapsed.Round(time.Second), usage.PromptTokens, usage.CompletionTokens)
 
 	candidates := selectCandidates(shapes, *threshold, *minDays, *minLines)
-	inputs, err := candidateInputs(candidates)
+	inputs, err := candidateInputs(candidates, source)
 	if err != nil {
 		fatal("%v", err)
 	}
@@ -156,7 +195,7 @@ func runKnownsDiscover(args []string) {
 	for _, e := range added {
 		fmt.Printf("known-known %d added: %s\n", e.ID, describeKnown(e))
 	}
-	fmt.Fprintf(os.Stderr, "%d added; review with 'syslog-reporter knowns hits <dump> --source jev'\n", len(added))
+	fmt.Fprintf(os.Stderr, "%d added; review with 'syslog-reporter knowns hits <dump> --source %s'\n", len(added), source)
 }
 
 func defaultDumpDir() string {
@@ -208,30 +247,61 @@ func accumulate(shapes map[string]*shape, lines []string, day string) int {
 	return n
 }
 
-// jevScorer asks the real API. The state carries the counts so the model
-// judges "this shape, this often, this widely", as in the evaluation.
+// shapeState is what a scorer is shown about one shape: the counts ride
+// along so the model judges "this shape, this often, this widely", as in
+// the evaluation.
+func shapeState(s *shape) map[string]any {
+	return map[string]any{"log": map[string]any{
+		"program": s.Program, "message": s.Template,
+		"lines_seen": s.Lines, "hosts_seen": len(s.Hosts), "days_seen": len(s.Days),
+	}}
+}
+
+func logScore(log *logger, score float64, s *shape) {
+	log.Debug("%.2f %5d lines %3d hosts %2d days  %s: %s", score, s.Lines, len(s.Hosts), len(s.Days), s.Program, s.Template)
+}
+
+// jevScorer asks TypeSafe's Jev.
 func jevScorer(log *logger) scorer {
-	return func(ctx context.Context, s *shape) (float64, jev.Usage, error) {
-		state := map[string]any{"log": map[string]any{
-			"program": s.Program, "message": s.Template,
-			"lines_seen": s.Lines, "hosts_seen": len(s.Hosts), "days_seen": len(s.Days),
-		}}
-		resp, err := jev.Ask(ctx, state, attentionQuestion)
+	return func(ctx context.Context, s *shape) (float64, llm.Usage, error) {
+		resp, err := jev.Ask(ctx, shapeState(s), attentionQuestion)
 		if err != nil {
-			return 0, jev.Usage{}, err
+			return 0, llm.Usage{}, err
 		}
 		score, err := jev.Noul(resp, "attention")
 		if err != nil {
-			return 0, jev.Usage{}, err
+			return 0, llm.Usage{}, err
 		}
-		log.Debug("%.2f %5d lines %3d hosts %2d days  %s: %s", score, s.Lines, len(s.Hosts), len(s.Days), s.Program, s.Template)
-		return score, resp.Usage, nil
+		logScore(log, score, s)
+		return score, llm.Usage{PromptTokens: int64(resp.Usage.InputTokens), CompletionTokens: int64(resp.Usage.OutputTokens)}, nil
+	}
+}
+
+// decisionsScorer asks the Azure OpenAI Decisions API, with the same
+// state (as JSON text) and the question as prose. A refused shape scores
+// 1, so it can never become a candidate: a refusal is not a "routine".
+func decisionsScorer(log *logger, model string) scorer {
+	return func(ctx context.Context, s *shape) (float64, llm.Usage, error) {
+		input, err := json.Marshal(shapeState(s))
+		if err != nil {
+			return 0, llm.Usage{}, err
+		}
+		score, usage, err := llm.Predicate(ctx, model, string(input), attentionInstructions)
+		if errors.Is(err, llm.ErrRefused) {
+			log.Info("%s refused to score %s: %s; kept visible", model, s.Program, s.Template)
+			return 1, usage, nil
+		}
+		if err != nil {
+			return 0, llm.Usage{}, err
+		}
+		logScore(log, score, s)
+		return score, usage, nil
 	}
 }
 
 // scoreShapes scores every shape with workers in parallel; the first
 // error stops the rest.
-func scoreShapes(ctx context.Context, shapes map[string]*shape, workers int, score scorer) (jev.Usage, time.Duration, error) {
+func scoreShapes(ctx context.Context, shapes map[string]*shape, workers int, score scorer) (llm.Usage, time.Duration, error) {
 	start := time.Now()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -240,7 +310,7 @@ func scoreShapes(ctx context.Context, shapes map[string]*shape, workers int, sco
 		wg       sync.WaitGroup
 		mu       sync.Mutex
 		firstErr error
-		usage    jev.Usage
+		usage    llm.Usage
 	)
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
@@ -256,8 +326,8 @@ func scoreShapes(ctx context.Context, shapes map[string]*shape, workers int, sco
 					}
 				} else {
 					s.Score = v
-					usage.InputTokens += u.InputTokens
-					usage.OutputTokens += u.OutputTokens
+					usage.PromptTokens += u.PromptTokens
+					usage.CompletionTokens += u.CompletionTokens
 				}
 				mu.Unlock()
 			}
@@ -295,10 +365,11 @@ func selectCandidates(shapes map[string]*shape, threshold float64, minDays, minL
 	return out
 }
 
-// candidateInputs turns candidates into store inputs, checking that each
-// generated regex matches the line it came from: one that does not is a
-// templating bug, not something to write into the table.
-func candidateInputs(candidates []*shape) ([]reporter.KnownEntryInput, error) {
+// candidateInputs turns candidates into store inputs with the scorer's
+// source, checking that each generated regex matches the line it came
+// from: one that does not is a templating bug, not something to write
+// into the table.
+func candidateInputs(candidates []*shape, source string) ([]reporter.KnownEntryInput, error) {
 	inputs := make([]reporter.KnownEntryInput, 0, len(candidates))
 	for _, s := range candidates {
 		match := reporter.TemplateRegex(s.Program, s.Template)
@@ -311,8 +382,8 @@ func candidateInputs(candidates []*shape) ([]reporter.KnownEntryInput, error) {
 		}
 		inputs = append(inputs, reporter.KnownEntryInput{
 			Host: "*", Match: match,
-			Reason: fmt.Sprintf("jev: score %.2f, %d lines on %d hosts over %d days", s.Score, s.Lines, len(s.Hosts), len(s.Days)),
-			Added:  time.Now(), Source: reporter.KnownSourceJev,
+			Reason: fmt.Sprintf("%s: score %.2f, %d lines on %d hosts over %d days", source, s.Score, s.Lines, len(s.Hosts), len(s.Days)),
+			Added:  time.Now(), Source: source,
 		})
 	}
 	return inputs, nil
@@ -329,6 +400,13 @@ func printCandidates(w io.Writer, candidates []*shape, inputs []reporter.KnownEn
 	for i, in := range inputs {
 		fmt.Fprintf(w, "%d. %s\n", i+1, in.Match)
 	}
+}
+
+// flagSet reports whether name was given on the command line.
+func flagSet(fs *flag.FlagSet, name string) bool {
+	set := false
+	fs.Visit(func(f *flag.Flag) { set = set || f.Name == name })
+	return set
 }
 
 // confirm asks a y/n question on a terminal; anything but y or yes is no.

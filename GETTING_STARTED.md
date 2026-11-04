@@ -259,6 +259,14 @@ morning. A monthly cron line:
 15 6 1 * * syslog-reporter cd /var/lib/syslog-reporter && /usr/local/bin/syslog-reporter knowns discover >> /var/lib/syslog-reporter/daily-run.log 2>&1
 ```
 
+To keep the shapes inside Azure, score them with the Azure OpenAI
+Decisions API instead of Jev: point `--decisions-model` (or
+`SYSLOG_DECISIONS_MODEL`) at a gpt-6-luna deployment, for example
+`azure/gpt-6-luna`, and it uses the same `AZURE_OPENAI_*` credentials
+as the daily run. Its entries get source `decisions`. The 0.1 threshold
+was measured on Jev, so this mode will not auto-add until you have chosen
+your own: run it with `--preview` first, then pass `--threshold`.
+
 Once the daily email is going out, each finding in it carries a
 `syslog-mute` line that adds a known-knowns entry from your own shell,
 and from Claude Code you can mute one message on a couple of hosts, list

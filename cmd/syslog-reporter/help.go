@@ -186,8 +186,9 @@ usage: syslog-reporter knowns <list|add|remove|seed|hits|discover|import>
                         re-run after an upgrade
   hits <dump>           what the entries caught on that day's dump, newest
                         entries first: --since 1h|3d|2w|YYYY-MM-DD (by when
-                        the entry was created), --source api|cli|jev|bundled,
-                        --all to include the bundled rules; --id N shows one
+                        the entry was created), --source
+                        api|cli|jev|decisions|bundled, --all to include the
+                        bundled rules; --id N shows one
                         entry's catch grouped by message, --raw the lines.
                         Reads the dump and the db, writes nothing
   discover              the Jev noise finder: template the last --days (30)
@@ -197,7 +198,12 @@ usage: syslog-reporter knowns <list|add|remove|seed|hits|discover|import>
                         source 'jev' (--threshold 0.1, --min-days 3,
                         --min-lines 1). --preview prints them and asks y/n
                         on a terminal; off a terminal it only prints.
-                        Review the result with hits --source jev
+                        Review the result with hits --source jev.
+                        --decisions-model azure/<deployment> (or
+                        SYSLOG_DECISIONS_MODEL) scores with the Azure OpenAI
+                        Decisions API on a gpt-6-luna deployment instead,
+                        source 'decisions'; it needs --preview or an
+                        explicit --threshold (0.1 was measured on Jev)
   import <file.toml>    read the pre-database known_knowns.toml once and add
                         every [[known]] entry (leaves the file alone; does
                         not dedupe, so import a file once)

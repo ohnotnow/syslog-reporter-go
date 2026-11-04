@@ -158,10 +158,15 @@ slice date, not the wall clock, so backfills behave historically.
 
 Every row has a `source`: `api` (the mute endpoint), `cli` (`knowns add`
 or the TOML import), `bundled` (`knowns seed`, from the embedded
-noise-rules.txt; idempotent, never deletes) or `jev` (`knowns discover`,
+noise-rules.txt; idempotent, never deletes), `jev` (`knowns discover`,
 the noise finder: template a window of kept dumps, score each shape with
 Jev, add the routine recurring ones; `--preview` asks first on a
-terminal and only prints elsewhere). The evaluation behind the finder,
+terminal and only prints elsewhere) or `decisions` (the same finder with
+`--decisions-model azure/<deployment>`, scoring through the Azure OpenAI
+Decisions API in internal/llm/decisions.go so the shapes stay in Azure;
+it refuses to auto-add without `--preview` or an explicit `--threshold`,
+because the 0.1 default was measured on Jev's scores, and a refused shape
+scores 1 so it is never muted). The evaluation behind the finder,
 and why a Jev gate before the issue detector is deferred rather than
 rejected, is ant ADR srg-FGSKN.
 
@@ -814,7 +819,11 @@ Read from the environment or a `.env` beside the working directory
   "Backing up the database" under the findings library section
 - `SYSLOG_DB_KEEP_DAYS` store retention, pruned each run (default 90)
 - `TYPESAFE_API_KEY` the Jev key, read only by `knowns discover`;
-  `SYSLOG_JEV_MODEL` pins a model id (default `jev-latest`). A run that
+  `SYSLOG_JEV_MODEL` pins a model id (default `jev-latest`).
+  `SYSLOG_DECISIONS_MODEL` (`azure/<deployment>`, a gpt-6-luna
+  deployment) makes `knowns discover` score through the Azure OpenAI
+  Decisions API instead, with the AZURE_OPENAI_* credentials;
+  `--decisions-model` overrides it. A run that
   still has `SYSLOG_BLANKET_IGNORE` set warns that it is no longer read;
   each entry becomes a `knowns add --host '*' --match ...`
 - `SYSLOG_API_MUTE_LIMIT` mutes allowed per API token per 24 hours

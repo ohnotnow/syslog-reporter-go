@@ -184,19 +184,28 @@ func completeOpenAI(ctx context.Context, modelID, system, user, schemaName strin
 // base URL is load-bearing: request paths resolve relative to it, and
 // without the slash the endpoint's final path segment is silently dropped.
 func completeAzure(ctx context.Context, modelID, system, user, schemaName string, schema map[string]any) (string, error) {
+	client, err := azureClient(modelID)
+	if err != nil {
+		return "", err
+	}
+	return completeChat(ctx, client, "azure", modelID, system, user, schemaName, schema)
+}
+
+// azureClient builds the openai-go client for the Azure resource; chat
+// completions and decisions share it.
+func azureClient(modelID string) (openai.Client, error) {
 	endpoint := os.Getenv("AZURE_OPENAI_ENDPOINT")
 	apiKey := os.Getenv("AZURE_OPENAI_API_KEY")
 	if endpoint == "" || apiKey == "" {
-		return "", fmt.Errorf("azure/%s needs AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY set", modelID)
+		return openai.Client{}, fmt.Errorf("azure/%s needs AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY set", modelID)
 	}
-	client := openai.NewClient(
+	return openai.NewClient(
 		option.WithBaseURL(strings.TrimRight(endpoint, "/")+"/"),
 		option.WithAPIKey(apiKey),
 		option.WithMaxRetries(llmMaxRetries),
 		option.WithMaxRetryDelay(llmMaxRetryDelay),
 		option.WithMiddleware(rateLimitMiddleware("azure/"+modelID)),
-	)
-	return completeChat(ctx, client, "azure", modelID, system, user, schemaName, schema)
+	), nil
 }
 
 // rateLimitMiddleware sits inside both SDKs' retry loops (their Middleware

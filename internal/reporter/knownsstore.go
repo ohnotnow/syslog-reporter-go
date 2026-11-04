@@ -15,16 +15,19 @@ import (
 // Where an entry came from. api: the mute endpoint, from a finding. cli:
 // 'knowns add' or the TOML import on the box. bundled: the noise-rules
 // file shipped with the binary, via 'knowns seed'. jev: 'knowns discover',
-// the Jev-scored noise finder (ant ADR srg-uHwCr).
+// the Jev-scored noise finder (ant ADR srg-uHwCr). decisions: 'knowns
+// discover --decisions-model', the same finder scored by the Azure OpenAI
+// Decisions API (ait srg-uh92Y).
 const (
-	KnownSourceAPI     = "api"
-	KnownSourceCLI     = "cli"
-	KnownSourceBundled = "bundled"
-	KnownSourceJev     = "jev"
+	KnownSourceAPI       = "api"
+	KnownSourceCLI       = "cli"
+	KnownSourceBundled   = "bundled"
+	KnownSourceJev       = "jev"
+	KnownSourceDecisions = "decisions"
 )
 
 // KnownSources lists every accepted source value, in display order.
-var KnownSources = []string{KnownSourceAPI, KnownSourceCLI, KnownSourceBundled, KnownSourceJev}
+var KnownSources = []string{KnownSourceAPI, KnownSourceCLI, KnownSourceBundled, KnownSourceJev, KnownSourceDecisions}
 
 func validKnownSource(s string) bool {
 	for _, v := range KnownSources {
