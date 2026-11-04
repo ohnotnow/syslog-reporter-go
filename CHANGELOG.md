@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-04
+
+Self-service onboarding. Giving someone access no longer means an admin
+on the server running commands and passing a token through chat: admins
+add people from the web UI, and people set their own password and make
+their own API tokens.
+
+### Added
+- Admin accounts: `user add --admin`, and `user admin <username>`
+  (`--remove` to undo) for an existing account. `user list` gains an
+  ADMIN column.
+- A People page in the web UI, for admins only: add someone (optionally
+  as an admin) and get a one-time link to send them, which they open to
+  choose their own password. The same page issues a fresh link as a
+  password reset. A link works once, for 7 days, and a new one cancels
+  the old.
+- An API access page for anyone signed in: create a personal API token
+  (shown once, with an optional expiry date), see and revoke your own
+  tokens, and copy ready-made blocks for `~/.claude/settings.json`, for
+  the `syslog-mute` shell function, and a check command.
+- The Claude Code skill as a zip download on the API access page, always
+  matching the server's version.
+
+### Changed
+- Passwords set from the web or with `user add` / `user passwd` must be
+  15 to 64 characters, not a commonly used password, and not contain the
+  username or email. Existing passwords keep working.
+- The skill's setup check sends people to the API access page instead of
+  asking an admin to run `token create` (skill version 1.5.0).
+
+**Upgrading:** the first run or `serve` migrates the database to schema
+12 (an admin flag on users and a table for set-password links). Nobody
+is an admin after the upgrade: run `syslog-reporter user admin <you>`
+once on the server. The new pages need `--auth local`.
+
 ## [1.0.1] - 2026-11-04
 
 ### Added
@@ -124,6 +159,7 @@ tables for the Noise review page); back it up first with
 
 Releases before 1.0.0 were pre-release; their history is in the git tags.
 
-[Unreleased]: https://github.com/ohnotnow/syslog-reporter-go/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/ohnotnow/syslog-reporter-go/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/ohnotnow/syslog-reporter-go/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/ohnotnow/syslog-reporter-go/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/ohnotnow/syslog-reporter-go/compare/v0.34.0...v1.0.0
