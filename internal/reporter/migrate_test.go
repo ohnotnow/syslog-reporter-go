@@ -51,7 +51,8 @@ func TestMigrateFreshInMemory(t *testing.T) {
 		t.Errorf("schema version = %d, want %d", v, want)
 	}
 	names := tableNames(t, db)
-	for _, tbl := range []string{"aggregates", "runs", "findings", "finding_hosts", "feedback", "users", "api_tokens", "known_knowns"} {
+	for _, tbl := range []string{"aggregates", "runs", "findings", "finding_hosts", "feedback", "users", "api_tokens", "known_knowns",
+		"noise_shapes", "noise_verdicts", "noise_model_views"} {
 		if !names[tbl] {
 			t.Errorf("table %s missing after fresh migration", tbl)
 		}
@@ -465,5 +466,38 @@ INSERT INTO known_knowns (id, host, program, match, reason, added, expires, sour
 	db.QueryRow("SELECT max(id) FROM known_knowns").Scan(&newID)
 	if newID != 10 {
 		t.Errorf("next id = %d, want 10", newID)
+	}
+}
+
+// Migration 9 on a database already at version 8: build a fresh one,
+// take it back to 8 by dropping what 9 added, and reopen.
+func TestMigrateV8FileGainsNoiseReview(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v8.db")
+	db, err := openDatabase(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		"DROP TABLE noise_shapes", "DROP TABLE noise_verdicts", "DROP TABLE noise_model_views",
+		"UPDATE schema_version SET version = 8 WHERE id = 1",
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	db.Close()
+	db, err = openDatabase(path)
+	if err != nil {
+		t.Fatalf("migrating open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if v := schemaVersion(t, db); v != 9 {
+		t.Errorf("schema version = %d, want 9", v)
+	}
+	names := tableNames(t, db)
+	for _, tbl := range []string{"noise_shapes", "noise_verdicts", "noise_model_views"} {
+		if !names[tbl] {
+			t.Errorf("table %s missing after migrating from 8", tbl)
+		}
 	}
 }

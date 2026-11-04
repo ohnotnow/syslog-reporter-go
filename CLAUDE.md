@@ -78,6 +78,9 @@ internal/reporter/
   librarystore.go           findings library store (runs/findings/feedback/users)
   llmspend.go               per-day prompt-token ledger (llm_spend,
                             migration 7) behind SYSLOG_MAX_PROMPT_TOKENS
+  noisestore.go             noise review page's store (migration 9): the
+                            latest day's shapes, reviewers' verdicts, cached
+                            model views (ait epic srg-OymJL)
   apitokens.go              sysadmin API bearer tokens (sha256 + 8-char prefix)
   knownsmute.go             mute-by-finding-id: derive host+program entries
                             from a finding (optional host subset and match

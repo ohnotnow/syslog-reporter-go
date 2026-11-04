@@ -557,6 +557,11 @@ func (s *LibraryStore) RemoveUser(username string) error {
 	if _, err := tx.Exec("DELETE FROM api_tokens WHERE user_id = ?", id); err != nil {
 		return err
 	}
+	// Their noise-review verdicts stay (they still keep shapes out of the
+	// draw), unattributed, like their feedback.
+	if _, err := tx.Exec("UPDATE noise_verdicts SET user_id = NULL WHERE user_id = ?", id); err != nil {
+		return err
+	}
 	if _, err := tx.Exec("DELETE FROM users WHERE id = ?", id); err != nil {
 		return err
 	}

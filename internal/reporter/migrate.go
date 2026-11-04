@@ -97,6 +97,7 @@ var migrations = []migration{
 	{6, "run budget reached", applyRunBudgetReached},
 	{7, "llm spend per day", applyLLMSpend},
 	{8, "non-reusable known-known ids", applyNonReusableKnownIDs},
+	{9, "noise review", applyNoiseReview},
 }
 
 const baselineSchema = `
@@ -436,5 +437,50 @@ CREATE INDEX idx_known_knowns_finding ON known_knowns (finding_id);
 
 func applyNonReusableKnownIDs(tx *sql.Tx) error {
 	_, err := tx.Exec(nonReusableKnownIDsSchema)
+	return err
+}
+
+// Migration 9 (ait srg-OymJL.1): the web UI's noise review page. The run
+// writes the latest day's surviving message shapes (noise_shapes, one
+// day at a time); reviewers' verdicts and the cached "model's view" key
+// on program + template, not on a noise_shapes id, so they outlive the
+// daily replacement of the pool. IF NOT EXISTS because the ladder may be
+// re-run over a complete database (TestMigrateV1FileGainsAPITokens).
+const noiseReviewSchema = `
+CREATE TABLE IF NOT EXISTS noise_shapes (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    day          TEXT    NOT NULL,  -- slice date YYYY-MM-DD the shapes came from
+    program      TEXT    NOT NULL,
+    template     TEXT    NOT NULL,  -- Template's masked message
+    example      TEXT    NOT NULL,  -- one 'program[pid]: message' (Template's rest)
+    example_host TEXT    NOT NULL,  -- the host that example came from
+    lines        INTEGER NOT NULL,
+    hosts        INTEGER NOT NULL,
+    UNIQUE (day, program, template)
+);
+CREATE TABLE IF NOT EXISTS noise_verdicts (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    program    TEXT    NOT NULL,
+    template   TEXT    NOT NULL,
+    verdict    TEXT    NOT NULL CHECK (verdict IN ('noise', 'not_noise')),
+    user_id    INTEGER REFERENCES users(id),  -- NULL once the reviewer's account is removed
+    created_at TEXT    NOT NULL   -- RFC3339 UTC
+);
+CREATE INDEX IF NOT EXISTS idx_noise_verdicts_shape ON noise_verdicts (program, template, created_at);
+CREATE TABLE IF NOT EXISTS noise_model_views (
+    program       TEXT    NOT NULL,
+    template      TEXT    NOT NULL,
+    score         REAL,              -- P(needs attention); NULL if unscored or refused
+    score_model   TEXT,
+    refused       INTEGER NOT NULL DEFAULT 0,
+    explanation   TEXT,
+    explain_model TEXT,
+    created_at    TEXT    NOT NULL,  -- RFC3339 UTC
+    PRIMARY KEY (program, template)
+);
+`
+
+func applyNoiseReview(tx *sql.Tx) error {
+	_, err := tx.Exec(noiseReviewSchema)
 	return err
 }
