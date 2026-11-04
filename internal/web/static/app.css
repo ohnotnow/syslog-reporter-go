@@ -533,6 +533,69 @@ h3 {
   border-color: var(--navy);
 }
 
+/* Noise review: one shape per row, the tick box big enough to hit
+   without squinting; the label words, not colour, carry the choice. */
+.noise-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 var(--space-6);
+}
+
+.noise-row {
+  display: flex;
+  gap: var(--space-6);
+  align-items: flex-start;
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--light-grey-3);
+}
+
+.noise-pick {
+  flex: 0 0 auto;
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  font-weight: 600;
+  padding: var(--space-2);
+  cursor: pointer;
+}
+
+.noise-pick input {
+  width: 1.5rem;
+  height: 1.5rem;
+  margin: 0;
+}
+
+.noise-shape {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.noise-meta {
+  margin-top: 0;
+}
+
+.noise-shape pre {
+  margin: var(--space-2) 0;
+}
+
+.noise-example code {
+  overflow-wrap: anywhere;
+}
+
+.noise-saved {
+  font-weight: 600;
+}
+
+/* Narrow screens: the tick box above the shape, not beside it, so the
+   shape keeps the full width. */
+@media (max-width: 40rem) {
+  .noise-row {
+    flex-direction: column;
+    align-items: stretch; /* flex-start would let a long line set the width */
+    gap: var(--space-2);
+  }
+}
+
 /* The words carry the failure; the colour only underlines it. */
 .form-error {
   color: var(--error);

@@ -190,7 +190,9 @@ shape, oldest first:
 hand; `created_by` and `finding_id` are then null), `bundled` (the noise
 rules shipped with the binary, loaded by `knowns seed` on the server) or
 `jev` or `decisions` (added by the `knowns discover` noise finder on the
-server, scored by Jev or by the Azure OpenAI Decisions API). "What
+server, scored by Jev or by the Azure OpenAI Decisions API) or `web` (a
+sysadmin ticked it on the web UI's noise review page; `created_by` says
+who). "What
 did entry 37 actually catch?" is not an API question: it is
 `syslog-reporter knowns hits <dump> --id 37` on the server, which the
 admin runs themselves. An empty `match`

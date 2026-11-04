@@ -187,9 +187,9 @@ usage: syslog-reporter knowns <list|add|remove|seed|hits|discover|import>
   hits <dump>           what the entries caught on that day's dump, newest
                         entries first: --since 1h|3d|2w|YYYY-MM-DD (by when
                         the entry was created), --source
-                        api|cli|jev|decisions|bundled, --all to include the
-                        bundled rules; --id N shows one
-                        entry's catch grouped by message, --raw the lines.
+                        api|cli|jev|decisions|web|bundled, --all to include
+                        the bundled rules; --id N shows one entry's catch
+                        grouped by message, --raw the lines.
                         Reads the dump and the db, writes nothing
   discover              the Jev noise finder: template the last --days (30)
                         dumps in --dump-dir ($WORK_DIR/dumps), score each

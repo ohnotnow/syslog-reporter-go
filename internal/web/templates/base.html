@@ -16,6 +16,7 @@
       <nav aria-label="Primary">
         <ul class="site-nav">
           <li><a href="/"{{if eq .Path "/"}} aria-current="page"{{end}}>Findings</a></li>
+          <li><a href="/noise"{{if eq .Path "/noise"}} aria-current="page"{{end}}>Noise review</a></li>
         </ul>
       </nav>
       {{if .User}}

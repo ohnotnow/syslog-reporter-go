@@ -17,17 +17,19 @@ import (
 // file shipped with the binary, via 'knowns seed'. jev: 'knowns discover',
 // the Jev-scored noise finder (ant ADR srg-uHwCr). decisions: 'knowns
 // discover --decisions-model', the same finder scored by the Azure OpenAI
-// Decisions API (ait srg-uh92Y).
+// Decisions API (ait srg-uh92Y). web: a tick on the web UI's noise review
+// page (ait srg-OymJL.3), created_by the logged-in user.
 const (
 	KnownSourceAPI       = "api"
 	KnownSourceCLI       = "cli"
 	KnownSourceBundled   = "bundled"
 	KnownSourceJev       = "jev"
 	KnownSourceDecisions = "decisions"
+	KnownSourceWeb       = "web"
 )
 
 // KnownSources lists every accepted source value, in display order.
-var KnownSources = []string{KnownSourceAPI, KnownSourceCLI, KnownSourceBundled, KnownSourceJev, KnownSourceDecisions}
+var KnownSources = []string{KnownSourceAPI, KnownSourceCLI, KnownSourceBundled, KnownSourceJev, KnownSourceDecisions, KnownSourceWeb}
 
 func validKnownSource(s string) bool {
 	for _, v := range KnownSources {

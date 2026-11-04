@@ -178,7 +178,8 @@ its defaults are threshold 0.2 and 2 workers against Jev's 0.1 and 8,
 and a per-run `--max-prompt-tokens` cap (default 10M) stops it with
 nothing added; the cap is not recorded in `llm_spend`, so it never
 eats the daily run's budget. A refused shape scores 1 so it is never
-muted). The evaluation behind the finder,
+muted) or `web` (a tick on the web UI's noise review page, made by the
+logged-in user: see serve mode). The evaluation behind the finder,
 and why a Jev gate before the issue detector is deferred rather than
 rejected, is ant ADR srg-FGSKN.
 
@@ -416,7 +417,8 @@ must already exist - serve refuses a missing db file rather than creating
 an empty one and reporting "no findings yet". Routes: the findings list
 at `/` (substring filters for host/service and title search, exact-match
 severity/kind dropdowns, an inclusive date range, pagination at 50), the
-detail page at `/findings/{id}`, and `POST /findings/{id}/feedback`.
+detail page at `/findings/{id}`, `POST /findings/{id}/feedback`, and
+the noise review page at `/noise` (`GET` draws, `POST` saves).
 Cross-origin POSTs are rejected via `http.CrossOriginProtection`. The
 list page's status line is an aria-live region that persists across htmx
 swaps (a replaced live-region node is not reliably announced).
@@ -426,6 +428,18 @@ anonymous is a single shared voter). A re-vote always updates the verdict,
 and an empty comment on a re-vote KEEPS the existing note - the comment
 box is deliberately never prefilled, so flipping a verdict cannot wipe a
 voter's own note. There is no comment-clearing path.
+
+The noise review page draws ten random shapes from `noise_shapes` (the
+latest storing run's surviving lines, migration 9), leaving out any a
+current known-known drops and any with a verdict in the last 30 days.
+Ticked shapes become host `*` mutes with source `web` and `created_by`
+set, through `reporter.ShapeMatch` (the regex `knowns discover` builds,
+checked against its example); the rest get a `not_noise` verdict. A
+shape whose regex fails that check is reported and gets no verdict, so
+it is not hidden while unmuted. Saving needs a logged-in user: in auth
+mode `none` the page shows the shapes and a login notice instead of
+Save, and `POST /noise` is a 403. No per-user mute cap and no undo on the
+page: `knowns hits --source web` and `knowns remove` cover that.
 
 ### The sysadmin API
 

@@ -1,0 +1,56 @@
+{{define "title"}}Noise review{{end}}
+{{define "content"}}
+    <article class="article">
+    <h1>Noise review</h1>
+    <p class="lede">A random handful of the message shapes that got past the filters. Tick the ones that are noise and save: ticked shapes are muted on every host, and the ones you don't pick won't be shown to you again for 30 days.</p>
+    <!-- Announcement-only: the visible status lives inside the swapped
+         panel; this persistent live region just speaks the change. -->
+    <p id="noise-status" class="visually-hidden" aria-live="polite"></p>
+{{template "noise-panel" .}}
+    </article>
+{{end}}
+
+{{define "noise-partial"}}{{template "noise-panel" .}}
+<p id="noise-status" hx-swap-oob="innerHTML">{{.Data.Status}}</p>
+{{end}}
+
+{{define "noise-panel"}}
+    <section id="noise-panel" class="noise-panel" aria-labelledby="noise-heading">
+      <h2 id="noise-heading">{{if .Data.Day}}Shapes from {{.Data.Day}}{{else}}Shapes{{end}}</h2>
+      {{if .Data.Status}}<p class="noise-saved">{{.Data.Status}}</p>{{end}}
+      {{range .Data.Errors}}<p class="form-error">{{.}}</p>{{end}}
+      {{if .Data.Empty}}
+      <div class="empty-state">
+        <p>No shapes yet. The daily run fills this page.</p>
+      </div>
+      {{else if not .Data.Rows}}
+      <div class="empty-state">
+        <p>Nothing left to review from {{.Data.Day}}.</p>
+      </div>
+      {{else}}
+      <form method="post" action="/noise" hx-post="/noise" hx-target="#noise-panel" hx-swap="outerHTML">
+        <ul class="noise-list">
+          {{range $i, $r := .Data.Rows}}
+          <li class="noise-row">
+            <input type="hidden" name="shown" value="{{$r.ID}}">
+            <label class="noise-pick">
+              <input type="checkbox" name="noise" value="{{$r.ID}}" aria-describedby="shape-{{$r.ID}}"{{if and $.Data.AutoFocus (eq $i 0)}} autofocus{{end}}>
+              This is noise
+            </label>
+            <div id="shape-{{$r.ID}}" class="noise-shape">
+              <p class="noise-meta"><strong>{{$r.Program}}</strong> - {{$r.Lines}} {{if eq $r.Lines 1}}line{{else}}lines{{end}} on {{$r.Hosts}} {{if eq $r.Hosts 1}}host{{else}}hosts{{end}}</p>
+              <pre><code>{{$r.Template}}</code></pre>
+              <p class="noise-example"><span class="quiet">Example:</span> <code>{{$r.Example}}</code></p>
+            </div>
+          </li>
+          {{end}}
+        </ul>
+        {{if .Data.CanSave}}
+        <button class="button-primary" type="submit">Save and show more</button>
+        {{else}}
+        <p class="noise-login">Saving needs a login: run serve with <code>--auth local</code>.</p>
+        {{end}}
+      </form>
+      {{end}}
+    </section>
+{{end}}

@@ -214,7 +214,9 @@ SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.
   reintroduce it. Every row carries source, created_by, token_prefix,
   finding_id and created_at. Sources are api, cli, bundled and jev (ant
   ADR srg-uHwCr, owner decision 2026-09-18), plus decisions (ait
-  srg-uh92Y): the bundled noise rules
+  srg-uh92Y) and web (the web UI's noise review page, ait srg-OymJL.3:
+  ticked shapes become host * mutes via reporter.ShapeMatch, shared with
+  discover; saving needs a login, owner decision 2026-11-04): the bundled noise rules
   that used to be compiled in now ship as internal/reporter/noise-rules.txt
   and `knowns seed` loads them (idempotent, never deletes); SYSLOG_BLANKET_IGNORE
   is gone. The email body shows one count line for known-knowns, the

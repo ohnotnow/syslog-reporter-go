@@ -266,6 +266,8 @@ func New(cfg Config, auth Authenticator, lib *reporter.LibraryStore) (*Server, e
 	s.mux.HandleFunc("GET /{$}", s.handleFindings)
 	s.mux.HandleFunc("GET /findings/{id}", s.handleFindingDetail)
 	s.mux.HandleFunc("POST /findings/{id}/feedback", s.handleFeedback)
+	s.mux.HandleFunc("GET /noise", s.handleNoise)
+	s.mux.HandleFunc("POST /noise", s.handleNoiseSave)
 	s.mux.Handle("GET /static/", http.FileServerFS(staticFS))
 	s.mux.HandleFunc("GET /api/me", s.handleMe)
 	s.mux.HandleFunc("GET /api/findings", s.handleAPIFindings)

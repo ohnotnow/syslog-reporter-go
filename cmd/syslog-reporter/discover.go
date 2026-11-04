@@ -400,13 +400,9 @@ func selectCandidates(shapes map[string]*shape, threshold float64, minDays, minL
 func candidateInputs(candidates []*shape, source string) ([]reporter.KnownEntryInput, error) {
 	inputs := make([]reporter.KnownEntryInput, 0, len(candidates))
 	for _, s := range candidates {
-		match := reporter.TemplateRegex(s.Program, s.Template)
-		re, err := reporter.CompileLinePattern(match)
+		match, err := reporter.ShapeMatch(s.Program, s.Template, s.Example)
 		if err != nil {
-			return nil, fmt.Errorf("generated regex for %s shape does not compile: %v", s.Program, err)
-		}
-		if !re.MatchString(s.Example) {
-			return nil, fmt.Errorf("generated regex %q does not match its own example line for program %s", match, s.Program)
+			return nil, err
 		}
 		inputs = append(inputs, reporter.KnownEntryInput{
 			Host: "*", Match: match,

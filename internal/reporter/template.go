@@ -8,6 +8,7 @@ package reporter
 // part and the address leaks (the exposure incident in srg-FGSKN).
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -104,4 +105,20 @@ func TemplateRegex(program, template string) string {
 	}
 	b.WriteString(rest)
 	return b.String()
+}
+
+// ShapeMatch is the match regex for a host * mute of one shape, checked
+// against the example line the shape came from: a regex that does not
+// match its own example is a templating bug, not something to store.
+// 'knowns discover' and the web UI's noise review both mute through it.
+func ShapeMatch(program, template, example string) (string, error) {
+	match := TemplateRegex(program, template)
+	re, err := CompileLinePattern(match)
+	if err != nil {
+		return "", fmt.Errorf("generated regex for %s shape does not compile: %v", program, err)
+	}
+	if !re.MatchString(example) {
+		return "", fmt.Errorf("generated regex %q does not match its own example line for program %s", match, program)
+	}
+	return match, nil
 }
