@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-04
+
 The first stable release. syslog-reporter turns an organisation's syslog
 into a short, prioritised email for its sysadmins. Deterministic filters
 strip out the routine noise and an LLM decides which of the remaining
@@ -35,6 +37,19 @@ commands of it.
   0.2 threshold, 2 parallel calls, and a per-run cap of 10M prompt
   tokens (`--max-prompt-tokens`, separate from the daily budget) past
   which it stops and adds nothing.
+- A Noise review page in the web UI: ten random message shapes that got
+  past the filters on the latest run. Tick the noise and save; ticked
+  shapes are muted on every host (source `web`, with your username), and
+  the rest are not shown again, to anyone, for 30 days. Saving needs a
+  login (`--auth local`). Undo with `knowns hits --source web` and
+  `knowns remove`.
+- A "Model's view" on each Noise review row, fetched only when opened:
+  how likely the line is to need attention (the Decisions API when
+  `SYSLOG_DECISIONS_MODEL` is set, else Jev) and a short explanation
+  from the issue model. Each shape's answer is cached. This means the web
+  service now calls out to your model provider, so it needs the same model
+  settings and `https_proxy` in its `.env` as the daily run; restart it
+  after changing them.
 
 ### Changed
 - `SYSLOG_MAX_PROMPT_TOKENS` is now a budget per calendar day, shared by
@@ -53,6 +68,11 @@ commands of it.
   reads as one host's problem. The cap of three example lines is unchanged.
 - The management summary counts feedback as votes ("2 of 3 feedback votes
   said the fix worked"), not as reviewed findings.
+- `knowns discover` asks Jev a corrected question: "merely contains the
+  word error" now counts against needing attention, as intended, not for
+  it. Scores may shift a little, so run `knowns discover --preview` once
+  after upgrading before trusting the 0.1 default.
+- Built with Go 1.27.3.
 
 ### Fixed
 - An Elasticsearch search that timed out or lost a shard could be saved
@@ -82,6 +102,11 @@ commands of it.
   markers keep their names, so no day is re-run.
 - The interactive ELK password prompt; set `ELK_PASSWORD` or an API key.
 
+**Upgrading:** the first run migrates the database to schema 9 (new
+tables for the Noise review page); back it up first with
+`sqlite3 <file> ".backup <dest>"`.
+
 Releases before 1.0.0 were pre-release; their history is in the git tags.
 
-[Unreleased]: https://github.com/ohnotnow/syslog-reporter-go/compare/v0.32.0...HEAD
+[Unreleased]: https://github.com/ohnotnow/syslog-reporter-go/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/ohnotnow/syslog-reporter-go/compare/v0.32.0...v1.0.0
