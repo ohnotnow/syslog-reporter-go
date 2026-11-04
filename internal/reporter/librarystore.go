@@ -318,9 +318,8 @@ func findingDetailSelect(hostsExpr string) string {
 		"FROM findings fnd JOIN runs r ON fnd.run_id = r.id "
 }
 
-// findingHostsExpr is the comma-joined finding_hosts rows for the finding.
-// finding_hosts is indexed by host, not finding id, so this is a scan per
-// row: fine for one finding or a page, not for a whole window.
+// findingHostsExpr is the comma-joined finding_hosts rows for the finding,
+// an index lookup per row since migration 10 (idx_finding_hosts_finding).
 const findingHostsExpr = "COALESCE((SELECT GROUP_CONCAT(fh.host, ',') FROM finding_hosts fh " +
 	"WHERE fh.finding_id = fnd.id), '')"
 

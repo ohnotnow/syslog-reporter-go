@@ -7,10 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-11-04
+
 ### Added
 - `scripts/nginx-syslog-reporter.conf.example`: nginx in front of the
   web UI with HTTPS from certificate files, an optional allow-list of
   client addresses and per-client rate limits.
+
+### Fixed
+- The web UI's findings page, the findings API and `findings list` slowed
+  down as the library grew (over three seconds on a month of production
+  findings): looking up each finding's hosts read the whole host table
+  once per finding. A new index makes it a direct lookup.
+
+**Upgrading:** the first run or `serve` migrates the database to schema
+10 (one new index, created in moments).
 
 ## [1.0.0] - 2026-11-04
 
@@ -113,5 +124,6 @@ tables for the Noise review page); back it up first with
 
 Releases before 1.0.0 were pre-release; their history is in the git tags.
 
-[Unreleased]: https://github.com/ohnotnow/syslog-reporter-go/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/ohnotnow/syslog-reporter-go/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/ohnotnow/syslog-reporter-go/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/ohnotnow/syslog-reporter-go/compare/v0.32.0...v1.0.0

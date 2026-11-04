@@ -491,13 +491,58 @@ func TestMigrateV8FileGainsNoiseReview(t *testing.T) {
 		t.Fatalf("migrating open: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
-	if v := schemaVersion(t, db); v != 9 {
-		t.Errorf("schema version = %d, want 9", v)
+	if v, want := schemaVersion(t, db), migrations[len(migrations)-1].version; v != want {
+		t.Errorf("schema version = %d, want %d", v, want)
 	}
 	names := tableNames(t, db)
 	for _, tbl := range []string{"noise_shapes", "noise_verdicts", "noise_model_views"} {
 		if !names[tbl] {
 			t.Errorf("table %s missing after migrating from 8", tbl)
 		}
+	}
+}
+
+// Migration 10 on a database already at version 9: the findings list's
+// hosts subquery must look rows up by finding_id, not scan finding_hosts
+// once per finding.
+func TestMigrateV9FileIndexesFindingHostsByFinding(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v9.db")
+	db, err := openDatabase(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		"DROP INDEX idx_finding_hosts_finding",
+		"UPDATE schema_version SET version = 9 WHERE id = 1",
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	db.Close()
+	db, err = openDatabase(path)
+	if err != nil {
+		t.Fatalf("migrating open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if v := schemaVersion(t, db); v != 10 {
+		t.Errorf("schema version = %d, want 10", v)
+	}
+	rows, err := db.Query("EXPLAIN QUERY PLAN SELECT fnd.id, " + findingHostsExpr + " FROM findings fnd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan []string
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	if !strings.Contains(strings.Join(plan, "\n"), "idx_finding_hosts_finding") {
+		t.Errorf("hosts subquery does not use the finding index; plan:\n%s", strings.Join(plan, "\n"))
 	}
 }

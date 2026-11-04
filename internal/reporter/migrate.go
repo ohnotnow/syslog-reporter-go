@@ -98,6 +98,7 @@ var migrations = []migration{
 	{7, "llm spend per day", applyLLMSpend},
 	{8, "non-reusable known-known ids", applyNonReusableKnownIDs},
 	{9, "noise review", applyNoiseReview},
+	{10, "finding hosts by finding", applyFindingHostsByFinding},
 }
 
 const baselineSchema = `
@@ -482,5 +483,15 @@ CREATE TABLE IF NOT EXISTS noise_model_views (
 
 func applyNoiseReview(tx *sql.Tx) error {
 	_, err := tx.Exec(noiseReviewSchema)
+	return err
+}
+
+// Migration 10: index finding_hosts by finding. Every findings list
+// (the web UI home page, the API, the CLI) fetches each row's hosts with
+// a correlated subquery on finding_id, and the ORDER BY runs before the
+// LIMIT, so without this index each list read the whole finding_hosts
+// table once per finding in the library.
+func applyFindingHostsByFinding(tx *sql.Tx) error {
+	_, err := tx.Exec("CREATE INDEX IF NOT EXISTS idx_finding_hosts_finding ON finding_hosts (finding_id)")
 	return err
 }
