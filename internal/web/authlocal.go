@@ -48,10 +48,13 @@ func newLocalAuth(cfg Config, users UserStore) *localAuth {
 
 // Middleware loads the session, resolves the current user into the request
 // context, and bounces unauthenticated requests to /login with the original
-// path in next. Only /login itself and the static assets are exempt.
+// path in next. Only /login itself, the static assets and the
+// set-password links are exempt.
 func (a *localAuth) Middleware(next http.Handler) http.Handler {
 	return a.sessions.LoadAndSave(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/login" || strings.HasPrefix(r.URL.Path, "/static/") {
+		// /set-password/ is public: its one-time link is the credential.
+		if r.URL.Path == "/login" || strings.HasPrefix(r.URL.Path, "/static/") ||
+			strings.HasPrefix(r.URL.Path, "/set-password/") {
 			next.ServeHTTP(w, r)
 			return
 		}

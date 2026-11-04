@@ -99,6 +99,8 @@ var migrations = []migration{
 	{8, "non-reusable known-known ids", applyNonReusableKnownIDs},
 	{9, "noise review", applyNoiseReview},
 	{10, "finding hosts by finding", applyFindingHostsByFinding},
+	{11, "admin users", applyAdminUsers},
+	{12, "user invites", applyUserInvites},
 }
 
 const baselineSchema = `
@@ -493,5 +495,35 @@ func applyNoiseReview(tx *sql.Tx) error {
 // table once per finding in the library.
 func applyFindingHostsByFinding(tx *sql.Tx) error {
 	_, err := tx.Exec("CREATE INDEX IF NOT EXISTS idx_finding_hosts_finding ON finding_hosts (finding_id)")
+	return err
+}
+
+// Migration 11 (ait srg-xDjoC.1, ant ADR srg-nKiHN): admins can add users
+// from the web UI. Every existing account starts as a non-admin; the first
+// admin is made on the box with 'user add --admin' or 'user admin'.
+func applyAdminUsers(tx *sql.Tx) error {
+	have, err := tableColumns(tx, "users")
+	if err != nil || have["is_admin"] {
+		return err
+	}
+	_, err = tx.Exec("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0")
+	return err
+}
+
+// Migration 12 (ait srg-xDjoC.3): one-time set-password links. Only the
+// sha256 of a link's token is kept, as for api_tokens. created_by goes NULL
+// when the admin who issued the link is removed (RemoveUser does that).
+func applyUserInvites(tx *sql.Tx) error {
+	_, err := tx.Exec(`
+CREATE TABLE IF NOT EXISTS user_invites (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL REFERENCES users(id),
+    token_hash  TEXT NOT NULL UNIQUE,
+    created_by  INTEGER REFERENCES users(id),
+    created_at  TEXT NOT NULL,
+    expires_at  TEXT NOT NULL,
+    used_at     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_user_invites_user ON user_invites (user_id);`)
 	return err
 }

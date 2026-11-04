@@ -85,6 +85,10 @@ internal/reporter/
                             latest day's shapes, reviewers' verdicts, cached
                             model views (ait epic srg-OymJL)
   apitokens.go              sysadmin API bearer tokens (sha256 + 8-char prefix)
+  invites.go                one-time set-password links (migration 12)
+  password.go               CheckPassword: 15-64 chars, embedded
+                            common-passwords.txt (SecLists, MIT), no
+                            username/email; used by CLI and web
   knownsmute.go             mute-by-finding-id: derive host+program entries
                             from a finding (optional host subset and match
                             regex), ready for the store
@@ -97,9 +101,12 @@ internal/reporter/
   digestreport.go           the weekly digest's email body + attachment
 internal/web/               serve mode: findings UI, auth seam, hot-reload TLS,
                             and the bearer-token JSON API under /api/
-                            (apiauth.go, api.go, apiwrite.go)
+                            (apiauth.go, api.go, apiwrite.go); onboarding
+                            pages people.go (admins), setpassword.go,
+                            apiaccess.go (own tokens), skillzip.go
 skills/syslog-reporter/     Claude Code skill for the API; the team's only
-                            "client" (curl + this file), see README
+                            "client" (curl + this file), see README;
+                            skills/skills.go embeds it for /skill.zip
 internal/cli/               findings subcommands + ParseFlagsAnywhere
 internal/llm/               provider seam: litellm-style prefix -> official SDK
 internal/jev/               stdlib client for TypeSafe's Jev; only knowns
@@ -189,6 +196,11 @@ SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.
   variable; the flag wins. Read-only commands (serve, findings,
   mgmt-report, user) refuse a missing db file via
   reporter.RequireDatabase; only a run creates the store.
+  Onboarding is self-service (ait epic srg-xDjoC, ant ADR srg-nKiHN):
+  admins (users.is_admin, migration 11; the first is made with
+  `user add --admin`) add people on /people and hand them a one-time
+  set-password link; people mint their own tokens on /api-access. No
+  MCP/OAuth for now - see the ADR before reaching for it.
   Default port 7373 is a Blake's 7 joke
   (Vila weighs 73 kilos); do not "fix" it. Auth mode oidc errors at
   startup - deferred (ait srg-2KY5X.5) until the owner is present for a

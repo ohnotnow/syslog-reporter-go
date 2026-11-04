@@ -64,22 +64,13 @@ func runTokenCreate(args []string) {
 		tok.Prefix, tok.Username, expirySuffix(tok))
 }
 
-// parseExpiry turns a --expires date into the last second of that day
-// UTC, so "2026-12-31" works all of the 31st. Empty means never; a date
-// that has already passed is refused.
+// parseExpiry is reporter.ParseTokenExpiry with the flag named in errors.
 func parseExpiry(s string) (*time.Time, error) {
-	if s == "" {
-		return nil, nil
-	}
-	day, err := time.Parse("2006-01-02", s)
+	at, err := reporter.ParseTokenExpiry(s, time.Now())
 	if err != nil {
-		return nil, fmt.Errorf("--expires wants YYYY-MM-DD, got %q", s)
+		return nil, fmt.Errorf("--expires: %w", err)
 	}
-	at := day.Add(24*time.Hour - time.Second)
-	if !at.After(time.Now()) {
-		return nil, fmt.Errorf("--expires %s is already in the past", s)
-	}
-	return &at, nil
+	return at, nil
 }
 
 func expirySuffix(t *reporter.APIToken) string {

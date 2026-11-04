@@ -207,3 +207,65 @@ func TestRemoveUserDeletesTheirTokensInEveryState(t *testing.T) {
 		t.Fatalf("tokens after removal = %+v, want only the stayer's %d", left, kept.ID)
 	}
 }
+
+func TestAPITokensForUserAreScopedToTheirOwner(t *testing.T) {
+	s := newTestLibrary(t)
+	alice, err := s.CreateUser("alice", "alice@example.test", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob, err := s.CreateUser("bob", "bob@example.test", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, first, err := s.CreateAPIToken(alice, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, second, err := s.CreateAPIToken(alice, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, bobs, err := s.CreateAPIToken(bob, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.ListAPITokensForUser(alice)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 || list[0].ID != second.ID || list[1].ID != first.ID {
+		t.Fatalf("alice's tokens, newest first: got %+v", list)
+	}
+	if err := s.RevokeAPITokenForUser(bobs.ID, alice); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("alice revoking bob's token: %v, want sql.ErrNoRows", err)
+	}
+	if err := s.RevokeAPITokenForUser(first.ID, alice); err != nil {
+		t.Fatal(err)
+	}
+	list, _ = s.ListAPITokensForUser(alice)
+	if !list[1].Revoked || list[0].Revoked {
+		t.Errorf("wrong token revoked: %+v", list)
+	}
+	list, _ = s.ListAPITokensForUser(bob)
+	if len(list) != 1 || list[0].Revoked {
+		t.Errorf("bob's token touched: %+v", list)
+	}
+}
+
+func TestParseTokenExpiry(t *testing.T) {
+	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	if got, err := ParseTokenExpiry("", now); got != nil || err != nil {
+		t.Errorf("empty: %v, %v", got, err)
+	}
+	got, err := ParseTokenExpiry("2026-11-04", now)
+	if err != nil || got.Format(time.RFC3339) != "2026-11-04T23:59:59Z" {
+		t.Errorf("today: %v, %v", got, err)
+	}
+	if _, err := ParseTokenExpiry("2026-11-03", now); err == nil {
+		t.Error("yesterday accepted")
+	}
+	if _, err := ParseTokenExpiry("04/11/2026", now); err == nil {
+		t.Error("wrong format accepted")
+	}
+}

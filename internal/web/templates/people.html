@@ -1,0 +1,72 @@
+{{define "title"}}People{{end}}
+{{define "content"}}
+    <h1>People</h1>
+    {{with .Data}}
+    {{if .NeedsLogin}}
+    <p>The People page needs a login: run serve with <code>--auth local</code>.</p>
+    {{else if .Forbidden}}
+    <p>This page is for admins.</p>
+    {{else}}
+    {{if .Link}}
+    <section class="new-token" aria-labelledby="link-heading">
+      <h2 id="link-heading">Set-password link for {{.LinkFor}}</h2>
+      <p>Send this link to {{.LinkFor}}. It works once, for 7 days, and it will not be shown again.</p>
+      <div class="field">
+        <label for="invite-link">Link</label>
+        <input type="text" id="invite-link" value="{{.Link}}" readonly autofocus>
+      </div>
+    </section>
+    {{end}}
+
+    <h2>Add someone</h2>
+    {{if .Error}}<p class="form-error" role="alert">{{.Error}}</p>{{end}}
+    <form class="auth-form" method="post" action="/people">
+      <div class="field">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" value="{{.Username}}"
+               autocomplete="off" required>
+      </div>
+      <div class="field">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" value="{{.Email}}"
+               autocomplete="off" required>
+      </div>
+      <div class="field field-check">
+        <input type="checkbox" id="admin" name="admin" value="1"{{if .Admin}} checked{{end}}>
+        <label for="admin">Admin (may add people and issue links)</label>
+      </div>
+      <button class="button-primary" type="submit">Add and get a link</button>
+    </form>
+
+    <h2>Everyone</h2>
+    <div class="table-scroll">
+      <table class="findings-table">
+        <thead>
+          <tr><th scope="col">Username</th><th scope="col">Email</th><th scope="col">Admin</th>
+            <th scope="col">Password set</th><th scope="col">Added</th>
+            <th scope="col"><span class="visually-hidden">Actions</span></th></tr>
+        </thead>
+        <tbody>
+          {{range .Users}}
+          <tr>
+            <td>{{.Username}}</td>
+            <td>{{.Email}}</td>
+            <td>{{if .IsAdmin}}yes{{end}}</td>
+            <td>{{if .PasswordHash.Valid}}yes{{else}}no{{end}}</td>
+            <td>{{slice .CreatedAt 0 10}}</td>
+            <td>
+              <form method="post" action="/people/{{.ID}}/invite">
+                <button class="button-secondary" type="submit"
+                        aria-label="Issue a set-password link for {{.Username}}">Issue set-password link</button>
+              </form>
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    <p class="quiet">Removing someone, or changing who is an admin, is done on the server:
+      <code>syslog-reporter user remove</code> and <code>syslog-reporter user admin</code>.</p>
+    {{end}}
+    {{end}}
+{{end}}

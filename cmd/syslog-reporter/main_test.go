@@ -13,9 +13,28 @@ import (
 	"github.com/ohnotnow/syslog-reporter-go/internal/reporter"
 )
 
+// testPassword passes the password policy; fictional, like the users.
+const testPassword = "violet-kettle-harbour-42"
+
+func TestUserAddRefusesAPolicyFailure(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "users.db")
+	err := userAdd(db, "opsuser", "opsuser@example.test", "short", false)
+	if err == nil || !strings.Contains(err.Error(), "at least 15 characters") {
+		t.Fatalf("short password: got %v", err)
+	}
+	lib, err := reporter.OpenLibraryStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { lib.Close() })
+	if u, _ := lib.UserByUsername("opsuser"); u != nil {
+		t.Error("a refused password still created the user")
+	}
+}
+
 func TestUserAddWritesABcryptHash(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "users.db")
-	if err := userAdd(db, "opsuser", "opsuser@example.test", "correct horse"); err != nil {
+	if err := userAdd(db, "opsuser", "opsuser@example.test", testPassword, false); err != nil {
 		t.Fatal(err)
 	}
 	lib, err := reporter.OpenLibraryStore(db)
@@ -34,7 +53,7 @@ func TestUserAddWritesABcryptHash(t *testing.T) {
 		t.Fatal("password hash is NULL")
 	}
 	if err := bcrypt.CompareHashAndPassword(
-		[]byte(user.PasswordHash.String), []byte("correct horse")); err != nil {
+		[]byte(user.PasswordHash.String), []byte(testPassword)); err != nil {
 		t.Error("stored hash does not verify the password")
 	}
 	if cost, err := bcrypt.Cost([]byte(user.PasswordHash.String)); err != nil || cost != bcrypt.DefaultCost {
@@ -47,16 +66,40 @@ func TestUserAddWritesABcryptHash(t *testing.T) {
 	}
 }
 
-func TestUserAddDuplicatesNameTheField(t *testing.T) {
+func TestUserAddAdminFlag(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "users.db")
-	if err := userAdd(db, "opsuser", "opsuser@example.test", "pw"); err != nil {
+	if err := userAdd(db, "boss", "boss@example.test", testPassword, true); err != nil {
 		t.Fatal(err)
 	}
-	err := userAdd(db, "opsuser", "different@example.test", "pw")
+	if err := userAdd(db, "opsuser", "opsuser@example.test", testPassword, false); err != nil {
+		t.Fatal(err)
+	}
+	lib, err := reporter.OpenLibraryStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { lib.Close() })
+	for name, want := range map[string]bool{"boss": true, "opsuser": false} {
+		u, err := lib.UserByUsername(name)
+		if err != nil || u == nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if u.IsAdmin != want {
+			t.Errorf("%s IsAdmin = %v, want %v", name, u.IsAdmin, want)
+		}
+	}
+}
+
+func TestUserAddDuplicatesNameTheField(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "users.db")
+	if err := userAdd(db, "opsuser", "opsuser@example.test", testPassword, false); err != nil {
+		t.Fatal(err)
+	}
+	err := userAdd(db, "opsuser", "different@example.test", testPassword, false)
 	if err == nil || !strings.Contains(err.Error(), "username") {
 		t.Errorf("duplicate username: got %v", err)
 	}
-	err = userAdd(db, "different", "opsuser@example.test", "pw")
+	err = userAdd(db, "different", "opsuser@example.test", testPassword, false)
 	if err == nil || !strings.Contains(err.Error(), "email") {
 		t.Errorf("duplicate email: got %v", err)
 	}
@@ -64,7 +107,7 @@ func TestUserAddDuplicatesNameTheField(t *testing.T) {
 
 func TestTokenCreateMintsForAnExistingUserOnly(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "tokens.db")
-	if err := userAdd(db, "opsuser", "opsuser@example.test", "correct horse"); err != nil {
+	if err := userAdd(db, "opsuser", "opsuser@example.test", testPassword, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := tokenCreate(db, "nobody", nil); err == nil || !strings.Contains(err.Error(), `no user "nobody"`) {

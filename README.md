@@ -56,8 +56,9 @@ Each run also records what it found. To browse the accumulated findings:
 ```
 
 By default the web UI listens on localhost only with no login; for a
-shared box there is a local-accounts mode (`syslog-reporter user add`)
-and optional TLS.
+shared box there is a local-accounts mode and optional TLS. In that
+mode admins add people from the web UI, who set their own password via
+a one-time link and create their own API tokens (see API.md).
 
 ## The weekly digest
 

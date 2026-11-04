@@ -9,7 +9,7 @@ description: >
   digest email, syslog findings, muting or unmuting a finding, or log
   trends across the estate.
 allowed-tools: "Bash"
-version: "1.4.0"
+version: "1.5.0"
 ---
 
 # syslog-reporter
@@ -33,9 +33,11 @@ curl -sS -H "Authorization: Bearer $SYSLOG_API_TOKEN" "$SYSLOG_API_URL/api/me"
 
 A good answer looks like `{"username":"jbloggs","token_prefix":"5210c8e0","expires_at":null}`.
 If either variable is missing, or this returns 401, stop and tell the
-user: an admin creates tokens on the server with
-`syslog-reporter token create <username>`, and the README's "The sysadmin
-API" section covers setting the variables. Do not guess a URL or token.
+user: they create a token themselves on the syslog-reporter web UI's
+**API access** page (they sign in, create a token, and paste the block
+it shows into the `env` section of `~/.claude/settings.json`, then
+start a new Claude Code session). No account yet? An admin adds them on
+the web UI's People page. Do not guess a URL or token.
 
 ## Endpoints
 

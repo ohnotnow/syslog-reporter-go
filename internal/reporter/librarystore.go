@@ -464,10 +464,12 @@ type User struct {
 	Surname      sql.NullString
 	PasswordHash sql.NullString
 	CreatedAt    string
+	IsAdmin      bool // may manage other accounts from the web UI
 }
 
 // CreateUser inserts a user with the names left NULL. An empty passwordHash
-// is stored as NULL (an SSO-created user with no local login).
+// is stored as NULL (an SSO-created user, or one waiting on a set-password
+// link). A taken username or email is an error naming the field.
 func (s *LibraryStore) CreateUser(username, email, passwordHash string) (int64, error) {
 	var hash any
 	if passwordHash != "" {
@@ -477,6 +479,12 @@ func (s *LibraryStore) CreateUser(username, email, passwordHash string) (int64, 
 		"INSERT INTO users (email, username, password_hash, created_at) VALUES (?, ?, ?, ?)",
 		email, username, hash, time.Now().UTC().Format(time.RFC3339))
 	if err != nil {
+		switch {
+		case strings.Contains(err.Error(), "UNIQUE constraint failed: users.username"):
+			return 0, fmt.Errorf("username %q already exists", username)
+		case strings.Contains(err.Error(), "UNIQUE constraint failed: users.email"):
+			return 0, fmt.Errorf("email %q already exists", email)
+		}
 		return 0, err
 	}
 	return res.LastInsertId()
@@ -484,18 +492,15 @@ func (s *LibraryStore) CreateUser(username, email, passwordHash string) (int64, 
 
 // ListUsers returns every account, ordered by username.
 func (s *LibraryStore) ListUsers() ([]*User, error) {
-	rows, err := s.db.Query(
-		"SELECT id, email, username, forenames, surname, password_hash, created_at " +
-			"FROM users ORDER BY username")
+	rows, err := s.db.Query("SELECT " + userColumns + " FROM users ORDER BY username")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []*User
 	for rows.Next() {
-		u := &User{}
-		if err := rows.Scan(&u.ID, &u.Email, &u.Username, &u.Forenames, &u.Surname,
-			&u.PasswordHash, &u.CreatedAt); err != nil {
+		u, err := scanUser(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, u)
@@ -508,6 +513,23 @@ func (s *LibraryStore) ListUsers() ([]*User, error) {
 func (s *LibraryStore) SetUserPassword(username, passwordHash string) error {
 	res, err := s.db.Exec(
 		"UPDATE users SET password_hash = ? WHERE username = ?", passwordHash, username)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("no user named %q", username)
+	}
+	return nil
+}
+
+// SetUserAdmin grants or revokes the named user's admin flag. An unknown
+// username is an error, never a silent no-op.
+func (s *LibraryStore) SetUserAdmin(username string, admin bool) error {
+	res, err := s.db.Exec("UPDATE users SET is_admin = ? WHERE username = ?", admin, username)
 	if err != nil {
 		return err
 	}
@@ -556,6 +578,14 @@ func (s *LibraryStore) RemoveUser(username string) error {
 	if _, err := tx.Exec("DELETE FROM api_tokens WHERE user_id = ?", id); err != nil {
 		return err
 	}
+	// Their set-password links go too, and links they issued to others
+	// stay valid but unattributed.
+	if _, err := tx.Exec("DELETE FROM user_invites WHERE user_id = ?", id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("UPDATE user_invites SET created_by = NULL WHERE created_by = ?", id); err != nil {
+		return err
+	}
 	// Their noise-review verdicts stay (they still keep shapes out of the
 	// draw), unattributed, like their feedback.
 	if _, err := tx.Exec("UPDATE noise_verdicts SET user_id = NULL WHERE user_id = ?", id); err != nil {
@@ -578,16 +608,20 @@ func (s *LibraryStore) UserByID(id int64) (*User, error) {
 }
 
 func (s *LibraryStore) userWhere(cond string, arg any) (*User, error) {
-	u := &User{}
-	err := s.db.QueryRow(
-		"SELECT id, email, username, forenames, surname, password_hash, created_at "+
-			"FROM users WHERE "+cond, arg).
-		Scan(&u.ID, &u.Email, &u.Username, &u.Forenames, &u.Surname,
-			&u.PasswordHash, &u.CreatedAt)
+	u, err := scanUser(s.db.QueryRow("SELECT "+userColumns+" FROM users WHERE "+cond, arg))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
-	if err != nil {
+	return u, err
+}
+
+const userColumns = "id, email, username, forenames, surname, password_hash, created_at, is_admin"
+
+// scanUser reads one row selected with userColumns.
+func scanUser(row interface{ Scan(...any) error }) (*User, error) {
+	u := &User{}
+	if err := row.Scan(&u.ID, &u.Email, &u.Username, &u.Forenames, &u.Surname,
+		&u.PasswordHash, &u.CreatedAt, &u.IsAdmin); err != nil {
 		return nil, err
 	}
 	return u, nil

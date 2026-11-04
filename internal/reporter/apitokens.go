@@ -37,6 +37,25 @@ func (t *APIToken) Usable(now time.Time) bool {
 	return t.ExpiresAt == nil || now.Before(*t.ExpiresAt)
 }
 
+// ParseTokenExpiry turns an expiry date (YYYY-MM-DD) into the last second
+// of that day UTC, so "2026-12-31" works all of the 31st. Empty means
+// never; a date that has already passed is refused. Shared by 'token
+// create --expires' and the web UI's API access page.
+func ParseTokenExpiry(s string, now time.Time) (*time.Time, error) {
+	if s == "" {
+		return nil, nil
+	}
+	day, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		return nil, fmt.Errorf("want a date as YYYY-MM-DD, got %q", s)
+	}
+	at := day.Add(24*time.Hour - time.Second)
+	if !at.After(now) {
+		return nil, fmt.Errorf("%s is already in the past", s)
+	}
+	return &at, nil
+}
+
 // HashAPIToken is the stored form of a raw token.
 func HashAPIToken(raw string) string {
 	sum := sha256.Sum256([]byte(raw))
@@ -90,6 +109,43 @@ func (s *LibraryStore) ListAPITokens() ([]*APIToken, error) {
 		tokens = append(tokens, t)
 	}
 	return tokens, rows.Err()
+}
+
+// ListAPITokensForUser returns one user's tokens, revoked ones included,
+// newest first, for the web UI's API access page.
+func (s *LibraryStore) ListAPITokensForUser(userID int64) ([]*APIToken, error) {
+	rows, err := s.db.Query(apiTokenSelect+" WHERE t.user_id = ? ORDER BY t.id DESC", userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var tokens []*APIToken
+	for rows.Next() {
+		t, err := scanAPIToken(rows)
+		if err != nil {
+			return nil, err
+		}
+		tokens = append(tokens, t)
+	}
+	return tokens, rows.Err()
+}
+
+// RevokeAPITokenForUser revokes token tokenID only if userID owns it;
+// sql.ErrNoRows otherwise, so one user cannot learn of or touch another's
+// tokens. Revoking an already revoked token is not an error.
+func (s *LibraryStore) RevokeAPITokenForUser(tokenID, userID int64) error {
+	res, err := s.db.Exec("UPDATE api_tokens SET revoked = 1 WHERE id = ? AND user_id = ?", tokenID, userID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 // APITokenByHash finds a token by its stored hash; sql.ErrNoRows when

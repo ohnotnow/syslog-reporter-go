@@ -280,6 +280,13 @@ func New(cfg Config, auth Authenticator, lib *reporter.LibraryStore) (*Server, e
 	s.mux.HandleFunc("GET /noise", s.handleNoise)
 	s.mux.HandleFunc("POST /noise", s.handleNoiseSave)
 	s.mux.HandleFunc("GET /noise/{id}/model-view", s.handleNoiseModelView)
+	s.mux.HandleFunc("GET /api-access", s.handleAPIAccess)
+	s.mux.HandleFunc("POST /api-access", s.handleAPIAccessCreate)
+	s.mux.HandleFunc("POST /api-access/{id}/revoke", s.handleAPIAccessRevoke)
+	s.mux.HandleFunc("GET /skill.zip", s.handleSkillZip)
+	s.mux.HandleFunc("GET /people", s.handlePeople)
+	s.mux.HandleFunc("POST /people", s.handlePeopleAdd)
+	s.mux.HandleFunc("POST /people/{id}/invite", s.handlePeopleInvite)
 	s.mux.Handle("GET /static/", http.FileServerFS(staticFS))
 	s.mux.HandleFunc("GET /api/me", s.handleMe)
 	s.mux.HandleFunc("GET /api/findings", s.handleAPIFindings)
@@ -291,6 +298,10 @@ func New(cfg Config, auth Authenticator, lib *reporter.LibraryStore) (*Server, e
 	s.mux.HandleFunc("GET /api/knowns", s.handleAPIKnowns)
 	s.mux.HandleFunc("DELETE /api/knowns/{id}", s.handleAPIUnmuteEntry)
 	s.mux.HandleFunc("DELETE /api/findings/{id}/mute", s.handleAPIUnmuteFinding)
+	if cfg.AuthMode == "local" {
+		s.mux.HandleFunc("GET /set-password/{token}", s.handleSetPasswordForm)
+		s.mux.HandleFunc("POST /set-password/{token}", s.handleSetPassword)
+	}
 	auth.Routes(s.mux)
 	return s, nil
 }

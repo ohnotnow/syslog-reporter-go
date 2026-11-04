@@ -618,6 +618,46 @@ h3 {
   }
 }
 
+/* A checkbox field: box and label on one line, the box big enough to hit. */
+.field-check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.field-check input {
+  width: 1.5rem;
+  height: 1.5rem;
+  margin: 0;
+  flex: none;
+}
+
+.field-check label {
+  display: inline;
+  margin: 0;
+}
+
+/* A secret shown once (new API token, set-password link): set apart by
+   a border and its heading, not by colour alone. */
+.new-token {
+  margin: var(--space-6) 0;
+  padding: var(--space-4) var(--space-6);
+  background-color: var(--blue-10);
+  border-left: 4px solid var(--blue);
+}
+
+.new-token h2:first-child {
+  margin-top: 0;
+}
+
+.new-token pre {
+  overflow-x: auto;
+}
+
+.new-token input[readonly] {
+  font-family: monospace;
+}
+
 /* The words carry the failure; the colour only underlines it. */
 .form-error {
   color: var(--error);

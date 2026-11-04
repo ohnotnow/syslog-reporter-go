@@ -17,6 +17,8 @@
         <ul class="site-nav">
           <li><a href="/"{{if eq .Path "/"}} aria-current="page"{{end}}>Findings</a></li>
           <li><a href="/noise"{{if eq .Path "/noise"}} aria-current="page"{{end}}>Noise review</a></li>
+          {{if and .User .User.IsAdmin}}<li><a href="/people"{{if eq .Path "/people"}} aria-current="page"{{end}}>People</a></li>{{end}}
+          {{if .User}}<li><a href="/api-access"{{if eq .Path "/api-access"}} aria-current="page"{{end}}>API access</a></li>{{end}}
         </ul>
       </nav>
       {{if .User}}

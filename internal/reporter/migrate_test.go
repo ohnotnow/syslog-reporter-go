@@ -525,8 +525,8 @@ func TestMigrateV9FileIndexesFindingHostsByFinding(t *testing.T) {
 		t.Fatalf("migrating open: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
-	if v := schemaVersion(t, db); v != 10 {
-		t.Errorf("schema version = %d, want 10", v)
+	if v, want := schemaVersion(t, db), migrations[len(migrations)-1].version; v != want {
+		t.Errorf("schema version = %d, want %d", v, want)
 	}
 	rows, err := db.Query("EXPLAIN QUERY PLAN SELECT fnd.id, " + findingHostsExpr + " FROM findings fnd")
 	if err != nil {
@@ -544,5 +544,40 @@ func TestMigrateV9FileIndexesFindingHostsByFinding(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(plan, "\n"), "idx_finding_hosts_finding") {
 		t.Errorf("hosts subquery does not use the finding index; plan:\n%s", strings.Join(plan, "\n"))
+	}
+}
+
+// Migration 11 on a database already at version 10: users gain is_admin,
+// and every existing account reads back as a non-admin.
+func TestMigrateV10FileGainsAdminUsers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v10.db")
+	db, err := openDatabase(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		"ALTER TABLE users DROP COLUMN is_admin",
+		"INSERT INTO users (email, username, created_at) VALUES ('ops@example.test', 'opsuser', '2026-11-01T00:00:00Z')",
+		"UPDATE schema_version SET version = 10 WHERE id = 1",
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	db.Close()
+	db, err = openDatabase(path)
+	if err != nil {
+		t.Fatalf("migrating open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if v, want := schemaVersion(t, db), migrations[len(migrations)-1].version; v != want {
+		t.Errorf("schema version = %d, want %d", v, want)
+	}
+	var admin int
+	if err := db.QueryRow("SELECT is_admin FROM users WHERE username = 'opsuser'").Scan(&admin); err != nil {
+		t.Fatal(err)
+	}
+	if admin != 0 {
+		t.Errorf("existing user is_admin = %d, want 0", admin)
 	}
 }

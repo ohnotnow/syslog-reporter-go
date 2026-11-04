@@ -723,6 +723,44 @@ func TestSetUserPassword(t *testing.T) {
 	}
 }
 
+func TestSetUserAdmin(t *testing.T) {
+	s := newTestLibrary(t)
+	id, err := s.CreateUser("opsuser", "opsuser@example.test", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	isAdmin := func() bool {
+		t.Helper()
+		u, err := s.UserByID(id)
+		if err != nil || u == nil {
+			t.Fatalf("reload user: %v", err)
+		}
+		return u.IsAdmin
+	}
+	if isAdmin() {
+		t.Fatal("a new user should not be an admin")
+	}
+	if err := s.SetUserAdmin("opsuser", true); err != nil {
+		t.Fatal(err)
+	}
+	if !isAdmin() {
+		t.Error("SetUserAdmin(true) did not grant")
+	}
+	users, err := s.ListUsers()
+	if err != nil || len(users) != 1 || !users[0].IsAdmin {
+		t.Errorf("ListUsers does not carry the flag: %+v (%v)", users, err)
+	}
+	if err := s.SetUserAdmin("opsuser", false); err != nil {
+		t.Fatal(err)
+	}
+	if isAdmin() {
+		t.Error("SetUserAdmin(false) did not revoke")
+	}
+	if err := s.SetUserAdmin("nobody", true); !errContains(err, `no user named "nobody"`) {
+		t.Errorf("unknown username: got %v", err)
+	}
+}
+
 // RemoveUser keeps the finding history: votes become anonymous, except
 // where an anonymous vote already exists on the same finding (then the
 // leaver's vote is dropped - one anonymous vote per finding).

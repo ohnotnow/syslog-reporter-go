@@ -414,13 +414,16 @@ Every run files its findings into a findings library.
 **The web UI.** `install.sh` offers to install
 [scripts/syslog-reporter-web.service](scripts/syslog-reporter-web.service),
 which serves the findings library on `127.0.0.1:7373` with local
-accounts. It refuses to start until the database exists. Then add a
-login:
+accounts. It refuses to start until the database exists. Then add
+yourself as the first admin:
 
 ```bash
 cd /var/lib/syslog-reporter
-sudo -u syslog-reporter syslog-reporter user add jbloggs jbloggs@example.ac.uk
+sudo -u syslog-reporter syslog-reporter user add jbloggs jbloggs@example.ac.uk --admin
 ```
+
+`user admin <username>` makes an existing account an admin (`--remove`
+undoes it).
 
 **Noise review.** The web UI's Noise review page shows ten random
 message shapes that got past the filters on the latest run. Tick the

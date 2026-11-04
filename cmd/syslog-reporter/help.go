@@ -72,15 +72,22 @@ const digestHelpEnv = `environment:
 
 const userHelp = `Manage local-auth accounts for serve mode (auth mode local).
 
-usage: syslog-reporter user <add|list|passwd|remove> [flags]
+usage: syslog-reporter user <add|list|passwd|admin|remove> [flags]
 
-  add <username> <email>   create an account; --password-stdin for scripts
+  add <username> <email>   create an account; --admin makes it an admin,
+                           --password-stdin for scripts
   list                     every account
   passwd <username>        change a password; --password-stdin for scripts
+  admin <username>         make an account an admin; --remove undoes it
   remove <username>        delete an account (its votes become anonymous)
 
+Admins can add accounts and issue set-password links from the web UI's
+People page. Make the first admin here.
+
 Passwords are prompted for twice without echo, or read from stdin with
---password-stdin; they are never accepted as an argument.
+--password-stdin; they are never accepted as an argument. They must be
+15 to 64 characters, not on a list of common passwords, and not contain
+the username or email: a password manager's generated one is ideal.
 
 The store must already exist (a report run creates it); --db and
 SYSLOG_DB_PATH name it as in the other commands.

@@ -27,7 +27,7 @@ var commands = []command{
 	{"backfill", "Bootstrap history: run the last N days with no LLM, fetching missing dumps", cmdBackfill},
 	{"eval", "Compare provider/model combinations over a small log sample", cmdEval},
 	{"serve", "Serve the findings library web UI (default 127.0.0.1:7373)", cmdServe},
-	{"user", "Manage local-auth accounts (add, list, passwd, remove)", cmdUser},
+	{"user", "Manage local-auth accounts (add, list, passwd, admin, remove)", cmdUser},
 	{"token", "Manage sysadmin API bearer tokens (create, list, revoke)", cmdToken},
 	{"knowns", "Known-knowns: list, add, remove, seed, hits, discover (Jev noise finder), import", cmdKnowns},
 	{"findings", "List, show and record feedback on findings from the terminal", cmdFindings},

@@ -8,7 +8,16 @@ to install: a bearer token and a URL.
 ## Get a token
 
 Every call needs a personal bearer token, whatever `--auth` the web UI
-runs with. An admin mints them on the server:
+runs with. With `--auth local`, sign in to the web UI and open **API
+access**: create a token there (shown once), and the page gives you the
+block to paste into `~/.claude/settings.json` for Claude Code, the
+shell lines for `syslog-mute`, and a check. You can see and revoke your
+own tokens on the same page. Use one token per machine.
+
+No account yet? An admin adds you on the web UI's **People** page and
+sends you a one-time link to set your password.
+
+On the box, an admin can also mint and manage tokens for anyone:
 
 ```bash
 ./syslog-reporter token create jbloggs --expires 2027-01-31   # prints the token once
@@ -16,10 +25,23 @@ runs with. An admin mints them on the server:
 ./syslog-reporter token revoke 5210c8e0                        # by the 8-character prefix
 ```
 
-Then set two environment variables and check them:
+For Claude Code, the two values go in the `env` block of
+`~/.claude/settings.json`, which every Claude Code session picks up on
+every platform:
+
+```json
+{
+  "env": {
+    "SYSLOG_API_URL": "https://reports.example.test",
+    "SYSLOG_API_TOKEN": "..."
+  }
+}
+```
+
+For the shell function below, set them in your shell and check them:
 
 ```bash
-export SYSLOG_API_URL=http://reports.example.test:7373
+export SYSLOG_API_URL=https://reports.example.test
 export SYSLOG_API_TOKEN=...
 curl -sS -H "Authorization: Bearer $SYSLOG_API_TOKEN" "$SYSLOG_API_URL/api/me"
 ```
@@ -81,8 +103,11 @@ finding they came from, and each token gets twenty a day
 
 ## From Claude Code
 
-Copy [skills/syslog-reporter](skills/syslog-reporter) into
-`~/.claude/skills/` and ask in plain words: "what did the syslog report
+Download the skill from the web UI's **API access** page and unzip it
+into `~/.claude/skills/` (or copy
+[skills/syslog-reporter](skills/syslog-reporter) there from a checkout),
+put the token's `env` block in `~/.claude/settings.json`, and ask in
+plain words: "what did the syslog report
 find today?", "look at finding 1234", "mute the no-free-leases message
 on dhcp01 and dhcp02, they have no pool by design", "what is muted?",
 "sorry, unmute that". The skill carries the endpoint list, the JSON

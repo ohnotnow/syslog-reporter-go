@@ -308,7 +308,7 @@ func runServe(args []string) {
 // terminal, or read from stdin with --password-stdin for scripted/agent
 // use; never accepted as a CLI argument, never echoed or logged.
 func runUser(args []string) {
-	const usage = "usage: syslog-reporter user <add|list|passwd|remove> [args] (see 'user --help')"
+	const usage = "usage: syslog-reporter user <add|list|passwd|admin|remove> [args] (see 'user --help')"
 	if len(args) == 0 {
 		fatal(usage)
 	}
@@ -321,6 +321,8 @@ func runUser(args []string) {
 		runUserList(args[1:])
 	case "passwd":
 		runUserPasswd(args[1:])
+	case "admin":
+		runUserAdmin(args[1:])
 	case "remove":
 		runUserRemove(args[1:])
 	default:
@@ -398,9 +400,10 @@ func openUserStore(dbPath string) *reporter.LibraryStore {
 func runUserAdd(args []string) {
 	fs, dbPath := userFlagSet("user add")
 	passwordStdin := passwordStdinFlag(fs)
+	admin := fs.Bool("admin", false, "Make the account an admin (may add users from the web UI)")
 	positionals := cli.ParseFlagsAnywhere(fs, args)
 	if len(positionals) != 2 {
-		fatal("usage: syslog-reporter user add <username> <email> [--password-stdin] [--db <path>]")
+		fatal("usage: syslog-reporter user add <username> <email> [--admin] [--password-stdin] [--db <path>]")
 	}
 	username, email := positionals[0], positionals[1]
 	// The path check comes before the password prompt: a typo'd --db must
@@ -409,8 +412,12 @@ func runUserAdd(args []string) {
 		fatal("%v", err)
 	}
 	password := readNewPassword(*passwordStdin)
-	if err := userAdd(*dbPath, username, email, password); err != nil {
+	if err := userAdd(*dbPath, username, email, password, *admin); err != nil {
 		fatal("%v", err)
+	}
+	if *admin {
+		fmt.Printf("user %s added (admin)\n", username)
+		return
 	}
 	fmt.Printf("user %s added\n", username)
 }
@@ -431,13 +438,17 @@ func runUserList(args []string) {
 		return
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "USERNAME\tEMAIL\tLOCAL LOGIN\tCREATED")
+	fmt.Fprintln(tw, "USERNAME\tEMAIL\tADMIN\tLOCAL LOGIN\tCREATED")
 	for _, u := range users {
 		login := "yes"
 		if !u.PasswordHash.Valid {
 			login = "no (SSO only)"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", u.Username, u.Email, login, u.CreatedAt)
+		admin := ""
+		if u.IsAdmin {
+			admin = "yes"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", u.Username, u.Email, admin, login, u.CreatedAt)
 	}
 	tw.Flush()
 }
@@ -452,7 +463,17 @@ func runUserPasswd(args []string) {
 	username := positionals[0]
 	lib := openUserStore(*dbPath)
 	defer lib.Close()
+	user, err := lib.UserByUsername(username)
+	if err != nil {
+		fatal("%v", err)
+	}
+	if user == nil {
+		fatal("no user named %q", username)
+	}
 	password := readNewPassword(*passwordStdin)
+	if err := reporter.CheckPassword(password, user.Username, user.Email); err != nil {
+		fatal("%v", err)
+	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		fatal("%v", err)
@@ -461,6 +482,26 @@ func runUserPasswd(args []string) {
 		fatal("%v", err)
 	}
 	fmt.Printf("password updated for %s\n", username)
+}
+
+func runUserAdmin(args []string) {
+	fs, dbPath := userFlagSet("user admin")
+	remove := fs.Bool("remove", false, "Take the admin flag away instead of granting it")
+	positionals := cli.ParseFlagsAnywhere(fs, args)
+	if len(positionals) != 1 {
+		fatal("usage: syslog-reporter user admin <username> [--remove] [--db <path>]")
+	}
+	username := positionals[0]
+	lib := openUserStore(*dbPath)
+	defer lib.Close()
+	if err := lib.SetUserAdmin(username, !*remove); err != nil {
+		fatal("%v", err)
+	}
+	if *remove {
+		fmt.Printf("%s is no longer an admin\n", username)
+		return
+	}
+	fmt.Printf("%s is now an admin\n", username)
 }
 
 func runUserRemove(args []string) {
@@ -478,8 +519,13 @@ func runUserRemove(args []string) {
 	fmt.Printf("user %s removed (their feedback votes are now anonymous)\n", username)
 }
 
-// userAdd is the testable core of `user add`: hash and insert.
-func userAdd(dbPath, username, email, password string) error {
+// userAdd is the testable core of `user add`: check the password against
+// the policy, hash and insert, then flag
+// the account as an admin when asked.
+func userAdd(dbPath, username, email, password string, admin bool) error {
+	if err := reporter.CheckPassword(password, username, email); err != nil {
+		return err
+	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return err
@@ -490,13 +536,10 @@ func userAdd(dbPath, username, email, password string) error {
 	}
 	defer lib.Close()
 	if _, err := lib.CreateUser(username, email, string(hash)); err != nil {
-		if strings.Contains(err.Error(), "UNIQUE constraint failed: users.username") {
-			return fmt.Errorf("username %q already exists", username)
-		}
-		if strings.Contains(err.Error(), "UNIQUE constraint failed: users.email") {
-			return fmt.Errorf("email %q already exists", email)
-		}
 		return err
+	}
+	if admin {
+		return lib.SetUserAdmin(username, true)
 	}
 	return nil
 }

@@ -85,13 +85,16 @@ internal/jev/               stdlib client for TypeSafe's System One API
                             as the aggregates)
 internal/web/               serve mode: stdlib+htmx findings UI, auth seam,
                             and the bearer-token sysadmin API under /api/
-                            (none/local drivers), hot-reloading TLS; templates
-                            and static assets embedded via go:embed
+                            (none/local drivers), hot-reloading TLS, the
+                            People / set-password / API access pages and
+                            the skill zip; templates and static assets
+                            embedded via go:embed
 internal/cli/               the findings subcommands (list/show/feedback) and
                             the argparse-style flag helper
 internal/llm/               provider seam: model-string prefix -> official SDK
 skills/syslog-reporter/     Claude Code skill: the sysadmin API's endpoints,
-                            JSON shapes and etiquette (the laptop "client")
+                            JSON shapes and etiquette (the laptop "client");
+                            skills/skills.go embeds it for /skill.zip
 scripts/                    install.sh (the one-shot deploy), the web UI's
                             systemd unit and the .env example
 .github/workflows/          release build (six OS/arch targets on v* tags)
@@ -333,7 +336,8 @@ standard pragmas (WAL journal, enforced foreign keys, 5s busy timeout) and
 runs a numbered `schema_version` migration ladder shared by the whole
 file; schema changes are new migrations there, never inline DDL. The
 library tables are `runs`, `findings`, `finding_hosts`, `feedback`,
-`users`, and `api_tokens` (migration 2). Since migration 3 the `findings`
+`users`, and `api_tokens` (migration 2); `users.is_admin` arrived in
+migration 11 and `user_invites` in migration 12. Since migration 3 the `findings`
 and `users` ids are AUTOINCREMENT: a deleted id is never handed out
 again, so a mute line copied from an old email either hits the finding
 it named or gets a 404, never a different finding that inherited the
@@ -419,6 +423,19 @@ at `/` (substring filters for host/service and title search, exact-match
 severity/kind dropdowns, an inclusive date range, pagination at 50), the
 detail page at `/findings/{id}`, `POST /findings/{id}/feedback`, and
 the noise review page at `/noise` (`GET` draws, `POST` saves).
+Self-service onboarding (ait epic srg-xDjoC, ant ADR srg-nKiHN), all
+needing `--auth local`: `/people` (admins only, 403 otherwise) lists
+accounts, adds one with no password plus an optional admin flag, and
+issues one-time set-password links (`user_invites`, migration 12:
+sha256-stored, single use, 7 days, a new link retires older unused
+ones); `/set-password/{token}` is the public end of a link, exempt from
+the login redirect, enforcing `CheckPassword`; `/api-access` lets any
+logged-in user mint (shown once), list and revoke their OWN tokens and
+shows the paste-ready `env` block for `~/.claude/settings.json` plus
+shell lines for `syslog-mute`; `/skill.zip` zips the skill compiled into
+the binary. Links and snippets use the request's host, with https when
+TLS, `--secure-cookies` or `X-Forwarded-Proto: https` says so
+(`baseurl.go`). Removing users and granting admin stay CLI-only.
 Cross-origin POSTs are rejected via `http.CrossOriginProtection`. The
 list page's status line is an aria-live region that persists across htmx
 swaps (a replaced live-region node is not reliably announced).
@@ -469,7 +486,7 @@ whatever `--auth` says. A token is 32 random bytes shown once; the
 `api_tokens` table keeps its sha256, an 8-character prefix as the human
 handle, the owning user, `last_used_at` (touched on every call),
 `expires_at` and a revoked flag. `token create|list|revoke` manages them
-on the box. Absent, revoked and expired tokens all get the same 401.
+on the box; the web UI's `/api-access` page manages a user's own. Absent, revoked and expired tokens all get the same 401.
 
 Routes (`api.go`, `apiwrite.go`); every response is JSON, every error is
 `{"error": "..."}`:
@@ -526,7 +543,13 @@ of the app only asks "who is the current user, if anyone?".
   file. Accounts are created with
   `syslog-reporter user add <username> <email>` (password prompted
   without echo, or `--password-stdin` for scripted use; never a CLI
-  argument). Sessions are held in memory, so a restart logs everyone
+  argument). Every password set (`user add`, `user passwd`, the web's
+  set-password page) passes `reporter.CheckPassword`: 15 to 64
+  characters, not in the embedded `common-passwords.txt` (SecLists,
+  MIT), not containing the username or email local part; no
+  composition rules (NIST SP 800-63B). `--admin`, or `user admin <username>` later, sets
+  `users.is_admin` (migration 11): the first admin is always made on
+  the box. Sessions are held in memory, so a restart logs everyone
   out - accepted for this tool. Failed logins pay the bcrypt cost even
   for unknown usernames, so response time is not a username oracle.
 - `oidc`: not built yet; errors at startup.

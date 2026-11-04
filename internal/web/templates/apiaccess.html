@@ -1,0 +1,88 @@
+{{define "title"}}API access{{end}}
+{{define "content"}}
+    <h1>API access</h1>
+    {{with .Data}}
+    {{if .NeedsLogin}}
+    <p>API tokens need a login: run serve with <code>--auth local</code>.</p>
+    {{else}}
+    <p class="lede">A personal token lets Claude Code (with the syslog-reporter skill) and the
+      <code>syslog-mute</code> shell function act as you. Use one token per machine, so a leak
+      costs one token, not you.</p>
+
+    <h2>The Claude Code skill</h2>
+    <p><a href="/skill.zip" download>Download the skill</a> and unzip it into
+      <code>~/.claude/skills/</code>, so you get <code>~/.claude/skills/syslog-reporter/SKILL.md</code>.
+      Then create a token below and paste its block into your settings, and ask Claude about the syslog report.</p>
+
+    {{if .NewToken}}
+    <section class="new-token" aria-labelledby="new-token-heading">
+      <h2 id="new-token-heading">Your new token</h2>
+      <p><strong>Copy it now: it will not be shown again.</strong></p>
+
+      <h3>For Claude Code</h3>
+      <p>Add this inside the outer braces of <code>~/.claude/settings.json</code> (on Windows,
+        <code>%USERPROFILE%\.claude\settings.json</code>). If you have no such file, create it
+        with <code>{</code> and <code>}</code> around this. Claude Code then has it in every session.</p>
+      <pre><code>"env": {
+  "SYSLOG_API_URL": "{{$.Data.BaseURL}}",
+  "SYSLOG_API_TOKEN": "{{.NewToken}}"
+}</code></pre>
+
+      <h3>For the syslog-mute shell function</h3>
+      <p>The function in the daily email runs in your own shell, so it needs the same two
+        values there. bash or zsh (<code>~/.bashrc</code> or <code>~/.zshrc</code>):</p>
+      <pre><code>export SYSLOG_API_URL={{$.Data.BaseURL}}
+export SYSLOG_API_TOKEN={{.NewToken}}</code></pre>
+      <p>PowerShell (<code>$PROFILE</code>):</p>
+      <pre><code>$env:SYSLOG_API_URL = "{{$.Data.BaseURL}}"
+$env:SYSLOG_API_TOKEN = "{{.NewToken}}"</code></pre>
+
+      <h3>Check it</h3>
+      <pre><code>curl -sS -H "Authorization: Bearer $SYSLOG_API_TOKEN" "$SYSLOG_API_URL/api/me"</code></pre>
+    </section>
+    {{end}}
+
+    <h2>Create a token</h2>
+    {{if .Error}}<p class="form-error" role="alert">{{.Error}}</p>{{end}}
+    <form class="auth-form" method="post" action="/api-access">
+      <div class="field">
+        <label for="expires">Expires on (optional)</label>
+        <input type="date" id="expires" name="expires" value="{{.Expires}}"
+               aria-describedby="expires-help">
+        <p id="expires-help" class="quiet">Leave blank for a token that lasts until you revoke it.</p>
+      </div>
+      <button class="button-primary" type="submit">Create token</button>
+    </form>
+
+    <h2>Your tokens</h2>
+    {{if .Tokens}}
+    <div class="table-scroll">
+      <table class="findings-table">
+        <thead>
+          <tr><th scope="col">Token starts</th><th scope="col">Created</th><th scope="col">Last used</th>
+            <th scope="col">Expires</th><th scope="col">Status</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr>
+        </thead>
+        <tbody>
+          {{range .Tokens}}
+          <tr>
+            <td><code>{{.Prefix}}</code></td>
+            <td>{{.CreatedAt}}</td>
+            <td>{{.LastUsed}}</td>
+            <td>{{.Expires}}</td>
+            <td>{{.Status}}</td>
+            <td>{{if eq .Status "active"}}
+              <form method="post" action="/api-access/{{.ID}}/revoke">
+                <button class="button-secondary" type="submit"
+                        aria-label="Revoke the token starting {{.Prefix}}">Revoke</button>
+              </form>{{end}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <p class="empty-state">You have no tokens yet.</p>
+    {{end}}
+    {{end}}
+    {{end}}
+{{end}}
