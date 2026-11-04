@@ -85,12 +85,16 @@ var attentionInstructions = attentionAsk + " Inspect log.message in the input; t
 // 0.05 against Jev's 226 on the 2026-09-08 dump), so 0.2 mutes about what
 // Jev mutes at 0.2, the owner's choice to lean towards filtering
 // (2026-11-04); 8 parallel calls were throttled on the shared Azure
-// deployment, 2 were not.
+// deployment, 2 were not. The 10M cap is there for runaways, not as a
+// budget (owner, 2026-11-04): three days of local dumps already came to
+// 3,846 distinct shapes, about 1.85M tokens, so a 30-day window would
+// stall under 2M every month.
 const (
-	jevThreshold       = 0.1
-	jevWorkers         = 8
-	decisionsThreshold = 0.2
-	decisionsWorkers   = 2
+	decisionsMaxPromptTokens = 10_000_000
+	jevThreshold             = 0.1
+	jevWorkers               = 8
+	decisionsThreshold       = 0.2
+	decisionsWorkers         = 2
 )
 
 // shape is one message template's tally across the window.
@@ -117,7 +121,7 @@ func runKnownsDiscover(args []string) {
 	minDays := fs.Int("min-days", 3, "Add a shape only when it appeared on at least this many days")
 	minLines := fs.Int("min-lines", 1, "Add a shape only when it produced at least this many lines in the window")
 	workers := fs.Int("workers", jevWorkers, "Parallel scoring calls (default 8 on Jev, 2 with --decisions-model)")
-	maxPromptTokens := fs.Int64("max-prompt-tokens", llm.DefaultMaxPromptTokens,
+	maxPromptTokens := fs.Int64("max-prompt-tokens", decisionsMaxPromptTokens,
 		"With --decisions-model: most prompt tokens this run may send; past it the run stops and adds nothing (0 = no cap). Separate from the daily run's budget")
 	decisionsModel := fs.String("decisions-model", os.Getenv("SYSLOG_DECISIONS_MODEL"),
 		"Score with the Azure OpenAI Decisions API on this azure/<deployment> (a gpt-6-luna deployment) instead of Jev")

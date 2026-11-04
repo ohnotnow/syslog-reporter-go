@@ -221,7 +221,8 @@ SYSLOG_DB_PATH=/tmp/scratch.db ./syslog-reporter serve   # findings web UI, 127.
   Decisions service), with its own defaults (threshold 0.2, owner's
   call to lean towards filtering; 2 workers, as 8 were throttled on the
   Azure deployment production shares) and its own per-run
-  `--max-prompt-tokens` cap (2M). That cap never touches llm_spend: the
+  `--max-prompt-tokens` cap (10M; three local days were already about
+  1.85M, so 2M would stall a 30-day run). That cap never touches llm_spend: the
   ledger is one row a day that run reads at startup, so discover's spend
   there would degrade that day's report. A capped run adds nothing,
   because unscored shapes sit at score 0.

@@ -32,7 +32,7 @@ commands of it.
   `SYSLOG_DECISIONS_MODEL`): score message shapes with the Azure OpenAI
   Decisions API on a gpt-6-luna deployment instead of Jev, so they stay
   in Azure. Entries get source `decisions`. Its defaults are its own: a
-  0.2 threshold, 2 parallel calls, and a per-run cap of 2M prompt
+  0.2 threshold, 2 parallel calls, and a per-run cap of 10M prompt
   tokens (`--max-prompt-tokens`, separate from the daily budget) past
   which it stops and adds nothing.
 

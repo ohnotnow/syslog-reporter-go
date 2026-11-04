@@ -204,7 +204,7 @@ usage: syslog-reporter knowns <list|add|remove|seed|hits|discover|import>
                         Decisions API on a gpt-6-luna deployment instead,
                         source 'decisions', defaults --threshold 0.2,
                         --workers 2, and stops adding nothing past
-                        --max-prompt-tokens (2M, per run, separate from
+                        --max-prompt-tokens (10M, per run, separate from
                         the daily budget)
   import <file.toml>    read the pre-database known_knowns.toml once and add
                         every [[known]] entry (leaves the file alone; does

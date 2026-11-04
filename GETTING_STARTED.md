@@ -266,9 +266,10 @@ Decisions API instead of Jev: point `--decisions-model` (or
 as the daily run. Its entries get source `decisions`. Its scores are far
 more decided than Jev's, so its default threshold is 0.2 and it runs 2
 calls at a time (more were throttled). A run stops, adding nothing, once
-it has sent `--max-prompt-tokens` (default 2M) prompt tokens; this cap is
-separate from the daily run's budget. One day of shapes cost about 1.2M,
-so try `--days 7` first and read the token count it logs.
+it has sent `--max-prompt-tokens` (default 10M) prompt tokens; this cap
+is separate from the daily run's budget and is there to catch a runaway.
+One day of shapes cost about 1.2M, so read the token count the first
+monthly run logs.
 
 Once the daily email is going out, each finding in it carries a
 `syslog-mute` line that adds a known-knowns entry from your own shell,
